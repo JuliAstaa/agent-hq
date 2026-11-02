@@ -35,7 +35,8 @@ npm run build:demo   # static demo export to out/ (no bridge, demo mode only)
 npm run lint
 npm run typecheck    # tsc --noEmit
 npm test             # vitest run (unit + bridge integration)
-npm run test:e2e     # playwright (visual parity, dispose/leak, console errors)
+npm run test:e2e     # playwright (visual parity, dispose/leak, console errors); needs `npm run build` first.
+                     # Next allows one `next dev` per folder: if one is running, set HQ_E2E_DEV_URL=http://localhost:3000
 node references/server.js   # prototype bridge on :8787, used by parity tests
 ```
 

@@ -1,6 +1,35 @@
 # Rencana M1: Port Agent HQ ke Next.js (parity)
 
-Status: **disetujui 2026-11-02**. Kerjakan langkah 0 sampai 4, lalu **berhenti**: kirim screenshot 4 lantai (mode demo) ke user sebelum langkah 5 (UI React).
+Status: **disetujui 2026-11-02**. Langkah 0-4 **selesai**, berhenti di checkpoint: menunggu user meninjau screenshot 4 lantai (mode demo) sebelum langkah 5 (UI React).
+
+## Progres
+
+| Langkah | Status | Bukti |
+|---|---|---|
+| 0. Fondasi | selesai | build OK, font self-hosted |
+| 1. `lib/events.ts`, `lib/teams.ts` | selesai | `tests/unit/events.test.ts`, `teams.test.ts` |
+| 2. Bridge | selesai | 50 payload rekaman (`tests/fixtures/session.jsonl`) -> respons HTTP + SSE identik dengan `references/server.js`, juga dengan `HQ_TOKEN`; semua `/api/*` = `ƒ` |
+| 3. Store, transport, demo | selesai | `tests/unit/store.test.ts` |
+| 4. Engine | selesai | `tests/unit/nav.test.ts`; `tests/e2e/visual.spec.ts` (gedung kosong 4 view vs prototipe, toleransi 4%, lolos); `tests/e2e/dispose.spec.ts` (StrictMode: 2 konteks dibuat, 1 di-lose, 1 canvas, 1 loop; `dispose()` 2x aman) |
+| 5-7 | belum | |
+
+## Usulan perbaikan bug prototipe (menunggu persetujuan user)
+
+Saat ini di-port **apa adanya** (parity). Masing-masing satu perubahan kecil.
+
+| # | Bug di prototipe | Dampak | Usulan |
+|---|---|---|---|
+| B1 | `removeAgent()` hanya melepas reservasi spot, bukan stasiun Lt.3 (dikonfirmasi penulis prototipe sebagai bug). | Agen yang dihapus saat di stasiun membuat stasiun itu terkunci selamanya. Contoh: demo -> live, stasiun Rexx/Quill/Sentra tetap terpakai "hantu". | `releasePlaces()` melepas semua tujuan non-meja (`kind !== 'desk'`). Ada di `engine/agents/movement.ts`, tes sudah menandai perilaku sekarang. |
+| B2 | `redact()` hanya menyamarkan `-p<password>` kalau kata `mysql` muncul **setelah** `-p`. | `mysql -u root -pS3cret` bocor apa adanya ke log dan SSE. | Tambah pola untuk `-p<pw>` setelah `mysql`/`mysqldump`/`mariadb` (memperluas daftar, sesuai PRD §8.4). Tes `it.fails` di `tests/unit/redact.test.ts` sudah siap dibalik. |
+
+## Catatan teknis (tanpa perubahan perilaku yang terlihat)
+
+- Body > 2 MB: prototipe memutus socket; Route Handler tidak bisa, jadi membalas `400 {"ok":false,"error":"body terlalu besar"}`.
+- Lookup alias status/tim pakai `hasOwnProperty` (prototipe pakai `in`, sehingga kata seperti `constructor` lolos sebagai status).
+- Bubble langsung diperbarui saat agen mulai jalan (prototipe menunggu tick 1 detik berikutnya).
+- Avatar dan meja agen yang dihapus di-dispose (prototipe membiarkan geometri/material menumpuk).
+- `@types/node` ^24, aset SVG bawaan create-next-app di `public/` dihapus.
+
 Sumber: `prd.md` §5, §6, §7, §8, §14, §15 (M1), §16; prototipe di `references/`.
 
 ## Keputusan (disetujui user)
