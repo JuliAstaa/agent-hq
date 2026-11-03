@@ -14,9 +14,16 @@ const FLOORS: [FloorMode, string][] = [
 export default function FloorSwitcher() {
   const floorMode = useStore(hqStore, (s) => s.floorMode);
   return (
-    <div className={cn(CARD, "shrink-0 flex gap-[6px] p-[6px]")}>
+    <div className={cn(CARD, "pointer-events-auto shrink-0 flex gap-[6px] p-[6px] max-[420px]:gap-[5px] max-[420px]:p-[5px]")}>
       {FLOORS.map(([f, label]) => (
-        <Button key={f} size="floor" tone={floorMode === f ? "primary" : "paper"} data-f={f} onClick={() => hqStore.getState().setFloor(f)}>
+        <Button
+          key={f}
+          size="floor"
+          tone={floorMode === f ? "primary" : "paper"}
+          data-f={f}
+          className="whitespace-nowrap max-[420px]:px-[7px] max-[420px]:text-[12px]"
+          onClick={() => hqStore.getState().setFloor(f)}
+        >
           {label}
         </Button>
       ))}
