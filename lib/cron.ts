@@ -1,6 +1,8 @@
 // Scheduled jobs (Hermes cron, docs/hermes.md "Jadwal"): types, normalization, and display helpers shared by the
 // store, the 3D schedule board, and the control panel. Pure functions only.
 
+import { siblingApiUrl } from "./api-url";
+
 export type CronAction = "run" | "pause" | "resume";
 export const CRON_ACTIONS: CronAction[] = ["run", "pause", "resume"];
 
@@ -169,17 +171,4 @@ export function sortJobs(jobs: CronJob[]): CronJob[] {
 }
 
 /** Control endpoint next to the live stream: /api/stream -> /api/cron. Other stream URLs have no controls. */
-export function cronUrlFor(streamUrl: string | null, base: string): string | null {
-  if (!streamUrl) return null;
-  let u: URL;
-  try {
-    u = new URL(streamUrl, base);
-  } catch {
-    return null;
-  }
-  if ((u.protocol !== "http:" && u.protocol !== "https:") || !/\/api\/stream\/?$/.test(u.pathname)) return null;
-  u.pathname = u.pathname.replace(/\/stream\/?$/, "/cron");
-  u.search = "";
-  u.hash = "";
-  return u.toString();
-}
+export const cronUrlFor = (streamUrl: string | null, base: string): string | null => siblingApiUrl(streamUrl, base, "cron");

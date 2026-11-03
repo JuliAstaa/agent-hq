@@ -331,6 +331,44 @@ suite("installer (install.py)", { timeout: 30_000 }, () => {
     expect(second.stdout).toMatch(/MCP\s+: sudah terpasang/);
   });
 
+  it("--chat turns on the API server and points Agent HQ at it, keeping keys and other settings", () => {
+    const home = tmp();
+    const hq = tmp();
+    fs.writeFileSync(path.join(hq, "package.json"), '{\n  "name": "agent-hq",\n  "version": "0.1.0"\n}\n');
+    fs.writeFileSync(path.join(hq, ".env.local"), "HQ_TOKEN=abc\n");
+    const envFile = path.join(home, ".env");
+    fs.writeFileSync(envFile, "OPENROUTER_API_KEY=sk-or-rahasia\nAPI_SERVER_PORT=9642\n");
+    const install = () =>
+      spawnSync(PY, [path.join(DIR, "install.py"), "--hermes-home", home, "--chat", "--no-hooks", "--no-mcp", "--no-cron", "--agent-hq-dir", hq, "--url", "http://127.0.0.1:9"], {
+        encoding: "utf8",
+        env: cleanEnv({}),
+      });
+
+    const first = install();
+    expect(first.status).toBe(0);
+    const env = fs.readFileSync(envFile, "utf8");
+    expect(env).toMatch(/^OPENROUTER_API_KEY=sk-or-rahasia$/m);
+    expect(env).toMatch(/^API_SERVER_ENABLED=true$/m);
+    const key = env.match(/^API_SERVER_KEY=([0-9a-f]{64})$/m)?.[1];
+    expect(key).toBeTruthy();
+    const local = fs.readFileSync(path.join(hq, ".env.local"), "utf8");
+    expect(local).toMatch(/^HQ_TOKEN=abc$/m);
+    expect(local).toMatch(/^HQ_HERMES_API_URL=http:\/\/127\.0\.0\.1:9642$/m);
+    expect(local).toContain(`HQ_HERMES_API_KEY=${key}`);
+    expect(first.stdout).not.toContain(key!); // never printed
+    expect(first.stdout).toMatch(/hermes gateway restart/);
+    expect(fs.readdirSync(home).some((f) => /^\.env\.agent-hq-\d{8}-\d{6}\.bak$/.test(f))).toBe(true);
+    if (process.platform !== "win32") expect(fs.statSync(envFile).mode & 0o777).toBe(0o600);
+
+    const second = install();
+    expect(second.status).toBe(0);
+    expect(fs.readFileSync(envFile, "utf8")).toBe(env);
+    expect(fs.readFileSync(path.join(hq, ".env.local"), "utf8")).toBe(local);
+    expect(second.stdout).toMatch(/sudah aktif/);
+    expect(second.stdout).toMatch(/sudah cocok/);
+    expect(second.stdout).not.toMatch(/gateway restart/);
+  });
+
   it("refuses a missing Hermes folder", () => {
     const r = spawnSync(PY, [path.join(DIR, "install.py"), "--hermes-home", path.join(tmp(), "nope")], { encoding: "utf8", env: cleanEnv({}) });
     expect(r.status).toBe(1);

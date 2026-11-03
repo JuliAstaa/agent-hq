@@ -10,6 +10,7 @@ import { createTransport, type Transport } from "@/lib/transport";
 import { CRON_BOARD_EVENT } from "@/lib/cron";
 import ConnectModal from "./ConnectModal";
 import CronPanel from "./CronPanel";
+import HermesPanel, { useHermesAvailable } from "./HermesPanel";
 import LogPanel from "./LogPanel";
 import Roster from "./Roster";
 import Toast from "./Toast";
@@ -49,6 +50,9 @@ export default function Office() {
   const [cronOpen, setCronOpen] = useState(false);
   const closeCron = useCallback(() => setCronOpen(false), []);
   const liveUrl = useCallback(() => transportRef.current?.liveUrl ?? null, []);
+  const [hermesOpen, setHermesOpen] = useState(false);
+  const closeHermes = useCallback(() => setHermesOpen(false), []);
+  const hermesOn = useHermesAvailable(liveUrl);
 
   useEffect(() => {
     const engine = createEngine(stageRef.current!, labelsRef.current!, hqStore);
@@ -94,7 +98,12 @@ export default function Office() {
     <>
       <div ref={stageRef} className="hq-stage" />
       <div ref={labelsRef} className="hq-labels" />
-      <TopBar onConnect={() => setModalOpen(true)} onToggleRoster={() => setRosterOpen((v) => !v)} onCron={() => setCronOpen(true)} />
+      <TopBar
+        onConnect={() => setModalOpen(true)}
+        onToggleRoster={() => setRosterOpen((v) => !v)}
+        onCron={() => setCronOpen(true)}
+        onHermes={hermesOn ? () => setHermesOpen((v) => !v) : undefined}
+      />
       <Roster open={rosterOpen} />
       <LogPanel />
       <Toast />
@@ -106,6 +115,7 @@ export default function Office() {
         onDemo={() => transportRef.current?.backToDemo()}
       />
       {cronOpen && <CronPanel open onClose={closeCron} liveUrl={liveUrl} />}
+      {hermesOpen && hermesOn && <HermesPanel onClose={closeHermes} liveUrl={liveUrl} />}
     </>
   );
 }

@@ -11,6 +11,10 @@ export const CARD = cn("bg-paper", CARD_FRAME);
 /** `.pill` */
 export const PILL = "text-[11px] font-bold px-2 py-[2px] border-2 border-ink rounded-full whitespace-nowrap";
 
+/** Disabled look for Button (no hover lift). */
+export const OFF =
+  "disabled:opacity-45 disabled:cursor-not-allowed disabled:translate-x-0 disabled:translate-y-0 disabled:shadow-[2px_2px_0_var(--ink)]";
+
 const BTN_BASE =
   "[font-family:inherit] font-semibold border-[2.5px] border-ink rounded-[10px] shadow-[2px_2px_0_var(--ink)] cursor-pointer " +
   "transition-[translate,box-shadow] duration-[80ms] hover:translate-x-[-1px] hover:translate-y-[-1px] hover:shadow-[3px_3px_0_var(--ink)] " +

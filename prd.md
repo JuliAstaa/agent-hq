@@ -161,6 +161,14 @@ Not in the prototype. Source: `examples/hermes/hq_cron.py`, running next to Herm
 - The source long-polls `GET /api/cron/commands?wait=20` (queued -> sent), checks each command again, runs `hermes cron <action> <id>` as the Hermes user, and answers `POST /api/cron/result {"id","ok","message"}`. A command without an answer for 90 s fails. Every step is broadcast as `cron_command`, logged under the name `Jadwal`, and toasted when it ends. The bridge itself never runs anything.
 - With `HQ_TOKEN` set, all of these need the token (the panel asks for it once per tab).
 
+### 7.6 Hermes chat
+Not in the prototype. The office's chat panel talks to Hermes Agent through its API server (gateway platform `api_server`, `HQ_HERMES_API_URL`, default `http://127.0.0.1:8642`, key `HQ_HERMES_API_KEY` = Hermes' `API_SERVER_KEY`; docs/hermes.md section 11). Off (no button, routes answer `404`) without a key.
+- The Agent HQ server holds the conversation (`lib/bridge/hermes-chat.ts`, on `globalThis.__hqChat`): it creates a session titled `Agent HQ <date time>` (`POST /api/sessions`), posts each message to `/api/sessions/{id}/chat/stream`, and reads that SSE stream itself, because Hermes interrupts a turn when its stream client disconnects. After a restart it resumes the newest `Agent HQ` session with its history (`GET /api/sessions/{id}/messages`).
+- Panel endpoints: `GET /api/hermes` -> `{"enabled"}`; `GET /api/hermes/stream` (SSE: `chat_snapshot`, then `chat_item` upserts, `chat_delta` text appends, `chat_state` phase changes); `POST /api/hermes` with `{"action":"send","text"}` (`202`, `409` while a turn runs, `413` over 8000 chars), `{"action":"approve","choice","id"?}` (`once|session|always|deny`), `{"action":"stop"}`, `{"action":"new"}`.
+- Items: `user`, `assistant` (streamed, replaced by the final `assistant.completed` text), `tool` (`running|ok|error`), `note`, `approval` (`pending|expired|<choice>`). Phases: `idle`, `starting`, `running`, `approval`, `stopping`.
+- Approvals go to `POST /v1/runs/{run_id}/approval`: with the canonical session owner the body is exactly `{request_id, execution_generation, choice}` taken from `GET /v1/runs/{run_id}` `pending_controls`, otherwise `{choice, request_id?}`. Stop is `POST /v1/runs/{run_id}/stop`; before `run.started`, or if Hermes does not settle within 20 s, the bridge drops the stream instead.
+- Guard on the panel routes: same origin only (`Origin` / `Sec-Fetch-Site`, `403`), Host must be loopback (`localhost`, `127.x`, `[::1]`) or listed in `HQ_ALLOWED_HOSTS`, and a non-loopback host also needs `HQ_TOKEN` (`403` without it); `HQ_TOKEN` when set (`401`); JSON body (`415`). No CORS. The API key never reaches the browser. Shown text is redacted; Hermes receives the message as typed.
+
 ## 8. Claude Code integration
 
 ### 8.1 Mechanism
@@ -396,6 +404,7 @@ Decisions:
 - [x] MCP server (`examples/hermes/hq_mcp.py`) for status, logs, findings, alerts, metrics; reports to the hook's character.
 - [x] Scheduled jobs (§7.5): reporter `hq_cron.py` as a systemd user service, schedule board on floor 2, schedule panel with run / pause / resume.
 - [x] Installer (`examples/hermes/install.py`): files, `agent-hq.env`, config.yaml merge with backup and YAML check, reporter service.
+- [x] Hermes chat (§7.6): panel next to the office, server-held stream to the Hermes API server, approvals, stop, resume; `install.py --chat` sets up both sides.
 
 ### M5. Polish
 - [ ] Follow-cam toggle for the selected agent.

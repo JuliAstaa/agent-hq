@@ -89,7 +89,7 @@ Kalau Agent HQ mati, Claude Code tetap jalan normal: hook-nya cuma menunggu maks
 tidak memblokir apa pun.
 
 Memakai Hermes Agent (Nous Research) di VPS Ubuntu? Lihat `docs/hermes.md`: hook dan server MCP siap pakai
-di `examples/hermes/`.
+di `examples/hermes/`, plus panel chat untuk memberi perintah ke Hermes dari kantor.
 
 ## 3. Mengganti nama agen yang sudah jalan
 
@@ -234,8 +234,11 @@ Semua URL tersedia dalam dua bentuk: dengan awalan `/api` dan tanpa (sama sepert
 | `GET /api/health` atau `/health` | status singkat (jumlah agen dan penonton) |
 | `POST /api/cron` | perintah dari panel PAPAN JADWAL: jalankan, jeda, lanjutkan (hanya dari halaman Agent HQ sendiri) |
 | `GET /api/cron/commands`, `POST /api/cron/result` | dipakai reporter jadwal Hermes (`docs/hermes.md` bagian 10) |
+| `GET /api/hermes` | apakah chat Hermes aktif (`{"enabled": true}`) |
+| `POST /api/hermes`, `GET /api/hermes/stream` | panel chat Hermes: kirim pesan, jawab izin, hentikan, percakapan baru (`docs/hermes.md` bagian 11) |
 
-Endpoint `/api/cron` hanya ada dengan awalan `/api` dan hanya di app Next.js (tidak di `examples/server.js`).
+Endpoint `/api/cron` dan `/api/hermes` hanya ada dengan awalan `/api` dan hanya di app Next.js (tidak di
+`examples/server.js`). Chat Hermes hanya melayani halaman Agent HQ sendiri yang dibuka lewat `localhost`.
 
 ## 9. Keamanan
 
@@ -288,7 +291,7 @@ Dokumen lain:
 
 - `prd.md`: spesifikasi lengkap (protokol event, integrasi Claude Code, dunia, perilaku agen).
 - `plan-m1.md`: rencana port ke Next.js dan daftar perbedaan yang disengaja dari prototipe.
-- `docs/hermes.md`: menyambungkan Hermes Agent di VPS Ubuntu (hook dan MCP).
+- `docs/hermes.md`: menyambungkan Hermes Agent di VPS Ubuntu (hook, MCP, papan jadwal, chat).
 - `CLAUDE.md`: aturan kerja untuk AI agent yang mengerjakan repo ini.
 
 ## 12. Musik, efek suara, dan event langit

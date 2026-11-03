@@ -8,10 +8,13 @@
   python3 examples/hermes/install.py --print           # copy files, show the config.yaml blocks, edit nothing
   python3 examples/hermes/install.py --no-cron         # no schedule reporter (PAPAN JADWAL stays hidden)
   python3 examples/hermes/install.py --no-service      # copy hq_cron.py but do not set up its systemd service
+  python3 examples/hermes/install.py --chat            # also turn on Hermes' API server for the chat panel
 
 Copies hq_common.py, hq_hook.py, hq_mcp.py and hq_cron.py to $HERMES_HOME/agent-hq (default ~/.hermes/agent-hq),
 creates agent-hq.env there if missing, then adds the hooks and the MCP server to $HERMES_HOME/config.yaml
 after saving a backup, and starts the schedule reporter as the systemd user service agent-hq-cron.
+With --chat it also sets API_SERVER_ENABLED and API_SERVER_KEY in $HERMES_HOME/.env (backup first, an existing
+key is kept) and writes HQ_HERMES_API_URL / HQ_HERMES_API_KEY to .env.local of this Agent HQ checkout.
 Running it again is safe: blocks that are already there are left alone, the reporter restarts with the new code.
 """
 
@@ -20,6 +23,7 @@ import datetime
 import json
 import os
 import re
+import secrets
 import shlex
 import shutil
 import subprocess
@@ -200,6 +204,110 @@ def check_result(load, old_text, new_text, hook_cmd, hook_events, python, mcp_sc
             raise ValueError("mcp_servers.%s tidak terbaca" % SERVER)
 
 
+# ------------------------------------------------------------------ chat (Hermes API server)
+
+ENV_LINE = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$")
+LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "::1")
+
+
+def read_text(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return f.read()
+    except OSError:
+        return ""
+
+
+def env_values(text):
+    """KEY=value lines of a .env file (quotes around the value removed)."""
+    out = {}
+    for line in text.splitlines():
+        m = ENV_LINE.match(line)
+        if m and not line.lstrip().startswith("#"):
+            v = m.group(2)
+            if len(v) >= 2 and v[0] == v[-1] and v[0] in "\"'":
+                v = v[1:-1]
+            out[m.group(1)] = v
+    return out
+
+
+def set_env(text, values, comment):
+    """Replace KEY= lines in place, append the missing ones under a comment. Keeps every other line."""
+    lines = text.splitlines()
+    missing = dict(values)
+    for i, line in enumerate(lines):
+        m = ENV_LINE.match(line)
+        if m and not line.lstrip().startswith("#") and m.group(1) in missing:
+            lines[i] = "%s=%s" % (m.group(1), missing.pop(m.group(1)))
+    if missing:
+        if lines and lines[-1].strip():
+            lines.append("")
+        lines.append(comment)
+        lines += ["%s=%s" % kv for kv in missing.items()]
+    return "\n".join(lines) + "\n"
+
+
+def write_private(path, text):
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(text)
+    os.chmod(path, 0o600)
+
+
+def agent_hq_root(path):
+    """The Agent HQ checkout: has package.json named agent-hq."""
+    return path if '"name": "agent-hq"' in read_text(os.path.join(path, "package.json")) else ""
+
+
+def setup_chat(home, hq_dir, print_only):
+    """Turn on Hermes' API server and point Agent HQ's chat panel at it. Returns summary lines and next steps."""
+    hermes_env = os.path.join(home, ".env")
+    text = read_text(hermes_env)
+    vals = env_values(text)
+    changes = {}
+    if vals.get("API_SERVER_ENABLED", "").lower() not in ("true", "1", "yes", "on"):
+        changes["API_SERVER_ENABLED"] = "true"
+    key = vals.get("API_SERVER_KEY", "")
+    if len(key) < 16:  # Hermes refuses to start the API server with a short key
+        key = secrets.token_hex(32)
+        changes["API_SERVER_KEY"] = key
+    host = vals.get("API_SERVER_HOST", "") or "127.0.0.1"
+    port = vals.get("API_SERVER_PORT", "") or "8642"
+    url = "http://%s:%s" % ("127.0.0.1" if host in ("0.0.0.0", "::", "") else ("[::1]" if host == "::1" else host), port)
+    lines, steps = [], []
+    if host not in LOOPBACK_HOSTS:
+        lines.append("  PERINGATAN : API_SERVER_HOST=%s membuka API Hermes ke jaringan. Untuk Agent HQ cukup 127.0.0.1." % host)
+    root = agent_hq_root(hq_dir) if hq_dir else ""
+    local = os.path.join(root, ".env.local") if root else ""
+    if print_only:
+        lines.append("  chat       : akan mengisi %s (%s)" % (hermes_env, ", ".join(sorted(changes)) or "sudah aktif"))
+        lines.append("               dan %s (HQ_HERMES_API_URL=%s, HQ_HERMES_API_KEY)" % (local or "<folder Agent HQ>/.env.local", url))
+        return lines, steps
+    if changes:
+        if text:
+            backup = "%s.agent-hq-%s.bak" % (hermes_env, datetime.datetime.now().strftime("%Y%m%d-%H%M%S"))
+            shutil.copy2(hermes_env, backup)
+            os.chmod(backup, 0o600)
+        write_private(hermes_env, set_env(text, changes, "# Agent HQ: chat Hermes (docs/hermes.md, Chat Hermes)"))
+        lines.append("  chat       : %s diisi (%s)" % (hermes_env, ", ".join(sorted(changes))))
+        steps.append("hermes gateway restart        (API server Hermes mulai di %s)" % url)
+    else:
+        lines.append("  chat       : API server Hermes sudah aktif di %s" % hermes_env)
+    if not root:
+        lines.append("  chat       : folder Agent HQ tidak ditemukan. Isi sendiri di .env.local Agent HQ:")
+        lines.append("               HQ_HERMES_API_URL=%s" % url)
+        lines.append("               HQ_HERMES_API_KEY=<sama dengan API_SERVER_KEY di %s>" % hermes_env)
+        return lines, steps
+    old = read_text(local)
+    want = {"HQ_HERMES_API_URL": url, "HQ_HERMES_API_KEY": key}
+    if any(env_values(old).get(k) != v for k, v in want.items()):
+        write_private(local, set_env(old, want, "# Hermes chat panel (docs/hermes.md, Chat Hermes)"))
+        lines.append("  chat       : %s diisi (HQ_HERMES_API_URL=%s, HQ_HERMES_API_KEY)" % (local, url))
+        steps.append("pm2 restart agent-hq          (atau ./start.sh di %s) agar Agent HQ membaca .env.local" % root)
+    else:
+        lines.append("  chat       : %s sudah cocok" % local)
+    return lines, steps
+
+
 # ------------------------------------------------------------------ main
 
 def cron_unit(python, script, hermes_home, hermes_bin):
@@ -263,9 +371,12 @@ def main(argv):
     ap.add_argument("--print", dest="print_only", action="store_true", help="tampilkan blok config.yaml saja")
     ap.add_argument("--no-cron", action="store_true", help="jangan pasang reporter jadwal (hq_cron.py)")
     ap.add_argument("--no-service", action="store_true", help="salin hq_cron.py tanpa memasang service systemd")
+    ap.add_argument("--chat", action="store_true", help="aktifkan API server Hermes untuk panel chat Agent HQ")
+    ap.add_argument("--agent-hq-dir", default=os.path.dirname(os.path.dirname(HERE)),
+                    help="folder Agent HQ untuk .env.local (default: folder repo ini)")
     ap.add_argument("--hermes-home", default=os.environ.get("HERMES_HOME") or os.path.expanduser("~/.hermes"))
     args = ap.parse_args(argv)
-    if args.no_hooks and args.no_mcp:
+    if args.no_hooks and args.no_mcp and not args.chat:
         ap.error("--no-hooks dan --no-mcp sekaligus: tidak ada yang dipasang")
 
     home = os.path.abspath(args.hermes_home)
@@ -367,6 +478,11 @@ def main(argv):
         else:
             print("\n  jadwal     : " + install_cron_service(cron_unit(python, script, home, shutil.which("hermes") or "")))
 
+    chat_steps = []
+    if args.chat:
+        chat_lines, chat_steps = setup_chat(home, os.path.abspath(args.agent_hq_dir), args.print_only)
+        print("\n" + "\n".join(chat_lines))
+
     ok, detail = health(url)
     if ok:
         print("\n  koneksi    : OK, Agent HQ menjawab di %s" % url)
@@ -376,9 +492,19 @@ def main(argv):
         print("               atau buka tunnel ke Agent HQ di laptop (bagian 5).")
 
     print("\nLangkah berikutnya:")
-    print("  1. Jalankan hermes. Kalau ditanya izin untuk hook hq_hook.py, jawab ya (disimpan, cukup sekali).")
-    print("     Gateway tidak pernah bertanya: izinkan dulu lewat hermes, lalu: hermes gateway restart")
-    print("  2. Cek: hermes hooks list   dan   hermes mcp test %s" % SERVER)
+    n = 1
+    if not args.no_hooks:
+        print("  %d. Jalankan hermes. Kalau ditanya izin untuk hook hq_hook.py, jawab ya (disimpan, cukup sekali)." % n)
+        print("     Gateway tidak pernah bertanya: izinkan dulu lewat hermes, lalu: hermes gateway restart")
+        n += 1
+    if not (args.no_hooks and args.no_mcp):
+        print("  %d. Cek: hermes hooks list   dan   hermes mcp test %s" % (n, SERVER))
+        n += 1
+    for step in chat_steps:
+        print("  %d. %s" % (n, step))
+        n += 1
+    if args.chat and not args.print_only:
+        print("  %d. Buka Agent HQ lewat tunnel (localhost), lalu tombol Hermes di kanan atas." % n)
     return 0
 
 

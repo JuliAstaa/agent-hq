@@ -15,6 +15,9 @@ Ada tiga bagian. Installer memasang ketiganya, dan memang paling bagus dipakai b
 Kalau hook dan MCP jalan di proses Hermes yang sama, laporan MCP masuk ke karakter yang sama dengan hook.
 Satu sesi Hermes tetap satu karakter.
 
+Opsional: **chat Hermes** (bagian 11), panel di Agent HQ untuk mengobrol dan memberi perintah ke Hermes langsung
+dari kantor. Dipasang dengan `install.py --chat`.
+
 ## Isi
 
 1. [Pilih tempat Agent HQ](#1-pilih-tempat-agent-hq)
@@ -27,11 +30,12 @@ Satu sesi Hermes tetap satu karakter.
 8. [Ajari AI memakai tool MCP](#8-ajari-ai-memakai-tool-mcp)
 9. [Yang terlihat di kantor](#9-yang-terlihat-di-kantor)
 10. [Papan Jadwal (cron Hermes)](#10-papan-jadwal-cron-hermes)
-11. [Pengaturan](#11-pengaturan)
-12. [Pasang manual](#12-pasang-manual)
-13. [Masalah umum](#13-masalah-umum)
-14. [Update dan mencopot](#14-update-dan-mencopot)
-15. [Cara kerjanya](#15-cara-kerjanya)
+11. [Chat Hermes](#11-chat-hermes)
+12. [Pengaturan](#12-pengaturan)
+13. [Pasang manual](#13-pasang-manual)
+14. [Masalah umum](#14-masalah-umum)
+15. [Update dan mencopot](#15-update-dan-mencopot)
+16. [Cara kerjanya](#16-cara-kerjanya)
 
 ## 1. Pilih tempat Agent HQ
 
@@ -52,12 +56,13 @@ VPS Ubuntu                                                        Laptop
 │ Hermes ─ hq_hook.py ─ POST /api/hook ──┐         │
 │        └ hq_mcp.py  ─ POST /api/event ─┤         │
 │ hq_cron.py ─ jadwal dan perintah ──────┤         │
+│ API Hermes :8642 ◄─ chat (opsional) ───┤         │
 │                                        ▼         │
 │                     Agent HQ 127.0.0.1:8787 ◄────┼── ssh -L 8787 ── browser localhost:8787
 └──────────────────────────────────────────────────┘
 ```
 
-Langkah singkat opsi A: bagian 2, 3, 4, 6, 7. Opsi B: bagian 2, 5, 6, 7. Jadwal cron dan tombolnya ada di bagian 10.
+Langkah singkat opsi A: bagian 2, 3, 4, 6, 7. Opsi B: bagian 2, 5, 6, 7. Jadwal cron dan tombolnya ada di bagian 10, chat Hermes di bagian 11.
 
 ## 2. Siapkan VPS dan pasang Hermes
 
@@ -156,9 +161,9 @@ sama: dari folder repo, jalankan `pm2 start examples/server.js --name agent-hq` 
 tidak punya PAPAN JADWAL dan kontrolnya (bagian 10).
 
 **Token (opsional):** di VPS yang dipakai bersama orang lain, jalankan `HQ_TOKEN=<rahasia> ./start.sh` (pm2
-menyimpan env saat start), lalu isi `HQ_TOKEN` yang sama di `agent-hq.env` (bagian 11) dan restart reporter
+menyimpan env saat start), lalu isi `HQ_TOKEN` yang sama di `agent-hq.env` (bagian 12) dan restart reporter
 jadwal. Akibatnya, ganti nama dari tombol ✎ di kartu agen ditolak, jadi pakai `curl` dengan token (README
-bagian 3), dan panel jadwal meminta token itu sekali per tab browser.
+bagian 3), dan panel jadwal serta chat Hermes meminta token itu sekali per tab browser.
 
 ## 4. Tonton dari laptop
 
@@ -225,6 +230,8 @@ Yang dilakukan installer:
 | `--url http://127.0.0.1:9787` | alamat Agent HQ lain (disimpan di `agent-hq.env`) |
 | `--print` | salin file saja, tampilkan blok `config.yaml`, jangan ubah config |
 | `--hermes-home <folder>` | folder Hermes lain (default `$HERMES_HOME` atau `~/.hermes`) |
+| `--chat` | juga nyalakan API server Hermes untuk panel chat (bagian 11) |
+| `--agent-hq-dir <folder>` | folder Agent HQ untuk `.env.local` chat (default: repo tempat installer ini) |
 
 Installer aman dijalankan ulang: file disalin ulang, blok yang sudah ada dibiarkan, dan reporter jadwal
 di-restart dengan kode baru. Kalau keluar pesan
@@ -333,6 +340,7 @@ kamu kantongi izin tertulisnya.
 | `delegate_task` (subagen) | Karakter baru dengan nama dari tujuannya, pergi sekitar 45 detik setelah selesai |
 | Keluar dari Hermes, `/new`, atau sesi gateway ditutup | Offline, hilang setelah 5 menit |
 | Jadwal cron jalan | Karakter bernama sesuai jadwal (peran `Cron · <jadwal>`), offline begitu selesai, hilang 5 menit kemudian. Jadwalnya sendiri tampil di PAPAN JADWAL (bagian 10) |
+| Pesan dari panel chat Hermes | Sesi chat itu tampil sebagai karakter, sama seperti sesi gateway (bagian 11) |
 
 Tool Hermes yang dikenali: `terminal`, `read_file`, `write_file`, `patch`, `search_files`, `session_search`,
 `web_search`, `web_extract`, `browser_navigate`, `delegate_task`, `todo`, `skill_view`, `skills_list`. Tool lain
@@ -404,7 +412,72 @@ Dengan `HQ_DISABLE=1` reporter berhenti sendiri dan tetap berhenti. Setelah meng
   dikirim nama platformnya (tanpa ID chat).
 - Mau lihat saja tanpa kontrol? Set `HQ_CRON_CONTROLS=none` di `agent-hq.env`, lalu restart reporter.
 
-## 11. Pengaturan
+## 11. Chat Hermes
+
+Panel **HERMES** di Agent HQ dipakai untuk mengobrol dan memberi perintah ke Hermes langsung dari kantor, sambil
+melihat karakternya bekerja. Hasilnya sama seperti menjalankan `hermes` lewat SSH: Hermes memakai semua tool-nya
+(terminal, file, web) di VPS.
+
+**Pasang** di VPS, sebagai user Hermes:
+
+```bash
+python3 ~/agent-hq/examples/hermes/install.py --chat   # boleh sekalian dengan pemasangan biasa
+hermes gateway restart                                  # API server Hermes mulai di 127.0.0.1:8642
+pm2 restart agent-hq                                    # Agent HQ membaca .env.local
+```
+
+Installer mengisi dua file. Keduanya hanya bisa dibaca pemiliknya (`chmod 600`):
+
+| File | Isi |
+|---|---|
+| `~/.hermes/.env` | `API_SERVER_ENABLED=true` dan `API_SERVER_KEY` acak. Kunci yang sudah ada tetap dipakai. Cadangan: `.env.agent-hq-<waktu>.bak` |
+| `~/agent-hq/.env.local` | `HQ_HERMES_API_URL=http://127.0.0.1:8642` dan `HQ_HERMES_API_KEY` (sama dengan `API_SERVER_KEY`) |
+
+Kunci tidak pernah dicetak installer dan tidak pernah dikirim ke browser. Cek API server-nya dengan
+`curl -s http://127.0.0.1:8642/health`.
+
+**Pakai:** buka Agent HQ lewat tunnel (bagian 4), lalu klik tombol **Hermes** di kanan atas. Tombol ini hanya
+muncul kalau Agent HQ punya `HQ_HERMES_API_KEY`.
+
+- Tulis pesan, lalu Enter untuk kirim (Shift+Enter untuk baris baru). Jawaban Hermes muncul sambil ditulis. Tiap
+  tool tampil sebagai baris kecil dengan titik kuning (jalan), hijau (selesai), atau merah (gagal).
+- **Hentikan** menghentikan pekerjaan yang sedang jalan. **Baru** memulai percakapan baru; sesi lama tetap
+  tersimpan di Hermes (`hermes sessions list`).
+- Panel boleh ditutup dan halaman boleh di-reload: Hermes tetap bekerja, dan percakapan tampil lagi saat panel
+  dibuka. Setelah Agent HQ restart, percakapan terakhir dilanjutkan (sesi berjudul `Agent HQ <tanggal jam>`).
+- Kalau hook terpasang dan diizinkan (bagian 6 dan 7), sesi chat ini juga tampil sebagai karakter di kantor.
+- **Izin perintah berbahaya.** Kalau approval Hermes menyala (`approvals.mode: smart` atau `manual` di
+  `~/.hermes/config.yaml`), perintah seperti `rm -r` memunculkan kartu **Hermes minta izin** dengan tombol
+  Izinkan sekali, Izinkan sesi ini, Selalu izinkan, dan Tolak. Dengan `approvals.mode: off`, Hermes menjalankan
+  semuanya tanpa bertanya, termasuk perintah dari panel ini. Pakai `smart` atau `manual` kalau panel dibuka dari
+  HP atau dipakai orang lain.
+- Teks yang mirip rahasia (token, password, kunci) disamarkan jadi `***` di panel, sama seperti di log. Hermes
+  tetap menerima pesanmu apa adanya.
+- Panel ini untuk percakapan dan perintah biasa. Pengaturan Hermes (model, skill, slash command) tetap lewat
+  `hermes` di SSH.
+
+**Keamanan.** Pesan ke Hermes setara dengan akses terminal ke VPS, jadi chat dijaga lebih ketat dari kontrol jadwal:
+
+- Kunci API Hermes hanya ada di server Agent HQ. Browser bicara ke `/api/hermes` dan `/api/hermes/stream`, lalu
+  Agent HQ meneruskannya ke `127.0.0.1:8642`.
+- Permintaan dari situs lain di browser yang sama ditolak (`Origin`, `Sec-Fetch-Site`, tanpa CORS), dan aksi
+  harus berupa JSON.
+- Chat hanya dilayani untuk alamat `localhost`, `127.0.0.1`, atau `[::1]`, yaitu lewat tunnel SSH. Ini juga
+  menutup serangan DNS rebinding (situs jahat yang namanya diarahkan ke `127.0.0.1`).
+- Membuka Agent HQ lewat domain (reverse proxy)? Daftarkan nama host-nya di `HQ_ALLOWED_HOSTS`, dan `HQ_TOKEN`
+  **wajib** diisi. Tanpa token, chat menolak semua permintaan dari host itu. Panel meminta token sekali per tab.
+- Jangan buka port 8642 ke internet. Biarkan `API_SERVER_HOST` kosong atau `127.0.0.1`.
+
+Pengaturan chat ada di `.env.local` Agent HQ (bukan di `agent-hq.env`). Setelah mengubahnya, jalankan
+`pm2 restart agent-hq`.
+
+| Variabel | Default | Fungsi |
+|---|---|---|
+| `HQ_HERMES_API_KEY` | kosong | sama dengan `API_SERVER_KEY` Hermes; kosong berarti chat mati dan tombolnya tersembunyi |
+| `HQ_HERMES_API_URL` | `http://127.0.0.1:8642` | alamat API server Hermes |
+| `HQ_ALLOWED_HOSTS` | kosong | nama host selain localhost yang boleh memakai chat, dipisah koma (butuh `HQ_TOKEN`) |
+
+## 12. Pengaturan
 
 Semua pengaturan ada di `~/.hermes/agent-hq/agent-hq.env`. Env var dengan nama sama selalu menang, tapi env
 dari shell hanya sampai ke sesi CLI, tidak ke gateway dan tidak ke server MCP. Jadi di VPS, isi file ini.
@@ -434,7 +507,7 @@ normal.
 langsung muncul saat Hermes menyala. Jangan nyalakan `HQ_ANNOUNCE` kalau hook juga terpasang, karena hasilnya
 dua karakter untuk satu Hermes.
 
-## 12. Pasang manual
+## 13. Pasang manual
 
 Kalau tidak mau memakai installer:
 
@@ -488,7 +561,7 @@ WantedBy=default.target
 
 Lalu `systemctl --user daemon-reload && systemctl --user enable --now agent-hq-cron`.
 
-## 13. Masalah umum
+## 14. Masalah umum
 
 | Masalah | Penyebab dan solusi |
 |---|---|
@@ -514,9 +587,14 @@ Lalu `systemctl --user daemon-reload && systemctl --user enable --now agent-hq-c
 | "Jalankan sekarang" berhasil, tapi jadwal tidak jalan | Jadwal mulai di tick berikutnya (paling lama 1 menit) di dalam gateway. Kalau papan menulis `SCHEDULER MATI`, nyalakan gateway dulu. |
 | Meja kantor penuh oleh karakter cron | Jadwalnya jalan sangat sering. Tiap jalan jadi karakter sendiri selama sekitar 5 menit; perjarang jadwalnya di Hermes. |
 | Perintah gagal `perintah hermes tidak ditemukan` | Tulis `HQ_HERMES_BIN=/home/<user>/.local/bin/hermes` di `agent-hq.env`, lalu restart reporter. |
+| Tombol Hermes tidak muncul | `HQ_HERMES_API_KEY` belum terbaca: cek `~/agent-hq/.env.local`, lalu `pm2 restart agent-hq`. Halaman juga harus tersambung lewat `/api/stream`. `examples/server.js` tidak punya chat. |
+| Panel chat: `Hermes tidak bisa dihubungi` | API server Hermes belum jalan. Cek `API_SERVER_ENABLED=true` di `~/.hermes/.env`, `hermes gateway restart`, lalu `curl -s http://127.0.0.1:8642/health`. |
+| Panel chat: `Kunci API ditolak Hermes` | `HQ_HERMES_API_KEY` berbeda dengan `API_SERVER_KEY`. Jalankan ulang `install.py --chat`, lalu `pm2 restart agent-hq`. |
+| Panel chat: `Ditolak: host ... tidak diizinkan` | Agent HQ dibuka lewat IP atau domain. Buka lewat tunnel (`localhost`), atau isi `HQ_ALLOWED_HOSTS` dan `HQ_TOKEN`. |
+| Hermes menjalankan perintah tanpa kartu izin | `approvals.mode: off` di `~/.hermes/config.yaml`. Ganti ke `smart` atau `manual`, lalu `hermes gateway restart`. |
 | Hermes terasa lebih lambat | Tiap event menjalankan `python3` sebentar (puluhan milidetik). Hapus event yang tidak perlu dari `config.yaml`, misalnya `post_tool_call`. |
 
-## 14. Update dan mencopot
+## 15. Update dan mencopot
 
 **Update** setelah repo berubah:
 
@@ -526,6 +604,8 @@ cd ~/agent-hq
 python3 examples/hermes/install.py      # salin ulang adapter, restart reporter jadwal
 hermes gateway restart                  # kalau memakai gateway
 ```
+
+Chat Hermes tidak perlu dipasang ulang: `install.py --chat` boleh diulang dan memakai kunci yang sama.
 
 **Mencopot adapter:**
 
@@ -540,9 +620,13 @@ Kalau config belum diubah lagi sejak instalasi, cukup kembalikan cadangannya:
 `cp ~/.hermes/config.yaml.agent-hq-<waktu>.bak ~/.hermes/config.yaml`. Untuk mematikan sementara, cukup set
 `HQ_DISABLE=1` di `agent-hq.env`.
 
+**Mematikan chat Hermes:** hapus baris `HQ_HERMES_*` dari `~/agent-hq/.env.local` lalu `pm2 restart agent-hq`.
+Kalau API server Hermes tidak dipakai aplikasi lain, set juga `API_SERVER_ENABLED=false` di `~/.hermes/.env` lalu
+`hermes gateway restart`.
+
 **Mencopot Agent HQ di VPS:** `pm2 delete agent-hq && pm2 save && rm -rf ~/agent-hq`.
 
-## 15. Cara kerjanya
+## 16. Cara kerjanya
 
 - `hq_hook.py` menerima satu event Hermes lewat stdin, menerjemahkannya ke format hook Claude Code, lalu
   mengirimnya ke `/api/hook`. Jadi sensor, papan tugas, subagen, dan rename di bridge sama persis dengan
@@ -559,10 +643,17 @@ Kalau config belum diubah lagi sejak instalasi, cukup kembalikan cadangannya:
   (`GET /api/cron/commands`) dan melapor lewat `POST /api/cron/result`. Perintah yang tidak dijawab dalam 90 detik
   dianggap gagal. Sesi cron Hermes ber-id `cron_<id jadwal>_<waktu>`, jadi hook bisa menamai karakternya sesuai
   jadwal.
+- Chat Hermes: server Agent HQ (`lib/bridge/hermes-chat.ts`) membuat sesi lewat `POST /api/sessions` di API
+  server Hermes, mengirim pesan ke `/api/sessions/<id>/chat/stream`, dan membaca stream-nya sendiri. Ini perlu
+  karena Hermes menghentikan pekerjaan kalau klien stream-nya putus, sedangkan panel boleh ditutup. Panel menerima
+  percakapan lewat `GET /api/hermes/stream` dan mengirim aksi (`send`, `approve`, `stop`, `new`) ke
+  `POST /api/hermes`. Izin dijawab lewat `/v1/runs/<id>/approval` dan berhenti lewat `/v1/runs/<id>/stop`.
 - Teks dari MCP disensor di Python dengan pola yang sama dengan `lib/bridge/redact.ts`, karena `/api/event`
   tidak menyensor apa pun.
 - Tes (ikut `npm test`): `tests/integration/hermes.test.ts` untuk hook, MCP, installer, dan reporter jadwal
   (dilewati kalau tidak ada Python 3), `tests/integration/cron-routes.test.ts` untuk endpoint `/api/cron` di
   `next start` (butuh `npm run build`), serta `tests/unit/cron.test.ts` dan `tests/unit/bridge-cron.test.ts`.
+  Chat diuji dengan API Hermes tiruan di `tests/unit/bridge-hermes-chat.test.ts`, `tests/unit/hermes-chat.test.ts`,
+  dan `tests/integration/hermes-chat-routes.test.ts`.
   Nama event, isi payload, format `jobs.json`, dan id sesi cron mengikuti dokumentasi dan kode Hermes. Kalau
   Hermes mengubahnya, sesuaikan `hq_hook.py` dan `hq_cron.py`.

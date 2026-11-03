@@ -7,7 +7,18 @@ import FloorSwitcher from "./FloorSwitcher";
 import StatusChips from "./StatusChips";
 import { Button, CARD, CARD_FRAME, cn } from "./ui";
 
-export default function TopBar({ onConnect, onToggleRoster, onCron }: { onConnect: () => void; onToggleRoster: () => void; onCron: () => void }) {
+export default function TopBar({
+  onConnect,
+  onToggleRoster,
+  onCron,
+  onHermes,
+}: {
+  onConnect: () => void;
+  onToggleRoster: () => void;
+  onCron: () => void;
+  /** Set when the Agent HQ server has the Hermes chat configured. */
+  onHermes?: () => void;
+}) {
   const conn = useStore(hqStore, (s) => s.conn);
   const hasCron = useStore(hqStore, (s) => s.cron !== null);
   const dot = conn.mode === "live" ? "bg-working animate-[hq-pulse_1.4s_infinite]" : conn.mode === "down" ? "bg-error" : "bg-thinking";
@@ -22,7 +33,7 @@ export default function TopBar({ onConnect, onToggleRoster, onCron }: { onConnec
       <FloorSwitcher />
       <StatusChips />
       <div className="flex-1" />
-      <div className={cn(CARD, "shrink-0 flex items-center gap-2 py-[6px] pr-2 pl-3")}>
+      <div className={cn(CARD, "shrink-0 flex items-center gap-2 py-[6px] pr-2 pl-3", "max-[820px]:shrink max-[820px]:min-w-0 max-[820px]:flex-wrap")}>
         <span className="flex items-center gap-[6px] font-semibold text-[13px]" data-mode={conn.mode}>
           <i className={cn("inline-block w-[10px] h-[10px] rounded-full border-2 border-ink", dot)} />
           <span>{conn.text}</span>
@@ -43,6 +54,11 @@ export default function TopBar({ onConnect, onToggleRoster, onCron }: { onConnec
         {hasCron && (
           <Button title="Papan jadwal (cron Hermes)" onClick={onCron}>
             Jadwal
+          </Button>
+        )}
+        {onHermes && (
+          <Button title="Chat dengan Hermes" onClick={onHermes}>
+            Hermes
           </Button>
         )}
         <Button tone="primary" onClick={onConnect}>

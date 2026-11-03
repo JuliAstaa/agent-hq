@@ -11,11 +11,10 @@ import {
   type CronAction, type CronCmd, type CronJob,
 } from "@/lib/cron";
 import { hqStore } from "@/lib/store";
-import { Button, CARD, PILL, cn } from "./ui";
+import { authHeader, readToken, saveToken as storeToken } from "./token";
+import { Button, CARD, OFF, PILL, cn } from "./ui";
 
-const TOKEN_KEY = "agenthq.token";
 const CONFIRM_MS = 4000;
-const OFF = "disabled:opacity-45 disabled:cursor-not-allowed disabled:translate-x-0 disabled:translate-y-0 disabled:shadow-[2px_2px_0_var(--ink)]";
 
 const when = (t: number | null) =>
   t == null ? "-" : new Date(t).toLocaleString("id-ID", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
@@ -26,14 +25,6 @@ const CMD_TEXT: Record<CronCmd["status"], string> = {
   ok: "Berhasil",
   error: "Gagal",
 };
-
-function readToken(): string {
-  try {
-    return sessionStorage.getItem(TOKEN_KEY) || "";
-  } catch {
-    return "";
-  }
-}
 
 export default function CronPanel({ open, onClose, liveUrl }: { open: boolean; onClose: () => void; liveUrl: () => string | null }) {
   const cron = useStore(hqStore, (s) => s.cron);
@@ -82,7 +73,7 @@ export default function CronPanel({ open, onClose, liveUrl }: { open: boolean; o
     try {
       const res = await fetch(url, {
         method: "POST",
-        headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
+        headers: { "content-type": "application/json", ...authHeader(token) },
         body: JSON.stringify({ action, job: job.id }),
       });
       if (res.status === 401) {
@@ -100,9 +91,7 @@ export default function CronPanel({ open, onClose, liveUrl }: { open: boolean; o
   }
 
   const saveToken = () => {
-    try {
-      sessionStorage.setItem(TOKEN_KEY, tokenDraft.trim());
-    } catch {}
+    storeToken(tokenDraft);
     setTokenDraft("");
     setNeedToken(false);
     setErr("Token disimpan untuk tab ini. Coba lagi.");
