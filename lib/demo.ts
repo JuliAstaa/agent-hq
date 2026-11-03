@@ -4,6 +4,9 @@ import type { HQStore } from "./store";
 
 const pick = <T,>(arr: readonly T[]): T => arr[Math.floor(Math.random() * arr.length)];
 
+// 9 demo agents to match the 9 desks (deviation 17; the prototype had 11, Fizzle and Nubb are gone).
+/** Demo agents that start out working (the rest start idle and head for the lounge). */
+const DEMO_WORKING = new Set(["zorp", "glimbo", "krunch", "rexx", "quill", "sentra"]);
 export const DEMO = [
   { id: "zorp", name: "Zorp", role: "Researcher", tasks: ["Merangkum 14 paper soal RAG", "Membandingkan vector DB", "Benchmark latency Go vs Rust", "Membaca changelog Laravel 12"] },
   { id: "glimbo", name: "Glimbo", role: "Coder", tasks: ["Refactor handler auth (Gofiber)", "Migration tabel transaksi", "Endpoint /v1/reports", "Fix race condition di worker"] },
@@ -11,8 +14,6 @@ export const DEMO = [
   { id: "vexa", name: "Vexa", role: "Writer", tasks: ["Menulis dokumentasi API", "Draft changelog v2.3", "Menyusun README deploy", "Merapikan docstring util"] },
   { id: "mib", name: "Mib", role: "Data Analyst", tasks: ["Ringkasan pengeluaran bulanan", "Bersihkan dataset 12k baris", "Grafik retensi user", "Cari anomali log Nginx"] },
   { id: "krunch", name: "Krunch", role: "DevOps", tasks: ["Build image Docker multi-stage", "Rolling deploy ke staging", "Rotasi sertifikat TLS", "Tuning worker_processes Nginx"] },
-  { id: "fizzle", name: "Fizzle", role: "Scraper", tasks: ["Crawl 3k halaman produk", "Parsing sitemap", "Retry URL gagal", "Normalisasi harga"] },
-  { id: "nubb", name: "Nubb", role: "Support Bot", tasks: ["Balas 18 tiket masuk", "Rangkum keluhan minggu ini", "Update FAQ", "Eskalasi tiket prioritas"] },
   { id: "rexx", name: "Rexx", role: "Red Team", tasks: ["Recon subdomain target", "Scan port & service (nmap)", "Uji SQL injection di /login", "Cek IDOR di API booking", "Uji bruteforce form login (scope)"] },
   { id: "quill", name: "Quill", role: "VA Reporter", tasks: ["Laporan VA: executive summary", "Hitung skor CVSS temuan", "Tulis rekomendasi remediasi", "Rapikan bukti PoC"] },
   { id: "sentra", name: "Sentra", role: "SOC Analyst", tasks: ["Monitor SIEM: login gagal SSH", "Deteksi bruteforce /wp-login", "Blokir IP via fail2ban", "Threat hunting log Nginx"] },
@@ -86,7 +87,7 @@ export function createDemo(store: HQStore): Demo {
       type: "snapshot",
       agents: DEMO.map((d, i) => ({
         id: d.id, name: d.name, role: d.role,
-        status: [0, 1, 5, 6, 8, 9, 10].includes(i) ? "working" : "idle",
+        status: DEMO_WORKING.has(d.id) ? "working" : "idle",
         task: d.tasks[0], tokens: 2000 + i * 1700, progress: 0.1 + i * 0.08,
       })),
     });

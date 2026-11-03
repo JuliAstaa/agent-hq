@@ -12,8 +12,9 @@ import { truncate } from "@/lib/format";
 import { ACT_LABEL, F2, F3, INK, VIEWS } from "./constants";
 import { animateAgent, type AgentRuntime, type AnimCtx } from "./agents/animate";
 import { buildAvatar } from "./agents/avatar";
+import { allowedQuirks, CHAT_REPLIES, chatLine, newFun, say, startQuirk, tickFun, type ChatSlots, type FunInfo, type Quirk } from "./agents/fun";
 import { floorOf, locText, newMovement, pickSpot, placeAt, releasePlaces, workTarget, type NavCtx } from "./agents/movement";
-import { drawArcade, drawBoard, drawEmptyDesk, drawPlate, drawScreen, drawTaskBoard, drawTV, drawWhiteboard } from "./displays/office";
+import { drawArcade, drawBoard, drawEmptyDesk, drawPlate, drawScreen, drawTaskBoard, drawTV, drawWhiteboard, newWhiteboardEgg } from "./displays/office";
 import { drawRedWall, drawReportBoard, drawSOC, drawStation, newSocAnim } from "./displays/security";
 import { createFx } from "./fx";
 import { createSkyEvents, type SkyEventKind } from "./skyEvents";
@@ -49,6 +50,12 @@ export interface Engine {
     skyZones: (kind: SkyEventKind, n?: number) => Record<string, number>;
     /** Hide the task board (visual parity: the prototype has none, deviation 14). */
     hideTaskBoard: (hidden: boolean) => void;
+    /** Whiteboard easter egg: write it now if someone is at the board, else at the next whiteboard session. */
+    whiteboardEgg: () => void;
+    /** Open a chat balloon on agent `id` (random line for its context when `text` is omitted). */
+    say: (id: string, text?: string) => boolean;
+    /** Start a random action on agent `id` (any allowed one when `kind` is omitted). */
+    quirk: (id: string, kind?: Quirk) => boolean;
   };
 }
 
@@ -221,7 +228,7 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
     const home = slot.place;
     av.root.position.copy(home.final);
     av.root.rotation.y = home.face; // spawned seated: already facing the monitor (desks face PI, deviation 8)
-    const rt: AgentRuntime = { id, root: av.root, av, desk, home, mv: newMovement(home), squash: 0 };
+    const rt: AgentRuntime = { id, root: av.root, av, desk, home, mv: newMovement(home), squash: 0, fun: newFun(simTime) };
     world.add(av.root);
     av.root.scale.setScalar(0.01);
     av.spawn = 0;
@@ -238,6 +245,8 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
     releasePlaces(rt);
     world.remove(rt.root);
     rt.av.el.remove();
+    rt.av.chatLabel.element.remove();
+    if (rt.fun?.chat) chatSlots.open = Math.max(0, chatSlots.open - 1);
     disposeSubtree(rt.root);
     resetDesk(rt.desk);
     agents.delete(id);
@@ -259,6 +268,42 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
     (el.querySelector(".tt") as HTMLElement).textContent = txt ? "· " + txt : "";
     el.classList.toggle("sel", a.id === selectedId);
     el.classList.toggle("chill", mv.mode === "act");
+  }
+
+  /* ---------------- random actions + chat balloons (agents/fun.ts) ---------------- */
+  const chatSlots: ChatSlots = { open: 0 };
+  const funInfo = (rt: AgentRuntime, a: Agent): FunInfo => {
+    const mv = rt.mv;
+    const pose = mv.mode === "desk" ? "desk" : mv.mode === "act" && mv.dest.kind === "spot" ? mv.dest.pose : mv.mode;
+    return { status: a.status, mode: mv.mode, pose, activity: mv.activity, dept: a.dept, visible: rt.av.label.visible, carrying: mv.carrying };
+  };
+  function stepFun(rt: AgentRuntime, a: Agent, now: number, dt: number) {
+    const f = rt.fun;
+    if (!f) return;
+    const res = tickFun(f, funInfo(rt, a), now, dt, chatSlots);
+    // Sometimes a neighbour on the same floor answers.
+    if (res.said && !res.isReply && Math.random() < 0.5) {
+      const here = rt.root.position;
+      for (const other of agents.values()) {
+        if (other === rt || !other.fun || other.fun.chat || other.fun.reply) continue;
+        if (Math.abs(other.root.position.y - here.y) > 1.5 || other.root.position.distanceTo(here) > 4) continue;
+        other.fun.reply = { text: CHAT_REPLIES[Math.floor(Math.random() * CHAT_REPLIES.length)], at: now + 1.2 + Math.random() };
+        break;
+      }
+    }
+    // balloon DOM
+    const av = rt.av, chat = f.chat;
+    if (chat && av.chatText !== chat.text) {
+      av.chatEl.textContent = chat.text;
+      av.chatText = chat.text;
+    }
+    const on = !!chat && av.label.visible;
+    if (on !== !!av.chatOn) {
+      av.chatEl.classList.toggle("on", on);
+      av.chatOn = on;
+      if (!on) av.chatOffAt = now + 0.3; // let the fade-out play
+    }
+    av.chatLabel.visible = av.label.visible && (on || now < (av.chatOffAt ?? 0));
   }
 
   /* ---------------- floors + camera ---------------- */
@@ -542,6 +587,7 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
       if (!a) continue;
       animateAgent(anim, rt, a, t, dt);
       if (rt.mv.mode === "act" && rt.mv.activity) activeActs.add(rt.mv.activity);
+      stepFun(rt, a, t, dt);
     }
     // bubbles: on store change, selection change, or movement change
     const selChanged = s.selectedId !== lastSel;
@@ -585,7 +631,7 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
     wbAcc += dt;
     if (wbAcc > 0.09) {
       wbAcc = 0;
-      drawWhiteboard(p2.wb, activeActs.has("whiteboard"));
+      drawWhiteboard(p2.wb, activeActs.has("whiteboard"), fontsReady ? fonts : null);
     }
     // ---- floor 3 ----
     const occ = new Map<number, Agent>();
@@ -787,7 +833,10 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
     for (const g of geos) g.dispose();
     for (const mat of mats) mat.dispose();
     for (const tx of [...texs, ...b.looseTextures, skyTex, kit.gradientMap]) tx.dispose();
-    for (const rt of agents.values()) rt.av.el.remove();
+    for (const rt of agents.values()) {
+      rt.av.el.remove();
+      rt.av.chatLabel.element.remove();
+    }
     for (const r of b.roomLabels) r.o.element.remove();
     agents.clear();
     labelsEl.replaceChildren();
@@ -819,6 +868,25 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
       },
       hideTaskBoard: (hidden) => {
         p2.taskBoard.group.visible = !hidden;
+      },
+      whiteboardEgg: () => {
+        if (p2.wb.wasOn) p2.wb.egg = newWhiteboardEgg(0);
+        else p2.wb.forceEgg = true;
+      },
+      say: (id, text) => {
+        const rt = agents.get(id), a = S().agents.get(id);
+        if (!rt?.fun || !a) return false;
+        say(rt.fun, text ?? chatLine(funInfo(rt, a)), simTime, chatSlots);
+        return true;
+      },
+      quirk: (id, kind) => {
+        const rt = agents.get(id), a = S().agents.get(id);
+        if (!rt?.fun || !a) return false;
+        const allowed = allowedQuirks(funInfo(rt, a));
+        const k = kind ?? allowed[Math.floor(Math.random() * allowed.length)];
+        if (!k) return false;
+        startQuirk(rt.fun, k);
+        return true;
       },
       skyZones: (kind, n = 30) => {
         const out: Record<string, number> = {};

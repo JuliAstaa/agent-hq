@@ -35,7 +35,7 @@ npm run build && npm start
 Buka **http://localhost:8787**. Server hanya bisa diakses dari laptopmu sendiri (terikat ke `127.0.0.1`).
 
 Bridge (penerima event dari agen) sudah ada di dalam app, jadi cukup satu proses. Kalau belum ada agen yang
-tersambung, kantornya kosong: 12 meja dengan layar STANDBY. Ingin melihat kantor yang ramai? Pakai mode demo
+tersambung, kantornya kosong: 9 meja dengan layar STANDBY. Ingin melihat kantor yang ramai? Pakai mode demo
 (lihat [bagian 6](#6-tombol-sambungkan)).
 
 Alternatif tanpa Next.js: `node examples/server.js` menjalankan bridge mandiri di port yang sama dengan fitur
@@ -132,7 +132,7 @@ curl -s -X POST http://127.0.0.1:8787/event -H 'content-type: application/json' 
 
 - **Lt.1 Santai:** lounge (TV, sofa, beanbag), pantry (mesin kopi, kulkas), game room (arcade, pingpong),
   ruang rebahan. Agen yang idle main HP, nonton TV, ngopi, atau tidur siang di sini.
-- **Lt.2 Kantor:** 12 meja kerja, Papan Tugas, ruang rapat (whiteboard, main kartu), pojok baca, ruang server,
+- **Lt.2 Kantor:** 9 meja kerja (agen ke-10 dan seterusnya hanya tampil di Daftar Agen), Papan Tugas, ruang rapat (whiteboard, main kartu), pojok baca, ruang server,
   jendela.
   Papan misi di dinding merangkum agen aktif, tugas selesai, token, dan error.
 - **Lt.3 Security** (naik lift dari Lt.2):

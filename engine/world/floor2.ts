@@ -4,6 +4,7 @@
 import * as THREE from "three";
 import { F2, INK } from "../constants";
 import { boxAt, canvasTex, cyl, mesh, noLine, pick, rbox, shade, thin, V, type CanvasTex } from "../scene/kit";
+import type { WhiteboardEgg } from "../displays/office";
 import { BOARD_SLOTS_Z } from "../nav/places";
 import { alienPlant } from "./props/alienPlant";
 import { floorPlane, makeWall, partition, plankTexture, rail, roomLabel, type Build } from "./structure";
@@ -61,7 +62,7 @@ export interface Floor2Props {
   tankBubbles: THREE.Mesh[];
   board: CanvasTex;
   clockHands: { h: THREE.Group; m: THREE.Group; s: THREE.Group };
-  wb: CanvasTex & { strokes: number; cx: number; cy: number };
+  wb: CanvasTex & { strokes: number; cx: number; cy: number; wasOn?: boolean; forceEgg?: boolean; egg?: WhiteboardEgg | null; keepOut?: [number, number, number, number] | null };
   taskBoard: TaskBoard;
 }
 

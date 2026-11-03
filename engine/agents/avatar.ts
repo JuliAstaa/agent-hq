@@ -52,6 +52,13 @@ export interface Avatar {
   spawn?: number;
   /** Floor number currently shown in the bubble badge. */
   badgeFloor?: number;
+  /** Chat balloon above the status bubble (fun.ts). `chatEl` holds the text; `chatOn` mirrors its shown state. */
+  chatLabel: CSS2DObject;
+  chatEl: HTMLDivElement;
+  chatText?: string;
+  chatOn?: boolean;
+  /** Sim time until which a closing balloon stays mounted for its fade-out. */
+  chatOffAt?: number;
 }
 
 export function buildAvatar(kit: Kit, M: Materials, id: string, onClick: () => void): Avatar {
@@ -195,11 +202,22 @@ export function buildAvatar(kit: Kit, M: Materials, id: string, onClick: () => v
   const label = new CSS2DObject(el);
   label.position.set(0, top + 0.95, 0);
   root.add(label);
+  // Chat balloon: a zero-size anchor at the status bubble's point; CSS lifts the balloon above it in pixels.
+  const chatAnchor = document.createElement("div");
+  chatAnchor.className = "chat-anchor";
+  const chatEl = document.createElement("div");
+  chatEl.className = "chat";
+  chatAnchor.appendChild(chatEl);
+  const chatLabel = new CSS2DObject(chatAnchor);
+  chatLabel.position.copy(label.position);
+  chatLabel.visible = false;
+  root.add(chatLabel);
   root.traverse((o) => {
     o.userData.agentId = id;
   });
   return {
     root, poseG, bob, eyes, mouth, arms, legs, bulbMat, label, el, top, cy, front, depth, color, P,
     blinkT: 1 + Math.random() * 3, blinking: 0, lookPh: Math.random() * 10, smokeT: 0,
+    chatLabel, chatEl,
   };
 }

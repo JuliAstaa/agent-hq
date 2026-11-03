@@ -77,16 +77,27 @@ export function createSpots(): SpotPlace[] {
   return out;
 }
 
-/** 12 home desks on floor 2: 3 rows x 4, slot index = row * 4 + column. */
+/** 9 home desks on floor 2: 3 rows x 3, slot index = row * 3 + column. */
 // Deviation 8 (plan-m1.md): like the floor-3 stations, the chair is on the front side (+z) and the agent faces
 // the back wall, looking at a monitor that faces it (and the camera). Rows moved back 0.8 so the aisle in front
 // of each row (K2, K3, K4) clears the chairs.
 export const DESK_ROWS = [
-  { z: -5.4, hub: "K2", aisle: -3.0 },
-  { z: -1.8, hub: "K3", aisle: 0.6 },
-  { z: 1.8, hub: "K4", aisle: 4.0 },
+  { z: -5.4, aisle: -3.0 },
+  { z: -1.8, aisle: 0.6 },
+  { z: 1.8, aisle: 4.0 },
 ];
-export const DESK_XS = [-9.6, -6.0, -2.4, 1.2];
+// Deviation 17 (plan-m1.md): 9 desks (3 x 3) instead of 12. The outer columns stay where they were (the task-board
+// walkway and the aisles are unchanged); the middle column sits halfway between them.
+export const DESK_XS = [-9.6, -4.2, 1.2];
+/** Walkways through the gaps between desk columns (deviation 18). */
+export const DESK_GAPS = [-6.9, -1.5];
+
+/**
+ * Office grid node on floor 2 (deviation 18): aisle z (one of DESK_ROWS[].aisle) x column. The graph links them along
+ * each aisle and across aisles through the desk gaps and the left wall walkway (BOARD_X), so an agent walks the
+ * short way between the task board and any desk instead of detouring via the right-hand K column.
+ */
+export const officeNode = (aisle: number, x: number) => `O${aisle}:${x}`;
 
 export interface DeskSlot {
   x: number;
@@ -98,7 +109,8 @@ export function createDeskSlots(): DeskSlot[] {
   const out: DeskSlot[] = [];
   for (const r of DESK_ROWS) {
     for (const x of DESK_XS) {
-      out.push({ x, z: r.z, place: { kind: "desk", room: "Meja kerja", floor: 2, hub: r.hub, via: [new THREE.Vector3(x, F2, r.aisle)], final: new THREE.Vector3(x, F2, r.z + 1.05), face: Math.PI, occ: null } });
+      // hub: the desk's own spot on its aisle, then straight to the chair
+      out.push({ x, z: r.z, place: { kind: "desk", room: "Meja kerja", floor: 2, hub: officeNode(r.aisle, x), via: [], final: new THREE.Vector3(x, F2, r.z + 1.05), face: Math.PI, occ: null } });
     }
   }
   return out;
@@ -123,15 +135,15 @@ export function stationPlace(index: number): StationPlace {
 
 /**
  * Task board ("PAPAN TUGAS", floor 2 left wall, deviation 14): three standing spots side by side in front of it.
- * Reached along the row-2 aisle (z 0.6, hub K3), then straight down the gap between the wall and the first desk
- * column (x -11.75 keeps clear of both).
+ * Hub: the left wall walkway on the middle aisle (deviation 18), then straight down the gap between the wall and the
+ * first desk column (x -11.75 keeps clear of both).
  */
 export const BOARD_X = -11.75;
 export const BOARD_SLOTS_Z = [0.95, 1.7, 2.45];
 
 export function createBoardSlots(): BoardPlace[] {
   return BOARD_SLOTS_Z.map((z, index) => ({
-    kind: "board", index, room: "Papan Tugas", floor: 2, hub: "K3",
-    via: [new THREE.Vector3(BOARD_X, F2, 0.6)], final: new THREE.Vector3(BOARD_X, F2, z), face: -PI / 2, occ: null,
+    kind: "board", index, room: "Papan Tugas", floor: 2, hub: officeNode(DESK_ROWS[1].aisle, BOARD_X),
+    via: [], final: new THREE.Vector3(BOARD_X, F2, z), face: -PI / 2, occ: null,
   }));
 }

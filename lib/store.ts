@@ -14,7 +14,7 @@ import { truncate } from "./format";
 export type FloorMode = "all" | "1" | "2" | "3";
 export type ConnMode = "demo" | "live" | "down";
 
-export const DESK_SLOTS = 12;
+export const DESK_SLOTS = 9; // 3 x 3 desks on floor 2 (deviation 17; the prototype had 12)
 export const MAX_LOG_LINES = 220;
 export const MAX_AGENT_EVENTS = 60;
 
@@ -213,7 +213,7 @@ export function createHQStore(): HQStore {
         });
         d.touched.add(id);
         emit({ type: "add", id });
-        if (slot == null) logInto(d, { id, level: "warn", message: "Meja penuh (maks 12), agen hanya tampil di daftar" });
+        if (slot == null) logInto(d, { id, level: "warn", message: `Meja penuh (maks ${DESK_SLOTS}), agen hanya tampil di daftar` });
       }
       const a = touch(d, id)!;
       if (p.name && p.type !== "alert" && p.type !== "finding") a.name = p.name;

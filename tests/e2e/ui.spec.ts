@@ -1,6 +1,7 @@
 // 2D UI behavior (plan-m1.md step 5): connection pill, connect modal, demo, floors, roster selection, log filters.
 
 import { expect, test } from "@playwright/test";
+import { DEMO } from "../../lib/demo";
 import { blockExternal } from "./offline";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -34,8 +35,8 @@ test("2D UI wiring", async ({ page }) => {
   await expect(modal).toBeHidden();
   await expect(pill).toHaveAttribute("data-mode", "demo");
   await expect(pill).toHaveText("Mode demo");
-  await expect(page.locator(".agent")).toHaveCount(11);
-  await expect(page.locator('[data-hq-ui="roster"] header')).toContainText("11");
+  await expect(page.locator(".agent")).toHaveCount(DEMO.length);
+  await expect(page.locator('[data-hq-ui="roster"] header')).toContainText(String(DEMO.length));
   await expect(page.locator('[data-hq-ui="log"]')).toContainText("Mode demo aktif. Klik agen untuk zoom, pilih lantai di atas.");
 
   // Floor switcher drives the store (and the engine).

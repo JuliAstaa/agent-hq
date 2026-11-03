@@ -3,6 +3,7 @@
 
 import * as THREE from "three";
 import { F2, F3 } from "../constants";
+import { BOARD_X, DESK_GAPS, DESK_ROWS, DESK_XS, officeNode } from "./places";
 
 export const N: Record<string, THREE.Vector3> = {};
 export const ADJ: Record<string, string[]> = {};
@@ -27,10 +28,41 @@ node("RPH", 0, F3, 2.2); node("RH", -4.9, F3, 2.2); node("BH", 8.3, F3, 2.4);
   [
     ["H1", "LH"], ["H1", "PH"], ["H1", "GH"], ["H1", "NH"], ["H1", "L1a"], ["LH", "PH"], ["LH", "NH"], ["PH", "GH"],
     ["L1a", "Land1"], ["Land1", "SB"], ["SB", "ST"], ["ST", "Top2"], ["Top2", "HL"], ["HL", "K3"],
-    ["K1", "K2"], ["K2", "K3"], ["K3", "K4"], ["K4", "Kf1"], ["Kf1", "Kf2"],
+    ["K1", "K2"], ["K2", "K3"], ["K3", "K4"],
     ["K4", "Lift2a"], ["HL", "Lift2a"], ["Lift2a", "Lift2"], ["Lift2", "Lift3"], ["Lift3", "X3"], ["X3", "BH"], ["X3", "RPH"], ["RPH", "RH"],
   ] as const
 ).forEach(([a, b]) => link(a, b));
+
+/* Floor-2 office grid (deviation 18). Each aisle is a row of nodes from the left wall walkway (back and middle aisles
+   only: the partition at z 4.4 closes it off at the front) through every desk column and desk gap to the K column on
+   the right; the front aisle also threads the meeting-room and reading-corner hubs (Kf2, Kf1). Cross links run
+   through the desk gaps (between all aisles) and along the left walkway (back aisle to the front of the board). */
+{
+  const [A, B, C] = DESK_ROWS.map((r) => r.aisle);
+  const right: Record<number, string> = { [A]: "K2", [B]: "K3", [C]: "K4" };
+  for (const z of [A, B, C]) {
+    const pts: [number, string][] = [];
+    const xs = [...DESK_XS, ...DESK_GAPS, ...(z === C ? [] : [BOARD_X])];
+    for (const x of xs) {
+      node(officeNode(z, x), x, F2, z);
+      pts.push([x, officeNode(z, x)]);
+    }
+    if (z === C) pts.push([N.Kf2.x, "Kf2"], [N.Kf1.x, "Kf1"]);
+    pts.push([N[right[z]].x, right[z]]);
+    pts.sort((p, q) => p[0] - q[0]);
+    for (let i = 1; i < pts.length; i++) link(pts[i - 1][1], pts[i][1]);
+  }
+  for (const x of DESK_GAPS) {
+    link(officeNode(A, x), officeNode(B, x));
+    link(officeNode(B, x), officeNode(C, x));
+  }
+  link(officeNode(A, BOARD_X), officeNode(B, BOARD_X));
+  // In front of the task board: the left walkway continues to z 3.4 (clear of the front desk at x -10.95 and of the
+  // meeting-room partition at z 4.4), then meets the front aisle at the first desk column.
+  node("BoardFront", BOARD_X, F2, 3.4);
+  link(officeNode(B, BOARD_X), "BoardFront");
+  link("BoardFront", officeNode(C, DESK_XS[0]));
+}
 
 /** Dijkstra shortest path between two node ids. Unreachable -> [a]. */
 export function shortest(a: string, b: string): string[] {

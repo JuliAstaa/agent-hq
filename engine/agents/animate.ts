@@ -6,6 +6,7 @@ import { V } from "../scene/kit";
 import type { Desk } from "../world/props/desk";
 import type { Station } from "../world/floor3";
 import type { Avatar } from "./avatar";
+import { QUIRK_DUR, type FunState } from "./fun";
 import { floorOf, updateNav, type Mover, type NavCtx } from "./movement";
 import { POSE } from "./poses";
 import { STATUS } from "@/lib/events";
@@ -14,6 +15,8 @@ import type { Agent, FloorMode } from "@/lib/store";
 export interface AgentRuntime extends Mover {
   av: Avatar;
   desk: Desk;
+  /** Random actions and chat balloons (fun.ts). */
+  fun?: FunState;
 }
 
 export interface AnimCtx {
@@ -180,13 +183,63 @@ export function animateAgent(ctx: AnimCtx, rt: AgentRuntime, a: Agent, t: number
         setArms(-0.3, -0.2, -0.3, 0.2);
     }
   }
+  // ---- random action (fun.ts), blended on top of the pose above ----
+  let ry = 0;
+  const q = rt.fun?.quirk;
+  if (q) {
+    const qt = rt.fun!.quirkT, p = Math.min(1, qt / QUIRK_DUR[q]);
+    const env = Math.sin(Math.PI * p); // 0 -> 1 -> 0
+    const blend = (lx: number, lz: number, rxa: number, rza: number, k: number) =>
+      setArms(L.rotation.x + (lx - L.rotation.x) * k, L.rotation.z + (lz - L.rotation.z) * k, R.rotation.x + (rxa - R.rotation.x) * k, R.rotation.z + (rza - R.rotation.z) * k);
+    switch (q) {
+      case "stretch":
+        blend(-3.0, 0.35, -3.0, -0.35, env); sy *= 1 + 0.08 * env; mouthK = 1 + 0.6 * env; if (env > 0.5) lidOpen = Math.PI;
+        break;
+      case "dance": {
+        const s = Math.sin(qt * 9), k = Math.min(1, env * 2);
+        rz += s * 0.16 * k; by += Math.abs(s) * 0.07 * k; ry = Math.sin(qt * 4.5) * 0.35 * k;
+        blend(-2.2 + s * 0.6, 0.6, -2.2 - s * 0.6, -0.6, k); mouthK = 1.5;
+        break;
+      }
+      case "yawn":
+        blend(L.rotation.x, L.rotation.z, -2.4, -0.6, env); mouthK = 1 + 1.4 * env; rx -= 0.12 * env; if (env > 0.4) lidOpen = Math.PI;
+        break;
+      case "hop": {
+        const h = Math.abs(Math.sin((qt * Math.PI) / 0.55));
+        by += 0.32 * h * (1 - p * 0.3); legL = legR = -0.6 * h; blend(-1.8, 0.4, -1.8, -0.4, h); mouthK = 1.5;
+        break;
+      }
+      case "wave":
+        blend(L.rotation.x, L.rotation.z, -2.9, 0.35 + Math.sin(qt * 10) * 0.35, Math.min(1, env * 2)); mouthK = 1.4; lidOpen = 0.05;
+        break;
+      case "spin": {
+        const e = p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
+        ry = Math.PI * 2 * e; by += 0.04 * env; blend(-1.6, 0.9, -1.6, -0.9, env); mouthK = 1.5;
+        break;
+      }
+      case "sneeze": {
+        if (p < 0.55) { rx -= 0.25 * (p / 0.55); lidOpen = Math.PI; mouthK = 1.3; }
+        else {
+          rx += 0.35 * (1 - (p - 0.55) / 0.45); by -= 0.04;
+          if (!rt.fun!.sneezed) {
+            rt.fun!.sneezed = true;
+            ctx.spawnSmoke(v.root.localToWorld(new THREE.Vector3(0, v.cy, v.front + 0.3)), "#ffffff", 0.35, 0.3);
+          }
+        }
+        break;
+      }
+      case "lookaround":
+        lookX = Math.sin(qt * 2.4) * 0.65; lookY = 0.1; ry = Math.sin(qt * 2.4) * 0.18 * env;
+        break;
+    }
+  }
   if (rt.squash > 0) {
     rt.squash = Math.max(0, rt.squash - dt * 2.8);
     const p = 1 - rt.squash;
     sy *= 1 + Math.sin(p * Math.PI * 2) * 0.18 * rt.squash;
   }
   v.bob.position.set(bx, by, 0);
-  v.bob.rotation.set(rx, 0, rz);
+  v.bob.rotation.set(rx, ry, rz);
   v.bob.scale.set(1 / Math.sqrt(sy), sy, 1 / Math.sqrt(sy));
   LL.rotation.x += (legL - LL.rotation.x) * Math.min(1, dt * 14);
   LR.rotation.x += (legR - LR.rotation.x) * Math.min(1, dt * 14);

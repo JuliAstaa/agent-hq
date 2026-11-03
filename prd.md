@@ -214,7 +214,7 @@ Cartoon cutaway building on a floating rock in an alien sky. Front and right wal
 ### Floor 2: Kantor
 | Room | Content |
 |---|---|
-| Office | 12 home desks (one per agent, max 12), monitor shows status, name plate, hover chair with status ring |
+| Office | 9 home desks in a 3 x 3 grid (one per agent, max 9; more agents are listed in the roster only), monitor shows status, name plate, hover chair with status ring |
 | Ruang rapat | Whiteboard (corat-coret, strokes accumulate), card table with 2 stools (main kartu) |
 | Pojok baca | Bookshelf, 2 armchairs (baca buku) |
 | Server room | Racks with blinking LEDs, bubbling tank (decor) |
@@ -282,7 +282,7 @@ Poses: desk, walk, stand, sit (sofa, armchair), stool, recline (beanbag), lie (f
 
 | Area | Requirement |
 |---|---|
-| Performance | 60 fps on a mid laptop iGPU with 12 agents; canvas textures redrawn at most every 120-150 ms; lower floors' heavy displays skip redraw when hidden |
+| Performance | 60 fps on a mid laptop iGPU with 9 agents; canvas textures redrawn at most every 120-150 ms; lower floors' heavy displays skip redraw when hidden |
 | Latency | Hook to on-screen change under 1 s on localhost |
 | Resilience | SSE auto-reconnect with backoff up to 15 s; server never crashes on bad JSON; hooks never block Claude Code |
 | Security | Bind 127.0.0.1 by default; `HQ_TOKEN` supported; redaction before broadcast; no secrets in URLs; HTML-escape all agent-provided strings in the UI |
@@ -379,7 +379,7 @@ Decisions:
 - [ ] Follow-cam toggle for the selected agent.
 - [ ] Optional sounds (typing, siren, confetti) with a mute toggle, off by default.
 - [ ] Mobile layout pass, reduced-motion mode.
-- [ ] More than 12 agents: extra desk row or overflow area.
+- [ ] More than 9 agents: extra desk row or overflow area.
 
 ## 16. Testing
 

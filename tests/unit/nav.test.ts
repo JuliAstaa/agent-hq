@@ -43,14 +43,53 @@ describe("router", () => {
     const coffee = spots.find((s) => s.id === "coffee")!;
     const r = route(atPlace(desk), coffee);
     expect(r[0].p.equals(desk.final)).toBe(true);
-    expect(r[1].p.equals(desk.via[0])).toBe(true);
+    expect(r[1].p.equals(N[desk.hub])).toBe(true); // the desk's own spot on its aisle (deviation 18)
     const ids = r.filter((w) => w.ref.t === "node").map((w) => (w.ref as { id: string }).id);
-    expect(ids).toEqual(["K2", "K3", "HL", "Top2", "ST", "SB", "Land1", "L1a", "H1", "PH"]);
+    expect(ids[0]).toBe(desk.hub);
+    expect(ids.slice(-8)).toEqual(["HL", "Top2", "ST", "SB", "Land1", "L1a", "H1", "PH"]);
     expect(r.slice(-4).map((w) => w.p.toArray())).toEqual(chainOf(coffee).slice(1).map((w) => w.p.toArray()));
     // height only changes on the stairs segment
     const ys = r.map((w) => floorOfY(w.p.y));
     expect(ys[0]).toBe(2);
     expect(ys.at(-1)).toBe(1);
+  });
+
+  // Deviation 18: the floor-2 office is a walkway grid, so trips between the task board and desks take the short way.
+  const pathLength = (r: { p: THREE.Vector3 }[]) => r.reduce((s, w, i) => (i ? s + w.p.distanceTo(r[i - 1].p) : 0), 0);
+  const boards = createBoardSlots();
+  const office: Place[] = [...desks.map((d) => d.place), ...boards];
+
+  it("task board <-> desks and desk <-> desk take a short way (no detour via the right-hand column)", () => {
+    for (const a of office) {
+      for (const b of office) {
+        if (a === b) continue;
+        const r = route(atPlace(a), b);
+        const manhattan = Math.abs(a.final.x - b.final.x) + Math.abs(a.final.z - b.final.z);
+        expect(pathLength(r), `${a.kind} ${a.final.toArray()} -> ${b.kind} ${b.final.toArray()}`).toBeLessThanOrEqual(manhattan * 1.25 + 8); // walking around one desk is fine; the old detour added 25+
+      }
+    }
+    // the case that used to run ~34 units: board -> back-row desk next to it
+    expect(pathLength(route(atPlace(boards[0]), desks[0].place))).toBeLessThan(9);
+  });
+
+  it("no floor-2 route cuts through a desk", () => {
+    const pad = 0.3; // agent clearance around the desk top (2.7 x 1.35)
+    const inDesk = (x: number, z: number) => desks.some((d) => Math.abs(x - d.x) < 1.35 + pad && Math.abs(z - d.z) < 0.675 + pad);
+    const lt2 = [...office, ...spots.filter((s) => s.floor === 2)];
+    for (const a of lt2) {
+      for (const b of lt2) {
+        if (a === b) continue;
+        const r = route(atPlace(a), b);
+        for (let i = 1; i < r.length; i++) {
+          const p = r[i - 1].p, q = r[i].p;
+          if (Math.abs(p.y - F2) > 0.3 || Math.abs(q.y - F2) > 0.3) continue;
+          for (let k = 0; k <= 20; k++) {
+            const x = p.x + ((q.x - p.x) * k) / 20, z = p.z + ((q.z - p.z) * k) / 20;
+            expect(inDesk(x, z), `${a.final.toArray()} -> ${b.final.toArray()} at (${x.toFixed(2)}, ${z.toFixed(2)})`).toBe(false);
+          }
+        }
+      }
+    }
   });
 
   it("redirect mid-walk retraces to the last reached waypoint", () => {
@@ -113,7 +152,7 @@ function setup() {
 describe("agent behavior (prd.md §10)", () => {
   it("an agent spawned at its desk faces the monitor (desk face PI), and keeps facing it while working", () => {
     const { mk, run } = setup();
-    for (const slot of [0, 5, 11]) {
+    for (const slot of [0, 4, 8]) {
       const m = mk(`seat${slot}`, slot);
       expect(m.home.face).toBe(Math.PI);
       expect(m.mv.yaw).toBe(Math.PI);
@@ -199,7 +238,7 @@ describe("agent behavior (prd.md §10)", () => {
 
   it("spots are reserved: pickSpot never returns another agent's spot", () => {
     const { ctx, mk } = setup();
-    const movers = Array.from({ length: 12 }, (_, i) => mk("a" + i, i));
+    const movers = Array.from({ length: 12 }, (_, i) => mk("a" + i, i % 9)); // 12 agents, 9 desks (deviation 17)
     const taken = new Set<string>();
     for (const m of movers) {
       const sp = pickSpot(ctx, m);

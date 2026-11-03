@@ -145,16 +145,89 @@ export function drawArcade(F: Fonts, ar: CanvasTex, t: number, on: boolean) {
   tex.needsUpdate = true;
 }
 
-export function drawWhiteboard(w: Floor2Props["wb"], on: boolean) {
-  if (!on) return;
+/* Easter egg (user request 2026-11-03): sometimes an agent at the whiteboard writes this, letter by letter. */
+export const WB_EGG_TEXT = "hey antek antek asing!";
+/** Chance per whiteboard session (an agent starts the "whiteboard" activity). */
+export const WB_EGG_CHANCE = 0.25;
+const MARKERS = ["#1b1530", "#ff4f5e", "#3a8fd9", "#2e8b6a"];
+
+export interface WhiteboardEgg {
+  /** Ticks (90 ms) of normal scribbling before the writing starts. */
+  wait: number;
+  /** Next letter; -1 = not started (spot not chosen yet). */
+  i: number;
+  x: number;
+  y: number;
+  color: string;
+}
+
+export const newWhiteboardEgg = (wait = Math.floor(rand(12, 35))): WhiteboardEgg => ({ wait, i: -1, x: 0, y: 0, color: pick(MARKERS) });
+
+/** One letter per tick, slightly tilted and bouncy like handwriting. Returns true while writing. */
+function writeEgg(w: Floor2Props["wb"], F: Fonts): boolean {
+  const e = w.egg!, c = w.ctx, size = 34;
+  c.font = `600 ${size}px ${F.fredoka}`;
+  if (e.i < 0) {
+    const width = c.measureText(WB_EGG_TEXT).width;
+    e.x = rand(24, Math.max(25, 512 - 24 - width));
+    e.y = rand(56, 300);
+    c.fillStyle = "#ffffff"; // wipe a clean patch first
+    c.fillRect(e.x - 12, e.y - size - 4, width + 24, size + 18);
+    w.keepOut = [e.x - 16, e.y - size - 8, e.x + width + 16, e.y + 18]; // scribbles stay off it until the next wipe
+    e.i = 0;
+  }
+  const ch = WB_EGG_TEXT[e.i];
+  const x = e.x + c.measureText(WB_EGG_TEXT.slice(0, e.i)).width;
+  c.save();
+  c.translate(x, e.y + rand(-2, 2));
+  c.rotate(rand(-0.07, 0.07));
+  c.fillStyle = e.color;
+  c.textAlign = "left";
+  c.fillText(ch, 0, 0);
+  c.restore();
+  e.i++;
+  if (e.i >= WB_EGG_TEXT.length) w.egg = null;
+  w.tex.needsUpdate = true;
+  return true;
+}
+
+/** Scribbles while an agent is at the whiteboard. `F` is null until fonts are ready (no text before that). */
+export function drawWhiteboard(w: Floor2Props["wb"], on: boolean, F: Fonts | null = null) {
+  if (!on) {
+    w.wasOn = false;
+    return;
+  }
+  if (!w.wasOn) {
+    w.wasOn = true;
+    if (w.forceEgg || Math.random() < WB_EGG_CHANCE) w.egg = newWhiteboardEgg(w.forceEgg ? 0 : undefined);
+    w.forceEgg = false;
+  }
+  if (w.egg) {
+    if (w.egg.wait > 0) w.egg.wait--;
+    else if (F && writeEgg(w, F)) return;
+  }
   const c = w.ctx;
-  if (w.strokes > 140) { c.fillStyle = "#ffffff"; c.fillRect(0, 0, 512, 320); w.strokes = 0; }
-  c.strokeStyle = pick(["#1b1530", "#ff4f5e", "#3a8fd9", "#2e8b6a"]); c.lineWidth = 4; c.lineCap = "round";
-  c.beginPath(); c.moveTo(w.cx, w.cy);
-  w.cx = Math.max(30, Math.min(482, w.cx + rand(-40, 40)));
-  w.cy = Math.max(30, Math.min(290, w.cy + rand(-25, 25)));
-  if (Math.random() < 0.05) { w.cx = rand(40, 460); w.cy = rand(40, 280); c.moveTo(w.cx, w.cy); }
-  c.quadraticCurveTo(w.cx + rand(-20, 20), w.cy + rand(-20, 20), w.cx, w.cy); c.stroke(); w.strokes++;
+  if (w.strokes > 140) { c.fillStyle = "#ffffff"; c.fillRect(0, 0, 512, 320); w.strokes = 0; w.keepOut = null; }
+  // Plan the stroke first (random walk from the last point, sometimes a jump), then draw it.
+  let sx = w.cx, sy = w.cy;
+  let ex = Math.max(30, Math.min(482, sx + rand(-40, 40)));
+  let ey = Math.max(30, Math.min(290, sy + rand(-25, 25)));
+  if (Math.random() < 0.05) { sx = ex = rand(40, 460); sy = ey = rand(40, 280); }
+  const k = w.keepOut;
+  if (k) {
+    // Keep the easter-egg text readable: strokes that would touch it start somewhere clear instead.
+    const near = (x: number, y: number) => x > k[0] - 24 && x < k[2] + 24 && y > k[1] - 24 && y < k[3] + 24;
+    for (let n = 0; n < 20 && (near(sx, sy) || near(ex, ey)); n++) {
+      sx = rand(40, 460); sy = rand(40, 280);
+      ex = Math.max(30, Math.min(482, sx + rand(-15, 15)));
+      ey = Math.max(30, Math.min(290, sy + rand(-10, 10)));
+    }
+    if (near(sx, sy) || near(ex, ey)) return;
+  }
+  c.strokeStyle = pick(MARKERS); c.lineWidth = 4; c.lineCap = "round";
+  c.beginPath(); c.moveTo(sx, sy);
+  c.quadraticCurveTo(ex + rand(-20, 20), ey + rand(-20, 20), ex, ey); c.stroke();
+  w.cx = ex; w.cy = ey; w.strokes++;
   w.tex.needsUpdate = true;
 }
 

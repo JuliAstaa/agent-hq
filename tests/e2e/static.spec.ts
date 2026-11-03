@@ -6,6 +6,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import path from "node:path";
+import { DEMO } from "../../lib/demo";
 import { blockExternal } from "./offline";
 
 const OUT = path.resolve(__dirname, "../../out");
@@ -50,7 +51,7 @@ test("static export runs the demo without any bridge request", async ({ page }) 
   const pill = page.locator('[data-hq-ui="top"] [data-mode]');
   await expect(pill).toHaveAttribute("data-mode", "demo", { timeout: 30_000 });
   await expect(pill).toHaveText("Mode demo");
-  await expect(page.locator(".agent")).toHaveCount(11);
+  await expect(page.locator(".agent")).toHaveCount(DEMO.length);
   await expect(page.locator("canvas")).toHaveCount(1);
   // The connect modal still works for pointing at a real bridge, with the app's default URL.
   await page.getByRole("button", { name: "Sambungkan" }).click();

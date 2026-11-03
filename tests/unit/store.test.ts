@@ -68,11 +68,11 @@ describe("agent lifecycle", () => {
     expect(agent("a").events).toHaveLength(60);
   });
 
-  it("desks full after 12: roster only + warn", () => {
-    for (let i = 0; i < 13; i++) apply({ id: "a" + i });
-    expect(agent("a11").slot).toBe(11);
-    expect(agent("a12").slot).toBeNull();
-    expect(S().logs.at(-1)).toMatchObject({ level: "warn", message: "Meja penuh (maks 12), agen hanya tampil di daftar", color: "#fff6e3" });
+  it("desks full after 9: roster only + warn (deviation 17)", () => {
+    for (let i = 0; i < 10; i++) apply({ id: "a" + i });
+    expect(agent("a8").slot).toBe(8);
+    expect(agent("a9").slot).toBeNull();
+    expect(S().logs.at(-1)).toMatchObject({ level: "warn", message: "Meja penuh (maks 9), agen hanya tampil di daftar", color: "#fff6e3" });
     apply({ type: "remove", id: "a3" });
     apply({ id: "late" });
     expect(agent("late").slot).toBe(3);
@@ -221,11 +221,13 @@ describe("ui state", () => {
 });
 
 describe("demo simulator", () => {
-  it("starts with the 11 demo agents and keeps running", () => {
+  it("starts with the 9 demo agents (one per desk, deviation 17) and keeps running", () => {
     vi.useFakeTimers();
     const demo = createDemo(store);
     demo.start();
     expect([...S().agents.keys()]).toEqual(DEMO.map((d) => d.id));
+    expect(DEMO).toHaveLength(9);
+    expect([...S().agents.values()].every((a) => a.slot != null)).toBe(true); // every demo agent gets a desk
     expect(agent("rexx")).toMatchObject({ status: "working", dept: "red" });
     expect(agent("plonk").status).toBe("idle");
     expect(S().conn.mode).toBe("demo");
