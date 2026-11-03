@@ -48,4 +48,6 @@ else
   set -- "${SHELL:-/bin/bash}" -l
 fi
 
-exec ttyd --interface lo --port "$PORT" --writable --check-origin --credential "$CRED" --cwd "$HOME" "${OPTS[@]}" "$@"
+# --debug 3 = errors and warnings only: at the default level ttyd logs the credential (base64) on every start.
+exec ttyd --interface lo --port "$PORT" --writable --check-origin --credential "$CRED" --cwd "$HOME" --debug 3 \
+  "${OPTS[@]}" "$@"

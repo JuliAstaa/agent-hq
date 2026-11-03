@@ -61,6 +61,7 @@ pm2 logs agent-hq-terminal --lines 5 --nostream    # cek: tidak ada error
 - hanya mendengar di `127.0.0.1:7681` (`--interface lo`), tidak di IP publik;
 - login `hq` dengan password acak yang dibuat sekali di `~/.config/agent-hq/terminal.cred` (`chmod 600`);
 - menolak koneksi WebSocket dari situs lain (`--check-origin`);
+- hanya mencatat error dan warning ke log (`--debug 3`), karena di level default ttyd menulis kredensialnya ke log;
 - membuka shell di sesi tmux `agent-hq` (kalau tmux ada), mulai dari folder home;
 - menolak jalan sebagai root.
 
