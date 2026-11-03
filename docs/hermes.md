@@ -16,7 +16,8 @@ Kalau hook dan MCP jalan di proses Hermes yang sama, laporan MCP masuk ke karakt
 Satu sesi Hermes tetap satu karakter.
 
 Opsional: **chat Hermes** (bagian 11), panel di Agent HQ untuk mengobrol dan memberi perintah ke Hermes langsung
-dari kantor. Dipasang dengan `install.py --chat`.
+dari kantor. Dipasang dengan `install.py --chat`. Juga opsional: **terminal VPS** di samping kantor lewat ttyd,
+lihat `docs/terminal.md`.
 
 ## Isi
 
@@ -181,6 +182,9 @@ Kalau port 8787 di laptop sudah terpakai (misalnya Agent HQ lokal sedang jalan),
 
 Saat tunnel ditutup, kantor di VPS tetap jalan. Begitu dibuka lagi, halaman langsung menampilkan status semua
 agen dan log terakhir.
+
+Memakai tombol Terminal (`docs/terminal.md`)? Teruskan port terminal di tunnel yang sama:
+`ssh -N -L 8787:127.0.0.1:8787 -L 7681:127.0.0.1:7681 user@ip-vps`.
 
 ## 5. Opsi B: Agent HQ di laptop
 

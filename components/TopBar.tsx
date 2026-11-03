@@ -12,12 +12,15 @@ export default function TopBar({
   onToggleRoster,
   onCron,
   onHermes,
+  onTerminal,
 }: {
   onConnect: () => void;
   onToggleRoster: () => void;
   onCron: () => void;
   /** Set when the Agent HQ server has the Hermes chat configured. */
   onHermes?: () => void;
+  /** Set when the Agent HQ server has HQ_TERMINAL_URL (docs/terminal.md). */
+  onTerminal?: () => void;
 }) {
   const conn = useStore(hqStore, (s) => s.conn);
   const hasCron = useStore(hqStore, (s) => s.cron !== null);
@@ -64,6 +67,11 @@ export default function TopBar({
         {onHermes && (
           <Button title="Chat dengan Hermes" onClick={onHermes}>
             Hermes
+          </Button>
+        )}
+        {onTerminal && (
+          <Button title="Terminal server" onClick={onTerminal}>
+            Terminal
           </Button>
         )}
         <Button tone="primary" onClick={onConnect}>

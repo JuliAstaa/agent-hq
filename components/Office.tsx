@@ -13,6 +13,7 @@ import CronPanel from "./CronPanel";
 import HermesPanel, { useHermesAvailable } from "./HermesPanel";
 import LogPanel from "./LogPanel";
 import Roster from "./Roster";
+import TerminalPanel, { useTerminalUrl } from "./TerminalPanel";
 import Toast from "./Toast";
 import TopBar from "./TopBar";
 
@@ -53,6 +54,12 @@ export default function Office() {
   const [hermesOpen, setHermesOpen] = useState(false);
   const closeHermes = useCallback(() => setHermesOpen(false), []);
   const hermesOn = useHermesAvailable(liveUrl);
+  // The Hermes and terminal panels take the same spot on the right, so opening one closes the other. The open
+  // terminal panel keeps its address: ttyd does not depend on the office stream, so a restart of Agent HQ (e.g.
+  // ./start.sh typed in that terminal) hides the button for a moment but leaves the panel connected.
+  const [termOpenUrl, setTermOpenUrl] = useState<string | null>(null);
+  const closeTerm = useCallback(() => setTermOpenUrl(null), []);
+  const termUrl = useTerminalUrl(liveUrl);
 
   useEffect(() => {
     const engine = createEngine(stageRef.current!, labelsRef.current!, hqStore);
@@ -102,7 +109,22 @@ export default function Office() {
         onConnect={() => setModalOpen(true)}
         onToggleRoster={() => setRosterOpen((v) => !v)}
         onCron={() => setCronOpen(true)}
-        onHermes={hermesOn ? () => setHermesOpen((v) => !v) : undefined}
+        onHermes={
+          hermesOn
+            ? () => {
+                setTermOpenUrl(null);
+                setHermesOpen((v) => !v);
+              }
+            : undefined
+        }
+        onTerminal={
+          termUrl
+            ? () => {
+                setHermesOpen(false);
+                setTermOpenUrl((v) => (v ? null : termUrl));
+              }
+            : undefined
+        }
       />
       <Roster open={rosterOpen} />
       <LogPanel />
@@ -116,6 +138,7 @@ export default function Office() {
       />
       {cronOpen && <CronPanel open onClose={closeCron} liveUrl={liveUrl} />}
       {hermesOpen && hermesOn && <HermesPanel onClose={closeHermes} liveUrl={liveUrl} />}
+      {termOpenUrl && <TerminalPanel url={termOpenUrl} onClose={closeTerm} />}
     </>
   );
 }

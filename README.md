@@ -176,6 +176,8 @@ Daftar kata kuncinya ada di `lib/teams.ts`.
 - **Log Aktivitas** (kiri bawah): semua kejadian. Tombol "Jalan" menyembunyikan atau menampilkan baris
   perpindahan agen, "Error saja" menyaring error dan alert.
 - **Chip status** (atas): jumlah agen per status.
+- **Terminal** (kanan atas, opsional): terminal server tempat Agent HQ jalan, lewat ttyd. Tombolnya hanya muncul
+  kalau `HQ_TERMINAL_URL` diisi. Lihat `docs/terminal.md`.
 
 ## 6. Tombol "Sambungkan"
 
@@ -236,9 +238,10 @@ Semua URL tersedia dalam dua bentuk: dengan awalan `/api` dan tanpa (sama sepert
 | `GET /api/cron/commands`, `POST /api/cron/result` | dipakai reporter jadwal Hermes (`docs/hermes.md` bagian 10) |
 | `GET /api/hermes` | apakah chat Hermes aktif (`{"enabled": true}`) |
 | `POST /api/hermes`, `GET /api/hermes/stream` | panel chat Hermes: kirim pesan, jawab izin, hentikan, percakapan baru (`docs/hermes.md` bagian 11) |
+| `GET /api/terminal` | alamat terminal web untuk tombol Terminal (`{"url": ...}`, `docs/terminal.md`) |
 
-Endpoint `/api/cron` dan `/api/hermes` hanya ada dengan awalan `/api` dan hanya di app Next.js (tidak di
-`examples/server.js`). Chat Hermes hanya melayani halaman Agent HQ sendiri yang dibuka lewat `localhost`.
+Endpoint `/api/cron`, `/api/hermes`, dan `/api/terminal` hanya ada dengan awalan `/api` dan hanya di app Next.js
+(tidak di `examples/server.js`). Chat Hermes hanya melayani halaman Agent HQ sendiri yang dibuka lewat `localhost`.
 
 ## 9. Keamanan
 
@@ -247,6 +250,9 @@ Endpoint `/api/cron` dan `/api/hermes` hanya ada dengan awalan `/api` dan hanya 
   membawa `Authorization: Bearer rahasia`. Untuk hook, jalankan Claude Code dengan `HQ_TOKEN` yang sama.
 - **Sensor otomatis:** prompt dan perintah disensor sebelum ditampilkan, misalnya token, API key, password,
   `mysql -p...`, `curl -u user:pass`, dan password di URL.
+- **Terminal web (opsional):** tombol Terminal hanya menampilkan ttyd yang jalan terpisah di `127.0.0.1` dengan
+  password sendiri, dibuka lewat tunnel SSH. Agent HQ tidak menjalankan perintah dan tidak melihat isi terminal.
+  Lihat `docs/terminal.md` bagian 6.
 - **Batas Red Team:** fitur Red Team hanya memvisualisasikan. Agen pentest-mu hanya boleh menguji target milikmu
   sendiri atau yang sudah kamu kantongi izin tertulisnya.
 
@@ -292,6 +298,7 @@ Dokumen lain:
 - `prd.md`: spesifikasi lengkap (protokol event, integrasi Claude Code, dunia, perilaku agen).
 - `plan-m1.md`: rencana port ke Next.js dan daftar perbedaan yang disengaja dari prototipe.
 - `docs/hermes.md`: menyambungkan Hermes Agent di VPS Ubuntu (hook, MCP, papan jadwal, chat).
+- `docs/terminal.md`: tombol Terminal, terminal server di samping kantor lewat ttyd.
 - `CLAUDE.md`: aturan kerja untuk AI agent yang mengerjakan repo ini.
 
 ## 12. Musik, efek suara, dan event langit

@@ -169,6 +169,12 @@ Not in the prototype. The office's chat panel talks to Hermes Agent through its 
 - Approvals go to `POST /v1/runs/{run_id}/approval`: with the canonical session owner the body is exactly `{request_id, execution_generation, choice}` taken from `GET /v1/runs/{run_id}` `pending_controls`, otherwise `{choice, request_id?}`. Stop is `POST /v1/runs/{run_id}/stop`; before `run.started`, or if Hermes does not settle within 20 s, the bridge drops the stream instead.
 - Guard on the panel routes: same origin only (`Origin` / `Sec-Fetch-Site`, `403`), Host must be loopback (`localhost`, `127.x`, `[::1]`) or listed in `HQ_ALLOWED_HOSTS`, and a non-loopback host also needs `HQ_TOKEN` (`403` without it); `HQ_TOKEN` when set (`401`); JSON body (`415`). No CORS. The API key never reaches the browser. Shown text is redacted; Hermes receives the message as typed.
 
+### 7.7 Web terminal
+Not in the prototype. A Terminal button opens the server's shell next to the office (docs/terminal.md). The terminal is ttyd, a separate program; Agent HQ never runs commands and never proxies the terminal.
+- `GET /api/terminal` -> `{"ok": true, "url"}` from `HQ_TERMINAL_URL`, the address as seen from the viewer's browser (usually `http://localhost:7681` through the SSH tunnel). `url` is `null` (no button) when unset, not `http(s)`, or carrying a user or password. No CORS.
+- The panel shows that URL in an iframe and takes the Hermes panel's spot (opening one closes the other). An open panel stays connected while the office stream reconnects.
+- `examples/terminal/ttyd.sh` runs ttyd on loopback only (`--interface lo`), writable, `--check-origin`, Basic auth `hq:<random>` from `~/.config/agent-hq/terminal.cred` (blocks DNS rebinding), refuses root, and attaches to the tmux session `agent-hq` when tmux exists.
+
 ## 8. Claude Code integration
 
 ### 8.1 Mechanism
@@ -405,6 +411,7 @@ Decisions:
 - [x] Scheduled jobs (§7.5): reporter `hq_cron.py` as a systemd user service, schedule board on floor 2, schedule panel with run / pause / resume.
 - [x] Installer (`examples/hermes/install.py`): files, `agent-hq.env`, config.yaml merge with backup and YAML check, reporter service.
 - [x] Hermes chat (§7.6): panel next to the office, server-held stream to the Hermes API server, approvals, stop, resume; `install.py --chat` sets up both sides.
+- [x] Web terminal (§7.7): Terminal button and panel for a separate ttyd on loopback, `examples/terminal/ttyd.sh` launcher, docs/terminal.md.
 
 ### M5. Polish
 - [ ] Follow-cam toggle for the selected agent.
