@@ -16,6 +16,8 @@ import { allowedQuirks, CHAT_REPLIES, chatLine, newFun, say, startQuirk, tickFun
 import { floorOf, locText, newMovement, pickSpot, placeAt, releasePlaces, workTarget, type NavCtx } from "./agents/movement";
 import { drawArcade, drawBoard, drawEmptyDesk, drawPlate, drawScreen, drawTaskBoard, drawTV, drawWhiteboard, newWhiteboardEgg } from "./displays/office";
 import { drawRedWall, drawReportBoard, drawSOC, drawStation, newSocAnim } from "./displays/security";
+import { drawScheduleBoard } from "./displays/schedule";
+import { CRON_BOARD_EVENT } from "@/lib/cron";
 import { createFx } from "./fx";
 import { createSkyEvents, type SkyEventKind } from "./skyEvents";
 import { planMeteors, planPortal, type NdcRect, type PlaceCtx, type SkyZone } from "./skyPlacement";
@@ -50,6 +52,8 @@ export interface Engine {
     skyZones: (kind: SkyEventKind, n?: number) => Record<string, number>;
     /** Hide the task board (visual parity: the prototype has none, deviation 14). */
     hideTaskBoard: (hidden: boolean) => void;
+    /** Hide the schedule board even when a schedule source reports (it is hidden without one). */
+    hideScheduleBoard: (hidden: boolean) => void;
     /** Whiteboard easter egg: write it now if someone is at the board, else at the next whiteboard session. */
     whiteboardEgg: () => void;
     /** Open a chat balloon on agent `id` (random line for its context when `text` is omitted). */
@@ -134,6 +138,17 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
   const spots = createSpots();
   const boards = createBoardSlots(); // task board standing spots (deviation 14)
   drawTaskBoard(null, p2.taskBoard.face);
+  // Schedule board (Hermes cron): shown only while a schedule source reports.
+  const SB = p2.scheduleBoard;
+  let scheduleHidden = false; // tests only, see Engine.debug
+  let bellOn = false;
+  const refreshSchedule = () => {
+    const c = S().cron;
+    SB.group.visible = !!c && !scheduleHidden;
+    if (c) bellOn = drawScheduleBoard(fontsReady ? fonts : null, SB.face, c, Date.now());
+    else bellOn = false;
+  };
+  refreshSchedule();
   const slots = createDeskSlots();
   // All 12 home desks exist from the start (deviation 7): an agent takes the desk of its slot and leaves it
   // empty again on removal. The prototype built a desk per agent, so an office without agents had no desks.
@@ -438,6 +453,9 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
       case "focus":
         focus(s.id);
         break;
+      case "cron":
+        refreshSchedule();
+        break;
     }
   };
   const offSignal = S().onSignal(onSignal);
@@ -460,6 +478,13 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
     const hit = ray.intersectObjects(roots, true).find((h) => (h.object as THREE.Mesh).isMesh);
     return (hit?.object.userData.agentId as string) || null;
   }
+  /** Schedule board under the pointer. Only in the floor-2 view (like desks): elsewhere other floors are in front of it. */
+  function pickScheduleBoard(e: PointerEvent): boolean {
+    if (!SB.group.visible || !g2.visible || g3.visible) return false;
+    ndc.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
+    ray.setFromCamera(ndc, camera);
+    return ray.intersectObject(SB.group, true).length > 0;
+  }
   const onDown = (e: PointerEvent) => {
     downAt = { x: e.clientX, y: e.clientY };
   };
@@ -467,11 +492,12 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
     if (!downAt || Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) > 5) return;
     const id = pickAgent(e);
     if (id) toggleFocus(id);
+    else if (pickScheduleBoard(e)) stage.dispatchEvent(new CustomEvent(CRON_BOARD_EVENT, { bubbles: true }));
   };
   const onMove = (e: PointerEvent) => {
     if (performance.now() - hoverT < 60) return;
     hoverT = performance.now();
-    renderer.domElement.style.cursor = pickAgent(e) ? "pointer" : "";
+    renderer.domElement.style.cursor = pickAgent(e) || pickScheduleBoard(e) ? "pointer" : "";
   };
   const onResize = () => {
     camera.aspect = vw() / vh();
@@ -535,6 +561,7 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
     const taken = new Set([...agents.values()].map((rt) => rt.desk));
     for (const d of desks) if (!taken.has(d)) drawEmptyDesk(fonts, d);
     drawTaskBoard(fonts, p2.taskBoard.face);
+    refreshSchedule();
   };
   loadFonts(fonts).then(() => {
     if (disposed) return;
@@ -700,7 +727,10 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
         const a = s.agents.get(rt.id);
         if (a) updateBubble(rt, a, s.selectedId);
       }
+      if (SB.group.visible && g2.visible) refreshSchedule(); // countdowns, like the mission board every 1 s
     }
+    // schedule bell: short rings while a job runs, then settles
+    SB.bell.rotation.z = bellOn && t % 2.4 < 0.9 ? Math.sin(t * 24) * 0.42 : SB.bell.rotation.z * 0.85;
     locAcc += dt;
     if (locAcc >= LOC_INTERVAL) {
       locAcc = 0;
@@ -868,6 +898,10 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
       },
       hideTaskBoard: (hidden) => {
         p2.taskBoard.group.visible = !hidden;
+      },
+      hideScheduleBoard: (hidden) => {
+        scheduleHidden = hidden;
+        refreshSchedule();
       },
       whiteboardEgg: () => {
         if (p2.wb.wasOn) p2.wb.egg = newWhiteboardEgg(0);

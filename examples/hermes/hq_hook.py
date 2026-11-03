@@ -33,6 +33,18 @@ DENIED = {"deny", "denied", "no", "n", "reject", "rejected", "block", "blocked",
           "expired", "withdrawn", "cancel", "cancelled", "canceled", "error", "failed"}
 CHILD_OK = {"", "completed", "complete", "success", "succeeded", "ok", "done", "finished"}
 GENERIC_ROLES = {"", "leaf", "child", "subagent", "worker", "orchestrator", "default"}
+# Hermes cron runs use session ids like cron_<job id>_<YYYYmmdd_HHMMSS> (cron/scheduler.py).
+CRON_SESSION = re.compile(r"^cron_([0-9a-f]{6,32})_")
+
+
+def cron_identity(job_id):
+    """Name and role for a cron run's character: the job's name and schedule, not HQ_NAME."""
+    job = next((j for j in hq.load_cron_jobs() if str(j.get("id")) == job_id), None)
+    if not job:
+        return {"name": "cron %s" % job_id[:6], "role": "Cron Hermes"}
+    shown = hq.schedule_text(job)
+    return {"name": hq.trunc(hq.redact(job.get("name") or job_id), 40),
+            "role": hq.trunc("Cron · " + shown if shown else "Cron Hermes", 60)}
 
 
 def first(*values):
@@ -113,6 +125,8 @@ class Translator:
         self.out = []
         self.parent = "unknown"  # raw Hermes session id of the main agent
         self.sub = None  # subagent record when the event belongs to one
+        self.cron_job = None  # job id when the main session is a cron run
+        self.identity = None  # name/role headers overriding HQ_NAME/HQ_ROLE (cron runs)
 
     # ---- output
 
@@ -133,6 +147,13 @@ class Translator:
     def remember_main(self, raw):
         self.parent = raw
         self.st["sessions"].setdefault(raw, {})["at"] = self.now
+        m = CRON_SESSION.match(raw)
+        if m:
+            # A cron run: its own character named after the job. It is not this process's interactive session,
+            # so hq_mcp.py keeps reporting for that one.
+            self.cron_job = m.group(1)
+            self.identity = cron_identity(self.cron_job)
+            return
         self.st["procs"][self.ppid] = {"sid": raw, "id": hq.agent_id(raw), "at": self.now}
 
     def last_main(self):
@@ -215,6 +236,10 @@ class Translator:
                     self.hook("Notification", notification_type="idle_prompt", message="")
                 else:
                     self.hook("StopFailure", error=str(first(x.get("error"), "Hermes gagal menyelesaikan giliran")))
+            if main and self.cron_job:
+                # A cron run is one turn: its character goes offline and leaves after 5 minutes.
+                self.hook("SessionEnd", reason="cron selesai")
+                self.end_children()
         elif ev == "on_session_finalize":
             if main:
                 self.hook("SessionEnd")
@@ -285,12 +310,13 @@ class Translator:
         self.sub["done"] = True
 
 
-def headers_for(path, cfg, body):
+def headers_for(path, cfg, body, identity=None):
     if path != "/api/hook":
         return {}
+    ident = identity or {}
     return {
-        "X-HQ-Name": cfg["name"],
-        "X-HQ-Role": cfg["role"] or "Hermes · " + hq.project_name(body.get("cwd")),
+        "X-HQ-Name": ident.get("name") or cfg["name"],
+        "X-HQ-Role": ident.get("role") or cfg["role"] or "Hermes · " + hq.project_name(body.get("cwd")),
         "X-HQ-Team": cfg["team"],
     }
 
@@ -309,18 +335,19 @@ def run(argv):
     dry = cfg["dry_run"] or "--dry-run" in argv
     now = time.time()
     with hq.State(cfg) as st:
-        requests = Translator(payload, st.data, now).run()
+        tr = Translator(payload, st.data, now)
+        requests = tr.run()
         down_until = st.data.get("down_until", 0)
     if dry:
         for path, body in requests:
-            line = {"path": path, "headers": headers_for(path, cfg, body), "body": body}
+            line = {"path": path, "headers": headers_for(path, cfg, body, tr.identity), "body": body}
             sys.stdout.write(json.dumps(line, ensure_ascii=False) + "\n")
         return
     if not requests or down_until > now:
         return
     reachable = True
     for path, body in requests:
-        status, error = hq.post(cfg, path, body, headers_for(path, cfg, body))
+        status, error = hq.post(cfg, path, body, headers_for(path, cfg, body, tr.identity))
         if status == 0:
             reachable = False
             sys.stderr.write("agent-hq: %s tidak terjangkau (%s)\n" % (cfg["url"], error))

@@ -4,13 +4,13 @@ Panduan ini menyambungkan [Hermes Agent](https://github.com/NousResearch/hermes-
 di VPS Ubuntu ke Agent HQ, supaya setiap sesi Hermes tampil sebagai karakter di kantor. Ini termasuk sesi CLI
 lewat SSH maupun sesi gateway seperti Telegram dan Discord.
 
-Ada dua sambungan. Installer memasang keduanya, dan memang paling bagus dipakai bersama:
+Ada tiga bagian. Installer memasang ketiganya, dan memang paling bagus dipakai bersama:
 
-| | Hook | MCP |
-|---|---|---|
-| Yang melapor | Hermes, otomatis di setiap event | AI-nya sendiri, saat ia memanggil tool |
-| Isinya | kerja, mikir, butuh kamu, error, bubble aksi, confetti, subagen | progres, catatan penting, temuan Red Team, alert SOC, metrik login gagal |
-| File | `examples/hermes/hq_hook.py` | `examples/hermes/hq_mcp.py` |
+| | Hook | MCP | Reporter jadwal |
+|---|---|---|---|
+| Yang melapor | Hermes, otomatis di setiap event | AI-nya sendiri, saat ia memanggil tool | service kecil di samping Hermes |
+| Isinya | kerja, mikir, butuh kamu, error, bubble aksi, confetti, subagen | progres, catatan penting, temuan Red Team, alert SOC, metrik login gagal | jadwal cron Hermes di PAPAN JADWAL, plus tombol jalankan, jeda, lanjutkan |
+| File | `examples/hermes/hq_hook.py` | `examples/hermes/hq_mcp.py` | `examples/hermes/hq_cron.py` |
 
 Kalau hook dan MCP jalan di proses Hermes yang sama, laporan MCP masuk ke karakter yang sama dengan hook.
 Satu sesi Hermes tetap satu karakter.
@@ -26,11 +26,12 @@ Satu sesi Hermes tetap satu karakter.
 7. [Izinkan hook dan cek](#7-izinkan-hook-dan-cek)
 8. [Ajari AI memakai tool MCP](#8-ajari-ai-memakai-tool-mcp)
 9. [Yang terlihat di kantor](#9-yang-terlihat-di-kantor)
-10. [Pengaturan](#10-pengaturan)
-11. [Pasang manual](#11-pasang-manual)
-12. [Masalah umum](#12-masalah-umum)
-13. [Update dan mencopot](#13-update-dan-mencopot)
-14. [Cara kerjanya](#14-cara-kerjanya)
+10. [Papan Jadwal (cron Hermes)](#10-papan-jadwal-cron-hermes)
+11. [Pengaturan](#11-pengaturan)
+12. [Pasang manual](#12-pasang-manual)
+13. [Masalah umum](#13-masalah-umum)
+14. [Update dan mencopot](#14-update-dan-mencopot)
+15. [Cara kerjanya](#15-cara-kerjanya)
 
 ## 1. Pilih tempat Agent HQ
 
@@ -38,8 +39,8 @@ Satu sesi Hermes tetap satu karakter.
 |---|---|---|
 | Hermes mengirim ke | `127.0.0.1:8787` di VPS itu sendiri | `127.0.0.1:8787` di VPS, diteruskan ke laptop lewat tunnel |
 | Cara menonton | `ssh -L` dari laptop, lalu buka `http://localhost:8787` | buka `http://localhost:8787` di laptop |
-| Saat laptop mati | kantor tetap jalan, status agen tetap tercatat | event Hermes terbuang (Hermes tetap jalan normal) |
-| Kebutuhan VPS | Node.js 24 dan RAM 2 GB untuk build (atau swap) | cukup `python3` |
+| Saat laptop mati | kantor tetap jalan, status agen dan jadwal tetap tercatat | event Hermes terbuang dan PAPAN JADWAL terputus (Hermes dan jadwalnya tetap jalan normal) |
+| Kebutuhan VPS | Node.js 20+ dan pm2, RAM 2 GB untuk build (atau swap) | cukup `python3` |
 
 Di kedua opsi, Agent HQ hanya mendengar di `127.0.0.1`. Port 8787 **tidak** dibuka ke internet; semua lewat SSH.
 
@@ -50,12 +51,13 @@ VPS Ubuntu                                                        Laptop
 ┌──────────────────────────────────────────────────┐
 │ Hermes ─ hq_hook.py ─ POST /api/hook ──┐         │
 │        └ hq_mcp.py  ─ POST /api/event ─┤         │
+│ hq_cron.py ─ jadwal dan perintah ──────┤         │
 │                                        ▼         │
 │                     Agent HQ 127.0.0.1:8787 ◄────┼── ssh -L 8787 ── browser localhost:8787
 └──────────────────────────────────────────────────┘
 ```
 
-Langkah singkat opsi A: bagian 2, 3, 4, 6, 7. Opsi B: bagian 2, 5, 6, 7.
+Langkah singkat opsi A: bagian 2, 3, 4, 6, 7. Opsi B: bagian 2, 5, 6, 7. Jadwal cron dan tombolnya ada di bagian 10.
 
 ## 2. Siapkan VPS dan pasang Hermes
 
@@ -72,7 +74,8 @@ hermes          # jalankan sekali dan ikuti setup awal (model, API key)
 Adapter hanya memakai Python bawaan Ubuntu, tanpa `pip install`. Hermes yang dibutuhkan versi yang sudah
 punya shell hooks (v2026.4.18 ke atas).
 
-Mau Hermes jalan 24 jam (Telegram, Discord, dan lain-lain)? Pasang gateway sebagai service:
+Mau Hermes jalan 24 jam (Telegram, Discord, dan lain-lain), atau memakai jadwal cron Hermes? Pasang gateway
+sebagai service. Jadwal cron dijalankan di dalam gateway, jadi tanpa gateway jadwal agen tidak pernah jalan:
 
 ```bash
 hermes gateway setup                 # pilih platform chat
@@ -83,69 +86,79 @@ hermes gateway start
 
 ## 3. Jalankan Agent HQ di VPS
 
-Lewati bagian ini kalau memakai opsi B.
+Lewati bagian ini kalau memakai opsi B. Agent HQ dijalankan dengan **pm2** lewat `start.sh` di folder repo.
 
-**Node.js 24** dari NodeSource (versi `apt` bawaan Ubuntu terlalu lama):
+**Node.js dan pm2.** Butuh Node.js 20 atau lebih baru. Versi `apt` bawaan Ubuntu terlalu lama, jadi pakai
+NodeSource:
 
 ```bash
 curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
 sudo apt install -y nodejs
-node -v
+sudo npm install -g pm2
 ```
 
-**Ambil dan build repo:**
+**Ambil repo dan jalankan:**
 
 ```bash
 git clone https://github.com/JuliAstaa/agent-hq.git ~/agent-hq
 cd ~/agent-hq
-npm ci
-npm run build
+./start.sh
 ```
 
-Kalau `git clone` ditolak (repo privat), pakai token GitHub atau deploy key. Bisa juga salin folder dari laptop
-dengan `scp -r`, tapi jangan ikut menyalin `node_modules` dan `.next`.
+`start.sh` menghentikan proses pm2 `agent-hq` yang lama kalau ada, menjalankan `git pull`, `npm install`, dan
+`npm run build`, lalu menyalakan `next start -H 127.0.0.1 -p 8787` di pm2 dengan nama `agent-hq`. Proses itu
+di-restart otomatis kalau memakai lebih dari 800 MB. Untuk update, jalankan script yang sama lagi. Kalau
+`git clone` ditolak (repo privat), pakai token GitHub atau deploy key.
 
-Build Next.js butuh sekitar 2 GB RAM. Kalau `free -h` menunjukkan kurang dari itu, atau build berhenti dengan
-`Killed`, tambahkan swap dulu:
+**Cek:**
+
+```bash
+pm2 ls                                       # agent-hq: online
+curl -s http://127.0.0.1:8787/api/health     # {"ok":true,...}
+pm2 logs agent-hq                            # log berjalan, Ctrl+C untuk keluar
+```
+
+**Tetap jalan setelah VPS reboot.** pm2 tidak otomatis menyala saat boot. Siapkan sekali:
+
+```bash
+pm2 startup     # mencetak satu perintah sudo: salin dan jalankan perintah itu
+pm2 save        # simpan daftar proses pm2
+```
+
+`start.sh` menghapus lalu membuat ulang proses `agent-hq`, jadi jalankan `pm2 save` lagi setiap selesai
+`./start.sh`.
+
+**Pakai satu pm2 saja.** pm2 milik root (`sudo pm2`) dan pm2 milik user adalah dua daemon terpisah, dan
+masing-masing punya daftar proses sendiri. Kalau keduanya menjalankan `agent-hq`, yang kedua gagal karena port
+8787 sudah dipakai. Jalankan `start.sh`, `pm2`, dan `pm2 startup` sebagai user yang sama, sebaiknya user biasa
+tanpa `sudo`. Cek keduanya dengan `pm2 ls` dan `sudo pm2 ls`. Untuk pindah dari pm2 root ke user biasa:
+
+```bash
+sudo pm2 delete agent-hq && sudo pm2 save
+sudo chown -R $USER:$USER ~/agent-hq     # file yang sempat dibuat root (node_modules, agent-hq-names.json)
+./start.sh && pm2 startup                # lalu jalankan perintah sudo yang dicetak, kemudian:
+pm2 save
+```
+
+`next start` di sini hanya mendengar di `127.0.0.1:8787`. Jangan membuka port 8787 di `ufw` atau firewall
+penyedia VPS.
+
+**RAM.** Build Next.js butuh sekitar 2 GB RAM. Kalau `free -h` menunjukkan kurang dari itu, atau build berhenti
+dengan `Killed`, tambahkan swap dulu:
 
 ```bash
 sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
 echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
 ```
 
-**Jalankan sebagai service** supaya hidup terus dan otomatis menyala setelah reboot:
+**VPS kecil (RAM 1 GB)?** Ada bridge mandiri tanpa build. Isinya halaman prototipe dengan fitur bridge yang
+sama: dari folder repo, jalankan `pm2 start examples/server.js --name agent-hq` (tanpa `start.sh`). Bridge ini
+tidak punya PAPAN JADWAL dan kontrolnya (bagian 10).
 
-```bash
-sudo tee /etc/systemd/system/agent-hq.service >/dev/null <<EOF
-[Unit]
-Description=Agent HQ
-After=network.target
-
-[Service]
-User=$USER
-WorkingDirectory=$HOME/agent-hq
-ExecStart=/usr/bin/npm start
-Restart=on-failure
-Environment=NODE_ENV=production
-
-[Install]
-WantedBy=multi-user.target
-EOF
-sudo systemctl daemon-reload
-sudo systemctl enable --now agent-hq
-curl -s http://127.0.0.1:8787/api/health     # harus menjawab {"ok":true,...}
-```
-
-`npm start` mendengar di `127.0.0.1:8787` saja. Jangan membuka port 8787 di `ufw` atau firewall penyedia VPS.
-Log: `journalctl -u agent-hq -f`.
-
-**VPS kecil (RAM 1 GB)?** Ada bridge mandiri tanpa build: ganti `ExecStart` dengan
-`/usr/bin/node examples/server.js`. Isinya halaman prototipe dengan fitur bridge yang sama, dan bisa dipakai
-tanpa `npm ci` dan `npm run build`.
-
-**Token (opsional):** di VPS yang dipakai bersama orang lain, tambahkan `Environment=HQ_TOKEN=<rahasia>` di
-service, isi `HQ_TOKEN` yang sama di `agent-hq.env` (bagian 10), lalu `sudo systemctl restart agent-hq`.
-Akibatnya, ganti nama dari tombol ✎ di kartu agen ditolak, jadi pakai `curl` dengan token (README bagian 3).
+**Token (opsional):** di VPS yang dipakai bersama orang lain, jalankan `HQ_TOKEN=<rahasia> ./start.sh` (pm2
+menyimpan env saat start), lalu isi `HQ_TOKEN` yang sama di `agent-hq.env` (bagian 11) dan restart reporter
+jadwal. Akibatnya, ganti nama dari tombol ✎ di kartu agen ditolak, jadi pakai `curl` dengan token (README
+bagian 3), dan panel jadwal meminta token itu sekali per tab browser.
 
 ## 4. Tonton dari laptop
 
@@ -155,7 +168,8 @@ Buka tunnel dari laptop (PowerShell Windows, macOS, atau Linux), biarkan jalan s
 ssh -N -L 8787:127.0.0.1:8787 user@ip-vps
 ```
 
-Lalu buka **http://localhost:8787** di browser laptop. Halaman otomatis tersambung ke data asli dari VPS.
+Lalu buka **http://localhost:8787** di browser laptop. Halaman otomatis tersambung ke data asli dari VPS, dan
+tombol di panel jadwal (bagian 10) juga jalan lewat tunnel ini.
 
 Kalau port 8787 di laptop sudah terpakai (misalnya Agent HQ lokal sedang jalan), pakai port lain:
 `ssh -N -L 9787:127.0.0.1:8787 user@ip-vps`, lalu buka `http://localhost:9787`.
@@ -176,6 +190,8 @@ Cek dari VPS: `curl -s http://127.0.0.1:8787/api/health`.
 
 - Event Hermes hanya sampai selama tunnel terbuka. Saat tunnel putus, hook diam dan mencoba lagi tiap 20 detik,
   dan Hermes tetap jalan normal.
+- Reporter jadwal di VPS juga lewat tunnel ini. Saat tunnel putus, PAPAN JADWAL menulis `TERPUTUS` dan tombolnya
+  mati, tapi jadwal Hermes tetap jalan. Begitu tunnel tersambung lagi, papan pulih sendiri dalam beberapa detik.
 - Kalau port 8787 di VPS sudah terpakai, pakai `-R 9787:127.0.0.1:8787` dan pasang adapter dengan
   `--url http://127.0.0.1:9787`.
 - Tanpa repo di VPS, salin foldernya saja dari laptop: `scp -r examples/hermes user@ip-vps:~/agent-hq-hermes`.
@@ -190,23 +206,28 @@ python3 ~/agent-hq/examples/hermes/install.py          # opsi B tanpa repo: pyth
 
 Yang dilakukan installer:
 
-- Menyalin `hq_common.py`, `hq_hook.py`, `hq_mcp.py` ke `~/.hermes/agent-hq/`. Setelah itu Hermes tidak
-  bergantung lagi pada folder repo.
+- Menyalin `hq_common.py`, `hq_hook.py`, `hq_mcp.py`, `hq_cron.py` ke `~/.hermes/agent-hq/`. Setelah itu Hermes
+  tidak bergantung lagi pada folder repo.
 - Membuat `~/.hermes/agent-hq/agent-hq.env` (alamat Agent HQ, nama default, token) kalau belum ada.
 - Menambahkan 13 hook dan server MCP `agent_hq` ke `~/.hermes/config.yaml`. Sebelumnya config disalin ke
   `config.yaml.agent-hq-<waktu>.bak`, dan hasil gabungannya diperiksa dengan parser YAML. Setting lain tidak
   disentuh.
+- Menyalakan reporter jadwal sebagai service systemd user `agent-hq-cron` (bagian 10), dan mengingatkan kalau
+  linger belum aktif.
 - Mengetes koneksi ke Agent HQ.
 
 | Pilihan | Fungsi |
 |---|---|
 | `--no-mcp` | hook saja |
 | `--no-hooks` | MCP saja |
+| `--no-cron` | tanpa reporter jadwal (PAPAN JADWAL tetap tersembunyi) |
+| `--no-service` | salin `hq_cron.py` tanpa memasang service; jalankan sendiri |
 | `--url http://127.0.0.1:9787` | alamat Agent HQ lain (disimpan di `agent-hq.env`) |
 | `--print` | salin file saja, tampilkan blok `config.yaml`, jangan ubah config |
 | `--hermes-home <folder>` | folder Hermes lain (default `$HERMES_HOME` atau `~/.hermes`) |
 
-Installer aman dijalankan ulang: file disalin ulang, blok yang sudah ada dibiarkan. Kalau keluar pesan
+Installer aman dijalankan ulang: file disalin ulang, blok yang sudah ada dibiarkan, dan reporter jadwal
+di-restart dengan kode baru. Kalau keluar pesan
 **perlu digabung manual**, berarti event itu sudah punya hook lain. Tambahkan entri yang dicetak installer ke
 daftar event itu sendiri.
 
@@ -235,7 +256,7 @@ HQ_TEAM=red            # red, report, blue, atau kosong
 
 Untuk sesi CLI, nama per sesi bisa lewat env: `HQ_NAME=Quill HQ_TEAM=report hermes`. Nama juga bisa diganti
 kapan saja dari tombol ✎ di kartu agen, dan perubahan itu permanen. Tanpa nama, karakter tampil sebagai
-`<folder>#xxxx`.
+`<folder>#xxxx`. Karakter dari jadwal cron tidak memakai `HQ_NAME`, tapi nama jadwalnya (bagian 10).
 
 **Cek:**
 
@@ -244,6 +265,8 @@ hermes hooks list                                     # 13 hook hq_hook.py beser
 hermes hooks doctor                                   # cek izin dan file hook
 hermes mcp test agent_hq                              # server MCP menjawab
 hermes hooks test pre_tool_call --for-tool terminal   # karakter muncul dengan status kerja
+systemctl --user status agent-hq-cron                 # reporter jadwal: active (running)
+python3 ~/.hermes/agent-hq/hq_cron.py --once          # jadwal yang dikirim ke kantor, tanpa jaringan
 ```
 
 Tes adapter tanpa Hermes. Dengan `--dry-run` permintaannya hanya dicetak. Tanpa `--dry-run` benar-benar dikirim:
@@ -309,6 +332,7 @@ kamu kantongi izin tertulisnya.
 | Giliran gagal tanpa jawaban | Error: merah dan berasap |
 | `delegate_task` (subagen) | Karakter baru dengan nama dari tujuannya, pergi sekitar 45 detik setelah selesai |
 | Keluar dari Hermes, `/new`, atau sesi gateway ditutup | Offline, hilang setelah 5 menit |
+| Jadwal cron jalan | Karakter bernama sesuai jadwal (peran `Cron · <jadwal>`), offline begitu selesai, hilang 5 menit kemudian. Jadwalnya sendiri tampil di PAPAN JADWAL (bagian 10) |
 
 Tool Hermes yang dikenali: `terminal`, `read_file`, `write_file`, `patch`, `search_files`, `session_search`,
 `web_search`, `web_extract`, `browser_navigate`, `delegate_task`, `todo`, `skill_view`, `skills_list`. Tool lain
@@ -319,7 +343,68 @@ tampil dengan namanya sendiri.
   bersama semua sesi, jadi laporannya masuk ke sesi yang terakhir aktif.
 - **Token** di kartu agen tetap kosong untuk Hermes, karena Agent HQ membaca token dari transcript Claude Code.
 
-## 10. Pengaturan
+## 10. Papan Jadwal (cron Hermes)
+
+Jadwal cron Hermes tampil di **PAPAN JADWAL**, papan gelap di dinding belakang Lt.2, di kanan jam dinding. Papan
+ini muncul begitu reporter jadwal (`hq_cron.py`) tersambung, dan tersembunyi kalau tidak ada reporter.
+
+- **Isi papan:** maksimal 5 jadwal, masing-masing dengan titik warna status, nama, jadwalnya (`0 9 * * *`,
+  `every 30m`), dan hitung mundur ke jalan berikutnya. Jadwal yang sedang jalan berkedip hijau, dan lonceng di
+  atas papan berbunyi. Pojok kanan atas menunjukkan `AKTIF` (scheduler Hermes jalan), `SCHEDULER MATI` (gateway
+  mati, jadwal agen tidak akan jalan), atau `TERPUTUS` (tidak ada kabar dari reporter selama 90 detik).
+- **Panel kontrol:** klik papannya di tampilan Lt.2 Kantor, atau tombol **Jadwal** di kanan atas. Tiap jadwal
+  punya tombol:
+  - **Jalankan sekarang** (`hermes cron run <id>`): mulai di tick berikutnya, paling lama 1 menit. Perlu dua kali
+    klik, karena setiap jalan memakai token model.
+  - **Jeda** dan **Lanjutkan** (`hermes cron pause|resume <id>`).
+
+  Hasilnya muncul di panel, di Log Aktivitas (dengan nama `Jadwal`), dan sebagai notifikasi. Tombol hanya aktif
+  kalau halaman tersambung ke Agent HQ itu sendiri lewat `/api/stream` (misalnya lewat tunnel di bagian 4),
+  reporter tersambung, dan perintah sebelumnya untuk jadwal itu sudah selesai. Di mode demo panel hanya bisa dilihat.
+- **Saat jadwal jalan**, sesi cron Hermes tampil sebagai karakter bernama sesuai jadwalnya, dengan peran
+  `Cron · <jadwal>`. Ia mengambil kartu di Papan Tugas, bekerja, merayakan dengan confetti, lalu offline dan hilang
+  5 menit kemudian. Bagian ini butuh hook yang terpasang (bagian 6) dan sudah diizinkan (bagian 7). Jadwal yang
+  sangat sering (misalnya tiap menit) membuat banyak karakter sekaligus, padahal meja kantor maksimal 9.
+- **Membuat, mengubah, dan menghapus** jadwal tetap lewat Hermes (`/cron` di chat atau `hermes cron create`).
+  Dari kantor hanya bisa jalankan, jeda, dan lanjutkan.
+
+| Warna titik | Status |
+|---|---|
+| hijau berkedip | Jalan |
+| kuning | Segera (kurang dari 1 menit) |
+| biru | Terjadwal |
+| merah | Gagal (jalan terakhir gagal) |
+| abu-abu | Jeda |
+| ungu | Selesai (jadwal sekali jalan) |
+
+**Reporter jadwal** dipasang installer (bagian 6) sebagai service systemd milik user, di samping service
+`hermes-gateway`. Seperti gateway, ia butuh linger (`sudo loginctl enable-linger $USER`) agar tetap jalan setelah
+logout SSH.
+
+```bash
+systemctl --user status agent-hq-cron      # jalan?
+journalctl --user -u agent-hq-cron -f      # log, termasuk setiap perintah dari kantor
+systemctl --user restart agent-hq-cron     # setelah mengubah agent-hq.env
+```
+
+Tanpa systemd, jalankan `python3 ~/.hermes/agent-hq/hq_cron.py` lewat pm2 atau tmux, sebagai user Hermes.
+Dengan `HQ_DISABLE=1` reporter berhenti sendiri dan tetap berhenti. Setelah menghapusnya, jalankan
+`systemctl --user restart agent-hq-cron`.
+
+**Keamanan kontrol:**
+
+- Agent HQ sendiri tidak menjalankan apa pun. Ia hanya meneruskan perintah ke reporter. Reporter mengecek ulang
+  (aksinya diizinkan, jadwalnya ada di Hermes), lalu menjalankan `hermes cron` sebagai user Hermes, tanpa shell.
+- `/api/cron` menolak permintaan dari situs lain yang terbuka di browser yang sama: ia mengecek `Origin` dan
+  `Sec-Fetch-Site` dan tidak memberi header CORS. Jadi halaman web lain tidak bisa memicu jadwal lewat tunnel
+  `localhost:8787`.
+- Kalau Agent HQ memakai `HQ_TOKEN`, panel meminta token sekali dan menyimpannya hanya untuk tab itu. Reporter
+  memakai token yang sama dari `agent-hq.env`.
+- Prompt jadwal tidak pernah dikirim ke Agent HQ. Nama dan pesan error disensor dulu, dan tujuan pengiriman hanya
+  dikirim nama platformnya (tanpa ID chat).
+- Mau lihat saja tanpa kontrol? Set `HQ_CRON_CONTROLS=none` di `agent-hq.env`, lalu restart reporter.
+
+## 11. Pengaturan
 
 Semua pengaturan ada di `~/.hermes/agent-hq/agent-hq.env`. Env var dengan nama sama selalu menang, tapi env
 dari shell hanya sampai ke sesi CLI, tidak ke gateway dan tidak ke server MCP. Jadi di VPS, isi file ini.
@@ -333,11 +418,14 @@ dari shell hanya sampai ke sesi CLI, tidak ke gateway dan tidak ke server MCP. J
 | `HQ_TEAM` | kosong | `red`, `report`, `blue`: agen pindah ke ruangannya di Lt.3 |
 | `HQ_TIMEOUT` | `1.5` | batas tunggu kirim ke Agent HQ, dalam detik |
 | `HQ_ANNOUNCE` | mati | khusus MCP tanpa hook: karakter muncul begitu Hermes menyala |
-| `HQ_DISABLE` | mati | `1` mematikan adapter tanpa mengubah `config.yaml` |
+| `HQ_DISABLE` | mati | `1` mematikan hook, MCP, dan reporter jadwal tanpa mengubah `config.yaml` |
 | `HQ_STATE_DIR` | `~/.cache/agent-hq` | catatan sesi yang dipakai bersama hook dan MCP |
+| `HQ_CRON_CONTROLS` | `run,pause,resume` | aksi yang boleh dari panel jadwal; `none` = lihat saja |
+| `HQ_CRON_SOURCE` | `Hermes di <hostname>` | label sumber jadwal di panel |
+| `HQ_HERMES_BIN` | dicari otomatis | path ke perintah `hermes` untuk reporter jadwal (installer mengisinya di service) |
 
-Perubahan di file ini langsung berlaku untuk hook. Server MCP membacanya saat mulai, jadi jalankan
-`hermes gateway restart` atau buka ulang `hermes`.
+Perubahan di file ini langsung berlaku untuk hook. Server MCP dan reporter jadwal membacanya saat mulai, jadi
+jalankan `hermes gateway restart` (atau buka ulang `hermes`) dan `systemctl --user restart agent-hq-cron`.
 
 Kalau Agent HQ tidak terjangkau, hook berhenti mengirim selama 20 detik lalu mencoba lagi. Hermes tetap jalan
 normal.
@@ -346,13 +434,13 @@ normal.
 langsung muncul saat Hermes menyala. Jangan nyalakan `HQ_ANNOUNCE` kalau hook juga terpasang, karena hasilnya
 dua karakter untuk satu Hermes.
 
-## 11. Pasang manual
+## 12. Pasang manual
 
 Kalau tidak mau memakai installer:
 
 ```bash
 mkdir -p ~/.hermes/agent-hq
-cp ~/agent-hq/examples/hermes/{hq_common.py,hq_hook.py,hq_mcp.py} ~/.hermes/agent-hq/
+cp ~/agent-hq/examples/hermes/{hq_common.py,hq_hook.py,hq_mcp.py,hq_cron.py} ~/.hermes/agent-hq/
 cp ~/agent-hq/examples/hermes/agent-hq.env.example ~/.hermes/agent-hq/agent-hq.env
 python3 ~/agent-hq/examples/hermes/install.py --print    # mencetak blok config.yaml dengan path yang benar
 ```
@@ -380,11 +468,34 @@ mcp_servers:
 Kalau `hooks:` atau `mcp_servers:` sudah ada di config, tambahkan isinya di bawah kunci yang sudah ada. Jangan
 menulis kunci yang sama dua kali, karena kunci yang terakhir akan menimpa yang pertama.
 
-## 12. Masalah umum
+Reporter jadwal sebagai service user, di `~/.config/systemd/user/agent-hq-cron.service`:
+
+```ini
+[Unit]
+Description=Agent HQ: jadwal cron Hermes ke PAPAN JADWAL
+After=network-online.target
+
+[Service]
+ExecStart="/usr/bin/python3" "/home/kamu/.hermes/agent-hq/hq_cron.py"
+Environment="HERMES_HOME=/home/kamu/.hermes"
+Environment="HQ_HERMES_BIN=/home/kamu/.local/bin/hermes"
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+```
+
+Lalu `systemctl --user daemon-reload && systemctl --user enable --now agent-hq-cron`.
+
+## 13. Masalah umum
 
 | Masalah | Penyebab dan solusi |
 |---|---|
-| Kantor tidak berubah sama sekali | Di VPS: `curl -s http://127.0.0.1:8787/api/health`. Kalau gagal, cek `systemctl status agent-hq` (opsi A) atau tunnel `ssh -R` (opsi B). Kalau berhasil, cek `hermes hooks list` (izin), lalu tes kirim manual (bagian 7). |
+| Kantor tidak berubah sama sekali | Di VPS: `curl -s http://127.0.0.1:8787/api/health`. Kalau gagal, cek `pm2 ls` dan `pm2 logs agent-hq` (opsi A) atau tunnel `ssh -R` (opsi B). Kalau berhasil, cek `hermes hooks list` (izin), lalu tes kirim manual (bagian 7). |
+| `agent-hq` di pm2 restart terus, log berisi `EADDRINUSE` | Port 8787 sudah dipakai, biasanya oleh `agent-hq` kedua di pm2 milik user lain. Cek `pm2 ls` dan `sudo pm2 ls`, lalu sisakan satu (bagian 3). |
+| Agent HQ mati setelah VPS reboot | `pm2 startup` belum disiapkan, atau `pm2 save` lupa diulang setelah `./start.sh` (bagian 3). |
+| `npm install` di `start.sh` gagal dengan `EACCES` | Ada file milik root di folder repo. Jalankan `sudo chown -R $USER:$USER ~/agent-hq`. |
 | Sesi CLI muncul, sesi gateway tidak | Gateway tidak pernah menanyakan izin. Izinkan lewat `hermes` interaktif, lalu `hermes gateway restart` (bagian 7). |
 | Halaman di laptop tidak terbuka | Tunnel `ssh -L` belum jalan atau sudah putus. Kalau keluar `bind: Address already in use`, port di laptop terpakai: pakai `-L 9787:...`. |
 | `remote port forwarding failed` (opsi B) | Port 8787 di VPS terpakai, atau `AllowTcpForwarding no` di `/etc/ssh/sshd_config`. Pakai port lain (`-R 9787:...` dan `--url`), atau izinkan forwarding lalu `sudo systemctl restart ssh`. |
@@ -396,23 +507,31 @@ menulis kunci yang sama dua kali, karena kunci yang terakhir akan menimpa yang p
 | Tes kirim manual menulis `HTTP 401 (HQ_TOKEN salah?)` | `HQ_TOKEN` di `agent-hq.env` berbeda dengan token di service Agent HQ. |
 | Tes kirim manual menulis `tidak terjangkau` | Agent HQ mati atau `HQ_URL` salah. Setelah gagal, hook diam 20 detik sebelum mencoba lagi, jadi tunggu sebentar sebelum tes ulang. |
 | Subagen tidak pergi | Subagen pergi 45 detik setelah `subagent_stop`, atau saat induknya memberi jawaban akhir. |
+| PAPAN JADWAL tidak muncul | Reporter belum jalan: `systemctl --user status agent-hq-cron`. Papan hanya ada di app Next.js, bukan di `examples/server.js`. |
+| Papan menulis `TERPUTUS` | Reporter mati atau tidak bisa menghubungi `HQ_URL`. Cek `journalctl --user -u agent-hq-cron`. |
+| Papan menulis `SCHEDULER MATI` | Gateway Hermes mati: `hermes gateway status`, lalu `hermes gateway start`. Tanpa gateway, jadwal agen tidak jalan. |
+| Tombol di panel jadwal abu-abu | Halaman tidak tersambung lewat `/api/stream`, reporter terputus, atau perintah sebelumnya untuk jadwal itu belum selesai. |
+| "Jalankan sekarang" berhasil, tapi jadwal tidak jalan | Jadwal mulai di tick berikutnya (paling lama 1 menit) di dalam gateway. Kalau papan menulis `SCHEDULER MATI`, nyalakan gateway dulu. |
+| Meja kantor penuh oleh karakter cron | Jadwalnya jalan sangat sering. Tiap jalan jadi karakter sendiri selama sekitar 5 menit; perjarang jadwalnya di Hermes. |
+| Perintah gagal `perintah hermes tidak ditemukan` | Tulis `HQ_HERMES_BIN=/home/<user>/.local/bin/hermes` di `agent-hq.env`, lalu restart reporter. |
 | Hermes terasa lebih lambat | Tiap event menjalankan `python3` sebentar (puluhan milidetik). Hapus event yang tidak perlu dari `config.yaml`, misalnya `post_tool_call`. |
 
-## 13. Update dan mencopot
+## 14. Update dan mencopot
 
 **Update** setelah repo berubah:
 
 ```bash
-cd ~/agent-hq && git pull
-npm ci && npm run build && sudo systemctl restart agent-hq   # opsi A
-python3 examples/hermes/install.py                           # salin ulang adapter
-hermes gateway restart                                       # kalau memakai gateway
+cd ~/agent-hq
+./start.sh && pm2 save                  # opsi A: pull, build, restart Agent HQ (opsi B: cukup git pull)
+python3 examples/hermes/install.py      # salin ulang adapter, restart reporter jadwal
+hermes gateway restart                  # kalau memakai gateway
 ```
 
 **Mencopot adapter:**
 
 ```bash
 hermes hooks revoke "/usr/bin/python3 /home/kamu/.hermes/agent-hq/hq_hook.py"   # cabut izin hook
+systemctl --user disable --now agent-hq-cron && rm ~/.config/systemd/user/agent-hq-cron.service
 rm -rf ~/.hermes/agent-hq ~/.cache/agent-hq
 ```
 
@@ -421,10 +540,9 @@ Kalau config belum diubah lagi sejak instalasi, cukup kembalikan cadangannya:
 `cp ~/.hermes/config.yaml.agent-hq-<waktu>.bak ~/.hermes/config.yaml`. Untuk mematikan sementara, cukup set
 `HQ_DISABLE=1` di `agent-hq.env`.
 
-**Mencopot Agent HQ di VPS:**
-`sudo systemctl disable --now agent-hq && sudo rm /etc/systemd/system/agent-hq.service && rm -rf ~/agent-hq`.
+**Mencopot Agent HQ di VPS:** `pm2 delete agent-hq && pm2 save && rm -rf ~/agent-hq`.
 
-## 14. Cara kerjanya
+## 15. Cara kerjanya
 
 - `hq_hook.py` menerima satu event Hermes lewat stdin, menerjemahkannya ke format hook Claude Code, lalu
   mengirimnya ke `/api/hook`. Jadi sensor, papan tugas, subagen, dan rename di bridge sama persis dengan
@@ -435,7 +553,16 @@ Kalau config belum diubah lagi sejak instalasi, cukup kembalikan cadangannya:
   id sesi Hermes diawali tanggal.
 - `~/.cache/agent-hq/hermes-state.json` mencatat sesi tiap proses Hermes dan subagen yang sedang jalan. Hook
   dan server MCP sama-sama anak dari proses Hermes, sehingga `hq_mcp.py` bisa menemukan karakter milik hook.
+- `hq_cron.py` membaca `~/.hermes/cron/jobs.json`, `executions.db` (jadwal yang sedang jalan) dan `ticker_heartbeat`
+  (scheduler hidup), lalu mengirim event `schedule` ke `/api/event` saat ada perubahan dan setiap 30 detik. Perintah
+  dari panel masuk antrian di bridge (`POST /api/cron`); reporter mengambilnya dengan long poll
+  (`GET /api/cron/commands`) dan melapor lewat `POST /api/cron/result`. Perintah yang tidak dijawab dalam 90 detik
+  dianggap gagal. Sesi cron Hermes ber-id `cron_<id jadwal>_<waktu>`, jadi hook bisa menamai karakternya sesuai
+  jadwal.
 - Teks dari MCP disensor di Python dengan pola yang sama dengan `lib/bridge/redact.ts`, karena `/api/event`
   tidak menyensor apa pun.
-- Tes: `tests/integration/hermes.test.ts` (ikut `npm test`, dilewati kalau tidak ada Python 3). Nama event dan
-  isi payload mengikuti dokumentasi hooks Hermes. Kalau Hermes mengubahnya, sesuaikan `hq_hook.py`.
+- Tes (ikut `npm test`): `tests/integration/hermes.test.ts` untuk hook, MCP, installer, dan reporter jadwal
+  (dilewati kalau tidak ada Python 3), `tests/integration/cron-routes.test.ts` untuk endpoint `/api/cron` di
+  `next start` (butuh `npm run build`), serta `tests/unit/cron.test.ts` dan `tests/unit/bridge-cron.test.ts`.
+  Nama event, isi payload, format `jobs.json`, dan id sesi cron mengikuti dokumentasi dan kode Hermes. Kalau
+  Hermes mengubahnya, sesuaikan `hq_hook.py` dan `hq_cron.py`.

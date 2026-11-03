@@ -126,6 +126,36 @@ def project_name(cwd):
     return os.path.basename(os.path.normpath(str(cwd or ""))) or "hermes"
 
 
+# ------------------------------------------------------------------ hermes cron
+
+def hermes_home():
+    return os.path.expanduser(os.environ.get("HERMES_HOME") or "~/.hermes")
+
+
+def load_cron_jobs(cron_dir=None):
+    """Hermes cron jobs.json -> list of job dicts ({"jobs": [...]}, a bare list, or an id map). Odd content -> []."""
+    path = os.path.join(cron_dir or os.path.join(hermes_home(), "cron"), "jobs.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return []
+    jobs = data.get("jobs") if isinstance(data, dict) else data
+    if isinstance(jobs, dict):
+        jobs = list(jobs.values())
+    return [j for j in jobs if isinstance(j, dict)] if isinstance(jobs, list) else []
+
+
+def schedule_text(job):
+    """Human schedule of a Hermes job: schedule_display, else schedule.display / .expr."""
+    sched = job.get("schedule")
+    if job.get("schedule_display"):
+        return str(job["schedule_display"])
+    if isinstance(sched, dict):
+        return str(sched.get("display") or sched.get("expr") or "")
+    return str(sched or "")
+
+
 # ------------------------------------------------------------------ ids
 
 def short_hash(value, n):
@@ -249,6 +279,21 @@ def request(cfg, method, path, body=None, headers=None):
 
 def post(cfg, path, body, headers=None):
     return request(cfg, "POST", path, body, headers)
+
+
+def get_json(cfg, path, timeout):
+    """GET a JSON answer from Agent HQ. Returns (status, error, data): status 0 means not reachable."""
+    h = {"Authorization": "Bearer " + cfg["token"]} if cfg["token"] else {}
+    req = urllib.request.Request(cfg["url"] + path, headers=h, method="GET")
+    try:
+        with _OPENER.open(req, timeout=timeout) as res:
+            return res.status, "", json.loads(res.read().decode("utf-8") or "null")
+    except urllib.error.HTTPError as e:
+        return e.code, "HTTP %d%s" % (e.code, " (HQ_TOKEN salah?)" if e.code == 401 else ""), None
+    except ValueError as e:
+        return 0, "jawaban bukan JSON: %s" % e, None
+    except (urllib.error.URLError, OSError) as e:
+        return 0, str(getattr(e, "reason", e)), None
 
 
 def main(argv):

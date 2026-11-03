@@ -232,6 +232,10 @@ Semua URL tersedia dalam dua bentuk: dengan awalan `/api` dan tanpa (sama sepert
 | `GET /api/stream` atau `/stream` | aliran data (SSE) untuk halaman kantor |
 | `GET /api/agents` atau `/agents` | daftar agen |
 | `GET /api/health` atau `/health` | status singkat (jumlah agen dan penonton) |
+| `POST /api/cron` | perintah dari panel PAPAN JADWAL: jalankan, jeda, lanjutkan (hanya dari halaman Agent HQ sendiri) |
+| `GET /api/cron/commands`, `POST /api/cron/result` | dipakai reporter jadwal Hermes (`docs/hermes.md` bagian 10) |
+
+Endpoint `/api/cron` hanya ada dengan awalan `/api` dan hanya di app Next.js (tidak di `examples/server.js`).
 
 ## 9. Keamanan
 

@@ -1,6 +1,7 @@
 // GET /api/stream: Server-Sent Events. New viewers get a snapshot, then the last 30 log/finding/alert
 // events with _replay: true (so alerts do not re-trigger the siren), then live events.
 import { CORS_HEADERS, preflight } from "@/lib/bridge/auth";
+import { scheduleForViewer } from "@/lib/bridge/cron";
 import { hub, type BridgeEvent } from "@/lib/bridge/hub";
 
 export const runtime = "nodejs";
@@ -15,6 +16,8 @@ export async function GET(req: Request) {
       const send = (ev: BridgeEvent) => write(`data: ${JSON.stringify(ev)}\n\n`);
       write("retry: 2000\n\n");
       send({ type: "snapshot", agents: [...hub.agents.values()] });
+      const schedule = scheduleForViewer(); // scheduled jobs (not in the prototype)
+      if (schedule) send(schedule);
       for (const ev of hub.recent.slice(-30)) send({ ...ev, _replay: true });
       hub.subs.add(send);
       const ping = setInterval(() => {

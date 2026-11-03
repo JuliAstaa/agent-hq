@@ -2,6 +2,7 @@
 // Pure functions, shared by the client store and the bridge tests. Ported from applyEvent() in
 // references/agent-hq.html; the store applies the normalized result.
 
+import { normalizeCronCommand, normalizeSchedule, type CronCmd, type CronState } from "./cron";
 import { normalizeTeam, type Dept } from "./teams";
 
 export type Status = "working" | "thinking" | "waiting" | "idle" | "error" | "offline";
@@ -97,7 +98,11 @@ export type HQEvent =
   | { kind: "alert"; agentId: string | null; sev: Severity; text: string; ip: string; replay: boolean; agent: AgentPatch | null }
   | { kind: "finding"; agentId: string | null; sev: Severity; title: string; node: AttackNode; agent: AgentPatch | null }
   | { kind: "remove"; id: string }
-  | { kind: "agent"; agent: AgentPatch };
+  | { kind: "agent"; agent: AgentPatch }
+  /** Scheduled jobs snapshot (Hermes cron). Never an agent. */
+  | { kind: "schedule"; cron: Omit<CronState, "receivedAt">; ageMs: number }
+  /** Progress of a control command from the schedule panel. */
+  | { kind: "cron_command"; cmd: CronCmd };
 
 export function eventType(ev: RawEvent): string {
   return String(ev.type || ev.event || (ev.message && !ev.status ? "log" : "agent_update")).toLowerCase();
@@ -160,6 +165,11 @@ export function normalizeEvent(input: unknown, now = Date.now()): HQEvent[] {
   if (type === "snapshot") {
     const list = Array.isArray(ev.agents) ? ev.agents : [];
     return list.flatMap((x) => normalizeEvent({ ...(x as object), type: "agent_update", _quiet: true, _snap: true }, now));
+  }
+  if (type === "schedule") return [{ kind: "schedule", ...normalizeSchedule(ev) }];
+  if (type === "cron_command") {
+    const cmd = normalizeCronCommand(ev);
+    return cmd ? [{ kind: "cron_command", cmd }] : [];
   }
   const rawId = rawAgentId(ev);
   const id = String(rawId ?? "agent");

@@ -337,3 +337,113 @@ suite("installer (install.py)", { timeout: 30_000 }, () => {
     expect(r.stdout).toContain("Pasang Hermes dulu");
   });
 });
+
+/** A Hermes home with two cron jobs, a fresh ticker heartbeat, and executions.db (one live run, one stuck claim). */
+function fakeHermesHome(): string {
+  const home = tmp();
+  fs.mkdirSync(path.join(home, "cron"));
+  fs.writeFileSync(path.join(home, "cron", "jobs.json"), JSON.stringify({
+    jobs: [
+      { id: "a1b2c3d4e5f6", name: "Laporan harian token=abc123", prompt: "RAHASIA jangan dikirim", schedule: { kind: "cron", expr: "0 9 * * *", display: "0 9 * * *" }, schedule_display: "0 9 * * *", enabled: true, state: "scheduled", next_run_at: "2026-11-04T09:00:00+08:00", last_run_at: "2026-11-03T09:00:02+08:00", last_status: "ok", failure_streak: 0, deliver: "telegram:-100123456" },
+      { id: "0f9e8d7c6b5a", name: "Cek SSH", prompt: "x", schedule: { kind: "interval", minutes: 30, display: "every 30m" }, enabled: false, state: "paused", next_run_at: null, last_run_at: "2026-11-03T12:30:00", last_status: "error", last_error: "API key sk-abcdefghijklmnop invalid", failure_streak: 3, deliver: "local" },
+    ],
+    updated_at: "2026-11-03T12:00:00+08:00",
+  }));
+  fs.writeFileSync(path.join(home, "cron", "ticker_heartbeat"), `${Date.now() / 1000} 1234`);
+  const r = spawnSync(PY, ["-c", [
+    "import sqlite3, sys",
+    "c = sqlite3.connect(sys.argv[1])",
+    "c.execute('create table executions (id text primary key, job_id text, status text, claimed_at text, progress_at text)')",
+    "c.executemany('insert into executions values (?,?,?,?,?)', [('e1', '0f9e8d7c6b5a', 'running', sys.argv[2], sys.argv[2]), ('e2', 'a1b2c3d4e5f6', 'claimed', '2020-01-01T00:00:00+00:00', None)])",
+    "c.commit()",
+  ].join("\n"), path.join(home, "cron", "executions.db"), new Date().toISOString()], { encoding: "utf8", env: cleanEnv({}) });
+  expect(r.status).toBe(0);
+  return home;
+}
+
+suite("Hermes cron (hq_cron.py and the hook)", { timeout: 30_000 }, () => {
+  const CRON = path.join(DIR, "hq_cron.py");
+
+  it("snapshot: no prompts or chat ids, redacted, running only with recent progress", () => {
+    const home = fakeHermesHome();
+    const r = spawnSync(PY, [CRON, "--once"], { encoding: "utf8", env: cleanEnv({ HERMES_HOME: home, HQ_ENV_FILE: path.join(home, "none.env"), HQ_CRON_SOURCE: "Hermes uji" }) });
+    expect(r.status).toBe(0);
+    expect(r.stdout).not.toMatch(/RAHASIA|-100123456|abc123|sk-abc/);
+    const snap = JSON.parse(r.stdout);
+    expect(snap).toMatchObject({ type: "schedule", source: "Hermes uji", controls: ["run", "pause", "resume"], scheduler: { alive: true } });
+    expect(snap.jobs).toEqual([
+      { id: "a1b2c3d4e5f6", name: "Laporan harian token=***", schedule: "0 9 * * *", next_run_at: Date.parse("2026-11-04T09:00:00+08:00"), last_run_at: Date.parse("2026-11-03T09:00:02+08:00"), last_status: "ok", last_error: "", state: "scheduled", enabled: true, running: false, failure_streak: 0, deliver: "telegram" },
+      { id: "0f9e8d7c6b5a", name: "Cek SSH", schedule: "every 30m", next_run_at: null, last_run_at: new Date("2026-11-03T12:30:00").getTime(), last_status: "error", last_error: "API key *** invalid", state: "paused", enabled: false, running: true, failure_streak: 3, deliver: "local" },
+    ]);
+    const viewOnly = spawnSync(PY, [CRON, "--once"], { encoding: "utf8", env: cleanEnv({ HERMES_HOME: home, HQ_ENV_FILE: path.join(home, "none.env"), HQ_CRON_CONTROLS: "none" }) });
+    expect(JSON.parse(viewOnly.stdout).controls).toEqual([]);
+  });
+
+  it("runs office commands as `hermes cron`, after checking them again, and reports back", async () => {
+    const home = fakeHermesHome();
+    const calls = path.join(home, "calls.txt");
+    const fake = path.join(home, "fake_hermes.py");
+    fs.writeFileSync(fake, [
+      "import json, os, sys",
+      "open(os.environ['FAKE_HERMES_LOG'], 'a').write(json.dumps(sys.argv[1:]) + chr(10))",
+      "print(chr(27) + '[32mPaused job Cek SSH' + chr(27) + '[0m')", // colored, like the real CLI
+    ].join("\n") + "\n");
+    const events: Record<string, unknown>[] = [];
+    const results: Record<string, unknown>[] = [];
+    let served = false;
+    const server = http.createServer((req, res) => {
+      let data = "";
+      req.on("data", (c) => (data += c));
+      req.on("end", () => {
+        if (req.url === "/api/event") {
+          events.push(JSON.parse(data));
+          res.writeHead(202).end("{}");
+        } else if (req.url?.startsWith("/api/cron/commands")) {
+          const commands = served ? [] : [
+            { id: "c-1", action: "pause", job: "0f9e8d7c6b5a" },
+            { id: "c-2", action: "run", job: "ffffffffffff" },
+            { id: "c-3", action: "remove", job: "a1b2c3d4e5f6" },
+          ];
+          served = true;
+          setTimeout(() => res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ ok: true, commands })), commands.length ? 0 : 300);
+        } else if (req.url === "/api/cron/result") {
+          results.push(JSON.parse(data));
+          res.writeHead(200).end("{}");
+        } else res.writeHead(404).end();
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const child = spawn(PY, [CRON], { env: cleanEnv({ HERMES_HOME: home, HQ_ENV_FILE: path.join(home, "none.env"), HQ_URL: url, HQ_HERMES_BIN: fake, FAKE_HERMES_LOG: calls }), stdio: "ignore" });
+    try {
+      for (let i = 0; i < 150 && results.length < 3; i++) await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      child.kill();
+      server.close();
+    }
+    expect(results).toEqual([
+      { id: "c-1", ok: true, message: "Paused job Cek SSH" },
+      { id: "c-2", ok: false, message: "jadwal tidak ada di Hermes" },
+      { id: "c-3", ok: false, message: "aksi ini dimatikan di reporter (HQ_CRON_CONTROLS)" },
+    ]);
+    expect(fs.readFileSync(calls, "utf8").trim().split("\n").map((l) => JSON.parse(l))).toEqual([["cron", "pause", "0f9e8d7c6b5a"]]);
+    expect(events[0]).toMatchObject({ type: "schedule", controls: ["run", "pause", "resume"] });
+  });
+
+  it("hook: a cron run is its own character named after the job, offline when the run ends", () => {
+    const home = fakeHermesHome();
+    const state = tmp();
+    const CRON_SID = "cron_a1b2c3d4e5f6_20261103_090000";
+    const run = (p: Record<string, unknown>) => hermesHook(state, { session_id: CRON_SID, cwd: "/home/ubuntu", ...p }, { HERMES_HOME: home, HQ_NAME: "Rexx" });
+    const start = run({ hook_event_name: "on_session_start" });
+    expect(start[0].headers).toMatchObject({ "X-HQ-Name": "Laporan harian token=***", "X-HQ-Role": "Cron · 0 9 * * *" });
+    expect(toEvents(start)[0]).toMatchObject({ name: "Laporan harian token=***", role: "Cron · 0 9 * * *", status: "idle" });
+    run({ hook_event_name: "pre_llm_call", extra: { user_message: "kirim laporan harian" } });
+    expect(toEvents(run({ hook_event_name: "post_llm_call", extra: { assistant_response: "terkirim" } }))[0]).toMatchObject({ type: "task_done" });
+    expect(toEvents(run({ hook_event_name: "on_session_end", extra: { completed: true, interrupted: false } }))).toEqual([
+      expect.objectContaining({ status: "offline", task: "Sesi selesai (cron selesai)" }),
+    ]);
+    // hq_mcp.py of this process keeps reporting for the interactive session, not for the cron run
+    expect(JSON.parse(fs.readFileSync(path.join(state, "hermes-state.json"), "utf8")).procs[String(process.pid)]).toBeUndefined();
+  });
+});

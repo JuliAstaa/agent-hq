@@ -7,6 +7,30 @@ import { IDENTITY_FIELDS, loadOverrides, mergeOverride, namesFile, saveOverrides
 export type BridgeEvent = Record<string, unknown>;
 export type Send = (ev: BridgeEvent) => void;
 
+/** A schedule-panel command (./cron.ts) as the bridge tracks and broadcasts it. */
+export interface BridgeCmd {
+  id: string;
+  action: string;
+  job: string;
+  job_name: string;
+  status: "queued" | "sent" | "ok" | "error";
+  message: string;
+  at: number;
+}
+
+/** Scheduled jobs (docs/hermes.md "Jadwal"): latest snapshot from the schedule source and the command queue. */
+export interface CronHub {
+  schedule: BridgeEvent | null;
+  /** Date.now() when `schedule` arrived. */
+  scheduleAt: number;
+  /** Insertion order = age; trimmed by ./cron.ts. */
+  cmds: Map<string, BridgeCmd>;
+  /** Long-polling reporters waiting for a command. */
+  waiters: Set<() => void>;
+}
+
+const newCronHub = (): CronHub => ({ schedule: null, scheduleAt: 0, cmds: new Map(), waiters: new Set() });
+
 interface Hub {
   /** id -> last known agent state (snapshot for new viewers). */
   agents: Map<string, BridgeEvent>;
@@ -21,6 +45,7 @@ interface Hub {
   overridesFile: string;
   /** id -> identity as last sent by the agent itself (fallback when an override is cleared). */
   sourceIdentity: Map<string, Identity>;
+  cron: CronHub;
 }
 
 const g = globalThis as unknown as { __hq?: Hub };
@@ -33,6 +58,7 @@ export const hub: Hub = (g.__hq ??= {
   overrides: loadOverrides(),
   overridesFile: namesFile(),
   sourceIdentity: new Map(),
+  cron: newCronHub(),
 });
 // A hub kept on globalThis by an older bundle (next dev reload) may predate the rename fields.
 if (!hub.overrides) {
@@ -40,6 +66,7 @@ if (!hub.overrides) {
   hub.overrides = loadOverrides(hub.overridesFile);
 }
 hub.sourceIdentity ??= new Map();
+hub.cron ??= newCronHub();
 
 const AGENT_KEYS = ["name", "role", "status", "state", "task", "current_task", "progress", "tokens", "cost", "team"];
 
@@ -47,6 +74,13 @@ export const idOf = (ev: BridgeEvent): string => String(ev.id ?? ev.agent_id ?? 
 
 export function remember(ev: BridgeEvent): void {
   const type = String(ev.type || "agent_update").toLowerCase();
+  // Scheduled jobs are not agents: keep the latest snapshot for new viewers; commands are tracked by ./cron.ts.
+  if (type === "schedule") {
+    hub.cron.schedule = ev;
+    hub.cron.scheduleAt = Date.now();
+    return;
+  }
+  if (type === "cron_command") return;
   const id = idOf(ev);
   hub.lastSeen.set(id, Date.now());
   if (type === "remove") {
@@ -230,4 +264,6 @@ export function resetHub(): void {
   hub.removeTimers.clear();
   hub.subs.clear();
   hub.sourceIdentity.clear();
+  for (const wake of hub.cron.waiters) wake();
+  hub.cron = newCronHub();
 }

@@ -145,6 +145,22 @@ Renames an agent that is already running, for example a Claude Code session star
 - Responses on `POST /event` (or `/api/event`): `202 {"ok":true,"id","matchedBy","before","after","override","file"}` and an `agent_update` broadcast; `404` when no agent matches (the error points at `GET /agents`); `409 {"candidates":[...]}` when a name or prefix matches several agents; `400` for invalid input. In an array of events each rename result is listed under `renames`.
 - `GET /agents` (or `/api/agents`): `{"ok":true,"agents":[{"id","name","role","team","status","renamed"}]}` to look up a name or id before renaming. Not authenticated, like `/stream` (localhost only); rename needs `HQ_TOKEN` when it is set, like every `POST /event`.
 
+### 7.5 Scheduled jobs (Hermes cron)
+Not in the prototype. Source: `examples/hermes/hq_cron.py`, running next to Hermes Agent (docs/hermes.md section 10).
+```json
+{ "type": "schedule", "source": "Hermes di vps", "controls": ["run", "pause", "resume"], "scheduler": { "alive": true },
+  "jobs": [ { "id": "a1b2c3d4e5f6", "name": "Laporan harian", "schedule": "0 9 * * *", "next_run_at": 1793754000000,
+              "last_run_at": 1793667602000, "last_status": "ok", "last_error": "", "state": "scheduled", "enabled": true,
+              "running": false, "failure_streak": 0, "deliver": "telegram" } ] }
+{ "type": "cron_command", "id": "c-1a2b3c4d", "action": "run", "job": "a1b2c3d4e5f6", "job_name": "Laporan harian",
+  "status": "queued|sent|ok|error", "message": "" }
+```
+- `schedule` is a full snapshot, sent on change and every 30 s. It is never an agent. The bridge keeps the latest one and sends it to new viewers right after the agent snapshot, with `age_ms`. A snapshot older than 90 s (or `"offline": true`) is shown as disconnected. Times are epoch ms (ISO strings and epoch seconds are also read). Job prompts are never sent; names and errors are redacted by the source.
+- The office shows the jobs on the schedule board (floor 2, back wall, right of the clock; hidden without a schedule) and in the schedule panel (board click or the "Jadwal" button).
+- Controls: `POST /api/cron {"action","job"}` from the panel queues a command (`202`). Refused: other sites (`Origin` / `Sec-Fetch-Site` not same-origin, `403`), non-JSON (`415`), wrong token (`401`), unknown action (`400`), no or stale schedule (`409` / `503`), action not in `controls` (`403`), unknown job (`404`), a command for the job still open (`409`). No CORS headers on the `/api/cron*` routes.
+- The source long-polls `GET /api/cron/commands?wait=20` (queued -> sent), checks each command again, runs `hermes cron <action> <id>` as the Hermes user, and answers `POST /api/cron/result {"id","ok","message"}`. A command without an answer for 90 s fails. Every step is broadcast as `cron_command`, logged under the name `Jadwal`, and toasted when it ends. The bridge itself never runs anything.
+- With `HQ_TOKEN` set, all of these need the token (the panel asks for it once per tab).
+
 ## 8. Claude Code integration
 
 ### 8.1 Mechanism
@@ -374,6 +390,12 @@ Decisions:
 - [ ] Append-only JSONL event log in `data/` (zero-dep), rotated daily.
 - [ ] Timeline scrubber to replay a past period in the office.
 - [ ] Export the VA findings list as Markdown for the report.
+
+### M6. Hermes Agent (docs/hermes.md)
+- [x] Shell-hook adapter (`examples/hermes/hq_hook.py`): Hermes events translated to Claude Code hook payloads, subagents, cron runs named after their job.
+- [x] MCP server (`examples/hermes/hq_mcp.py`) for status, logs, findings, alerts, metrics; reports to the hook's character.
+- [x] Scheduled jobs (§7.5): reporter `hq_cron.py` as a systemd user service, schedule board on floor 2, schedule panel with run / pause / resume.
+- [x] Installer (`examples/hermes/install.py`): files, `agent-hq.env`, config.yaml merge with backup and YAML check, reporter service.
 
 ### M5. Polish
 - [ ] Follow-cam toggle for the selected agent.

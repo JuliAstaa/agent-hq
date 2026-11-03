@@ -7,7 +7,9 @@ import { createDemo } from "@/lib/demo";
 import { setLiveUrlSource } from "@/lib/rename";
 import { hqStore, type HQStore } from "@/lib/store";
 import { createTransport, type Transport } from "@/lib/transport";
+import { CRON_BOARD_EVENT } from "@/lib/cron";
 import ConnectModal from "./ConnectModal";
+import CronPanel from "./CronPanel";
 import LogPanel from "./LogPanel";
 import Roster from "./Roster";
 import Toast from "./Toast";
@@ -44,6 +46,8 @@ export default function Office() {
   const [rosterOpen, setRosterOpen] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const closeModal = useCallback(() => setModalOpen(false), []);
+  const [cronOpen, setCronOpen] = useState(false);
+  const closeCron = useCallback(() => setCronOpen(false), []);
   const liveUrl = useCallback(() => transportRef.current?.liveUrl ?? null, []);
 
   useEffect(() => {
@@ -56,6 +60,9 @@ export default function Office() {
     if (process.env.NEXT_PUBLIC_HQ_STATIC === "1") demo.start();
     else if (streamParam) transport.connect(streamParam);
     else transport.connect("/api/stream", { fallbackToDemo: true });
+
+    const openCron = () => setCronOpen(true); // the 3D schedule board was clicked
+    window.addEventListener(CRON_BOARD_EVENT, openCron);
 
     window.agentHQ = {
       store: hqStore,
@@ -73,6 +80,7 @@ export default function Office() {
       engine,
     };
     return () => {
+      window.removeEventListener(CRON_BOARD_EVENT, openCron);
       transport.close();
       demo.stop();
       engine.dispose();
@@ -86,7 +94,7 @@ export default function Office() {
     <>
       <div ref={stageRef} className="hq-stage" />
       <div ref={labelsRef} className="hq-labels" />
-      <TopBar onConnect={() => setModalOpen(true)} onToggleRoster={() => setRosterOpen((v) => !v)} />
+      <TopBar onConnect={() => setModalOpen(true)} onToggleRoster={() => setRosterOpen((v) => !v)} onCron={() => setCronOpen(true)} />
       <Roster open={rosterOpen} />
       <LogPanel />
       <Toast />
@@ -97,6 +105,7 @@ export default function Office() {
         onConnect={(url) => transportRef.current?.connect(url)}
         onDemo={() => transportRef.current?.backToDemo()}
       />
+      {cronOpen && <CronPanel open onClose={closeCron} liveUrl={liveUrl} />}
     </>
   );
 }

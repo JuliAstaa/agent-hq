@@ -6,6 +6,7 @@
 // confetti, squash, snapshot placement, alert flash, camera focus) go through signals, not state.
 
 import { createStore, type StoreApi } from "zustand/vanilla";
+import { CRON_ACTION_LABEL, type CronCmd, type CronState } from "./cron";
 import { normalizeEvent, SEV, STATUS, type AgentPatch, type AttackNode, type Severity, type Status } from "./events";
 import { inferDept, type Dept } from "./teams";
 import { avatarColor } from "./palette";
@@ -17,6 +18,9 @@ export type ConnMode = "demo" | "live" | "down";
 export const DESK_SLOTS = 9; // 3 x 3 desks on floor 2 (deviation 17; the prototype had 12)
 export const MAX_LOG_LINES = 220;
 export const MAX_AGENT_EVENTS = 60;
+export const MAX_CRON_CMDS = 12;
+/** Log/agent id used for schedule-panel lines (like "SOC" for alerts). */
+export const CRON_LOG_ID = "Jadwal";
 
 export interface AgentEvent {
   t: number;
@@ -79,7 +83,9 @@ export type Signal =
   | { type: "finding" }
   | { type: "reset" }
   | { type: "floor"; floor: FloorMode; moveCam: boolean }
-  | { type: "focus"; id: string };
+  | { type: "focus"; id: string }
+  /** The schedule changed: redraw the schedule board now. */
+  | { type: "cron" };
 
 export interface HQState {
   /** Insertion order = roster order. */
@@ -92,6 +98,10 @@ export interface HQState {
   selectedId: string | null;
   conn: { mode: ConnMode; text: string };
   toast: { msg: string; seq: number } | null;
+  /** Latest scheduled-jobs snapshot; null = no schedule source (board hidden). */
+  cron: CronState | null;
+  /** Recent schedule-panel commands, newest last. */
+  cronCmds: CronCmd[];
 
   applyEvent: (raw: unknown) => void;
   pushLog: (entry: { id: string; level?: string; message?: string }) => void;
@@ -272,7 +282,29 @@ export function createHQStore(): HQStore {
         if (e.login) emit({ type: "metric", value: e.value });
         return;
       }
+      if (e.kind === "schedule") {
+        set({ cron: { ...e.cron, receivedAt: Date.now() - e.ageMs } });
+        emit({ type: "cron" });
+        return;
+      }
       const d = draft();
+      if (e.kind === "cron_command") {
+        const c = e.cmd;
+        const cmds = get().cronCmds.filter((x) => x.id !== c.id);
+        cmds.push(c);
+        set({ cronCmds: cmds.slice(-MAX_CRON_CMDS) });
+        const what = `${CRON_ACTION_LABEL[c.action]} · ${c.jobName}`;
+        if (c.status === "queued") logInto(d, { id: CRON_LOG_ID, level: "info", message: `Perintah: ${what}` });
+        else if (c.status === "ok") {
+          logInto(d, { id: CRON_LOG_ID, level: "info", message: `Berhasil: ${what}${c.message ? " · " + c.message : ""}` });
+          toastInto(d, `Berhasil: ${truncate(what, 60)}`);
+        } else if (c.status === "error") {
+          logInto(d, { id: CRON_LOG_ID, level: "error", message: `Gagal: ${what}${c.message ? " · " + c.message : ""}` });
+          toastInto(d, `Gagal: ${truncate(what, 40)}${c.message ? " · " + truncate(c.message, 40) : ""}`);
+        }
+        commit(d);
+        return;
+      }
       if (e.kind === "alert") {
         d.soc.total++;
         d.soc.alerts.unshift({ t: Date.now(), sev: e.sev, text: e.text, ip: e.ip });
@@ -309,6 +341,8 @@ export function createHQStore(): HQStore {
       selectedId: null,
       conn: { mode: "demo", text: "Mode demo" },
       toast: null,
+      cron: null,
+      cronCmds: [],
 
       applyEvent: (raw) => {
         for (const e of normalizeEvent(raw)) {
@@ -331,7 +365,10 @@ export function createHQStore(): HQStore {
         d.vuln = { counts: emptyCounts(), list: [], nodes: [] };
         d.soc = { alerts: [], total: 0 };
         commit(d);
+        const hadCron = get().cron !== null;
+        set({ cron: null, cronCmds: [] }); // a new connection sends its own schedule (if any)
         emit({ type: "reset" });
+        if (hadCron) emit({ type: "cron" }); // hide the schedule board
         flush();
       },
 

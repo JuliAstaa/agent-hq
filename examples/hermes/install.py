@@ -6,10 +6,13 @@
   python3 examples/hermes/install.py --no-hooks        # MCP only
   python3 examples/hermes/install.py --url URL         # Agent HQ address (default http://127.0.0.1:8787)
   python3 examples/hermes/install.py --print           # copy files, show the config.yaml blocks, edit nothing
+  python3 examples/hermes/install.py --no-cron         # no schedule reporter (PAPAN JADWAL stays hidden)
+  python3 examples/hermes/install.py --no-service      # copy hq_cron.py but do not set up its systemd service
 
-Copies hq_common.py, hq_hook.py and hq_mcp.py to $HERMES_HOME/agent-hq (default ~/.hermes/agent-hq),
+Copies hq_common.py, hq_hook.py, hq_mcp.py and hq_cron.py to $HERMES_HOME/agent-hq (default ~/.hermes/agent-hq),
 creates agent-hq.env there if missing, then adds the hooks and the MCP server to $HERMES_HOME/config.yaml
-after saving a backup. Running it again is safe: blocks that are already there are left alone.
+after saving a backup, and starts the schedule reporter as the systemd user service agent-hq-cron.
+Running it again is safe: blocks that are already there are left alone, the reporter restarts with the new code.
 """
 
 import argparse
@@ -24,7 +27,8 @@ import sys
 import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-FILES = ["hq_common.py", "hq_hook.py", "hq_mcp.py"]
+FILES = ["hq_common.py", "hq_hook.py", "hq_mcp.py", "hq_cron.py"]
+CRON_UNIT = "agent-hq-cron.service"
 EVENTS = [
     "on_session_start", "pre_llm_call", "pre_tool_call", "post_tool_call", "post_llm_call",
     "on_session_end", "on_session_finalize", "subagent_start", "subagent_stop",
@@ -198,6 +202,50 @@ def check_result(load, old_text, new_text, hook_cmd, hook_events, python, mcp_sc
 
 # ------------------------------------------------------------------ main
 
+def cron_unit(python, script, hermes_home, hermes_bin):
+    """systemd user unit for the schedule reporter (next to Hermes' own hermes-gateway user service)."""
+    env = ['Environment="HERMES_HOME=%s"' % hermes_home]
+    if hermes_bin:
+        env.append('Environment="HQ_HERMES_BIN=%s"' % hermes_bin)  # services do not get ~/.local/bin in PATH
+    return "\n".join([
+        "[Unit]",
+        "Description=Agent HQ: jadwal cron Hermes ke PAPAN JADWAL",
+        "After=network-online.target",
+        "",
+        "[Service]",
+        'ExecStart="%s" "%s"' % (python, script),
+        *env,
+        "Restart=on-failure",  # a clean exit (HQ_DISABLE, stop) stays stopped; a crash restarts
+        "RestartSec=5",
+        "",
+        "[Install]",
+        "WantedBy=default.target",
+        "",
+    ])
+
+
+def install_cron_service(unit_text):
+    """Write and (re)start the user service. Returns a one-line status for the summary."""
+    if not shutil.which("systemctl"):
+        return "systemctl tidak ada: jalankan python3 hq_cron.py sendiri (docs/hermes.md, Jadwal)"
+    unit_dir = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"), "systemd", "user")
+    os.makedirs(unit_dir, exist_ok=True)
+    with open(os.path.join(unit_dir, CRON_UNIT), "w", encoding="utf-8", newline="\n") as f:
+        f.write(unit_text)
+    for cmd in (["daemon-reload"], ["enable", CRON_UNIT], ["restart", CRON_UNIT]):
+        r = subprocess.run(["systemctl", "--user"] + cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+        if r.returncode != 0:
+            err = (r.stderr or r.stdout).strip().splitlines()
+            return "GAGAL systemctl --user %s: %s" % (" ".join(cmd), err[-1] if err else r.returncode)
+    note = ""
+    user = os.environ.get("USER") or ""
+    if shutil.which("loginctl") and user:
+        r = subprocess.run(["loginctl", "show-user", user, "-p", "Linger"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, universal_newlines=True)
+        if r.stdout.strip() == "Linger=no":
+            note = "; jalankan: sudo loginctl enable-linger %s (agar tetap jalan setelah logout)" % user
+    return "service %s jalan%s" % (CRON_UNIT, note)
+
+
 def health(url):
     req = urllib.request.Request(url.rstrip("/") + "/api/health")
     try:
@@ -213,6 +261,8 @@ def main(argv):
     ap.add_argument("--no-mcp", action="store_true", help="jangan pasang server MCP")
     ap.add_argument("--url", help="alamat Agent HQ, misalnya http://127.0.0.1:8787")
     ap.add_argument("--print", dest="print_only", action="store_true", help="tampilkan blok config.yaml saja")
+    ap.add_argument("--no-cron", action="store_true", help="jangan pasang reporter jadwal (hq_cron.py)")
+    ap.add_argument("--no-service", action="store_true", help="salin hq_cron.py tanpa memasang service systemd")
     ap.add_argument("--hermes-home", default=os.environ.get("HERMES_HOME") or os.path.expanduser("~/.hermes"))
     args = ap.parse_args(argv)
     if args.no_hooks and args.no_mcp:
@@ -309,6 +359,13 @@ def main(argv):
         if manual:
             print("\nGabungkan ini ke %s secara manual:\n" % config)
             print("\n".join(manual))
+
+    if not args.no_cron:
+        script = os.path.join(dest, "hq_cron.py")
+        if args.no_service or args.print_only:
+            print("\n  jadwal     : jalankan sendiri: %s %s" % (python, script))
+        else:
+            print("\n  jadwal     : " + install_cron_service(cron_unit(python, script, home, shutil.which("hermes") or "")))
 
     ok, detail = health(url)
     if ok:

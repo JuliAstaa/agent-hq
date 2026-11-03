@@ -64,7 +64,20 @@ export interface Floor2Props {
   clockHands: { h: THREE.Group; m: THREE.Group; s: THREE.Group };
   wb: CanvasTex & { strokes: number; cx: number; cy: number; wasOn?: boolean; forceEgg?: boolean; egg?: WhiteboardEgg | null; keepOut?: [number, number, number, number] | null };
   taskBoard: TaskBoard;
+  scheduleBoard: ScheduleBoard;
 }
+
+/** Schedule board (Hermes cron, docs/hermes.md "Jadwal"): hidden until a schedule source reports. Not in the prototype. */
+export interface ScheduleBoard {
+  group: THREE.Group;
+  face: CanvasTex;
+  /** Swings while a job runs. */
+  bell: THREE.Group;
+}
+
+/** Back wall, right of the clock (up to the server room). [x, y above F2, z] of the board's center. */
+export const SCHEDULE_BOARD_AT: [number, number, number] = [3.3, 2.3, -7.6];
+export const SCHEDULE_BOARD_SIZE: [number, number] = [2.75, 1.72];
 
 /** Cork task board (deviation 14): a header and one card spot per standing spot (BOARD_SLOTS_Z). */
 export interface TaskBoard {
@@ -207,5 +220,26 @@ export function buildFloor2Props(b: Build, g2: THREE.Group, tentacles: THREE.Gro
     }
   }
 
-  return { blinkers, tankBubbles, board, clockHands: clockHands!, wb: wb!, taskBoard: { group: tbGroup, face, cards } };
+  // schedule board (Hermes cron): dark departure board with a bell on top
+  const sFace = canvasTex(640, 400);
+  const sGroup = new THREE.Group();
+  const bell = new THREE.Group();
+  {
+    const [x, y, z] = SCHEDULE_BOARD_AT, [w, h] = SCHEDULE_BOARD_SIZE;
+    const g = sGroup; g.position.set(x, F2 + y, z); g.visible = false; g2.add(g);
+    g.add(mesh(rbox(w, h, 0.14, 0.08), M.dark));
+    const face = mesh(new THREE.PlaneGeometry(w - 0.22, h - 0.2), noLine(flat("#ffffff", { map: sFace.tex })), false, false);
+    face.position.z = 0.075; g.add(face);
+    cyl(g, 0.025, 0.025, 0.36, 0, h / 2, 0.12, M.dark, 8); // hook from the board top to the bell's pivot
+    bell.position.set(0, h / 2 + 0.36, 0.12); g.add(bell);
+    const cup = mesh(new THREE.CylinderGeometry(0.08, 0.2, 0.26, 16), toon("#ffd23f"), false, false);
+    cup.position.y = -0.2; bell.add(cup); // hangs below the pivot
+    const clapper = mesh(new THREE.SphereGeometry(0.05, 10, 8), toon("#c98a4b"), false, false);
+    clapper.position.y = -0.36; bell.add(clapper);
+  }
+
+  return {
+    blinkers, tankBubbles, board, clockHands: clockHands!, wb: wb!, taskBoard: { group: tbGroup, face, cards },
+    scheduleBoard: { group: sGroup, face: sFace, bell },
+  };
 }

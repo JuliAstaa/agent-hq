@@ -7,8 +7,9 @@ import FloorSwitcher from "./FloorSwitcher";
 import StatusChips from "./StatusChips";
 import { Button, CARD, CARD_FRAME, cn } from "./ui";
 
-export default function TopBar({ onConnect, onToggleRoster }: { onConnect: () => void; onToggleRoster: () => void }) {
+export default function TopBar({ onConnect, onToggleRoster, onCron }: { onConnect: () => void; onToggleRoster: () => void; onCron: () => void }) {
   const conn = useStore(hqStore, (s) => s.conn);
+  const hasCron = useStore(hqStore, (s) => s.cron !== null);
   const dot = conn.mode === "live" ? "bg-working animate-[hq-pulse_1.4s_infinite]" : conn.mode === "down" ? "bg-error" : "bg-thinking";
   return (
     <div data-hq-ui="top" className="fixed top-[14px] left-[14px] right-[14px] flex gap-3 items-start pointer-events-none z-[5] flex-wrap min-[1181px]:flex-nowrap [&>*]:pointer-events-auto">
@@ -39,6 +40,11 @@ export default function TopBar({ onConnect, onToggleRoster }: { onConnect: () =>
         <Button className="hidden max-[820px]:inline-block" onClick={onToggleRoster}>
           Agen
         </Button>
+        {hasCron && (
+          <Button title="Papan jadwal (cron Hermes)" onClick={onCron}>
+            Jadwal
+          </Button>
+        )}
         <Button tone="primary" onClick={onConnect}>
           Sambungkan
         </Button>
