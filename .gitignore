@@ -43,3 +43,6 @@ next-env.d.ts
 # playwright
 /test-results/
 /playwright-report/
+
+# agent rename overrides (local, written by POST /event {"type":"rename"})
+/agent-hq-names.json

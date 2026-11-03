@@ -81,7 +81,7 @@ One Next.js app does both jobs: it serves the 3D office and acts as the event br
    hooks (type: "http")                curl, python, log tailers
           |                                     |
           v                                     v
-   POST /api/hook ------------>  Next.js app (next start, Node.js runtime)
+   POST /api/hook ------------>  Next.js app on 127.0.0.1:8787 (next start, Node.js runtime)
    (raw hook JSON)  translate     |  lib/bridge: in-memory hub (agents, recent buffer)
                                   |  redaction, auth token
    POST /api/event -------------> |
@@ -96,7 +96,8 @@ One Next.js app does both jobs: it serves the 3D office and acts as the event br
 - **Transport:** Server-Sent Events from `app/api/stream/route.ts` using a `ReadableStream`. The client also accepts `ws://` URLs for external sources.
 - **State:** a singleton hub keeps the last known state per agent plus the last 80 logs, findings, and alerts, and replays them to new viewers (`_replay: true` so alerts do not re-trigger the siren). Store it on `globalThis` so it survives hot reload in `next dev`.
 - **Runtime constraints:** all bridge routes use `export const runtime = 'nodejs'` and `export const dynamic = 'force-dynamic'`. The bridge needs one long-lived process, so run it with `next dev` or `next start` (or a Node container). Serverless platforms such as Vercel are not supported for the bridge, because SSE connections and in-memory state do not persist there.
-- **Bind address:** `next start -H 127.0.0.1` by default. Optional `HQ_TOKEN` required on `/api/event` and `/api/hook` when set.
+- **Port and bind address:** `npm run dev` and `npm start` both listen on `127.0.0.1:8787`, the same port as the prototype bridge. Optional `HQ_TOKEN` required on `/api/event` and `/api/hook` when set.
+- **Prototype URLs:** `next.config.ts` rewrites `/hook`, `/event`, `/stream`, and `/health` to the matching `/api/*` routes, so anything configured for `references/server.js` (hook settings, curl scripts, `?stream=` links) keeps working unchanged. Rewrites are internal, so SSE on `/stream` is not buffered (covered by `tests/integration/bridge-parity.test.ts`). The static demo export has no rewrites (and no bridge).
 
 ## 7. Event protocol (v1)
 
@@ -132,10 +133,22 @@ All events are JSON objects. `id` identifies the agent. Unknown fields are ignor
 - `metric` with a login-related name drives the "failed logins per minute" chart for 6 s; otherwise the chart shows a baseline plus alert spikes.
 - `id` is optional on these three. Without it, no character is created.
 
+### 7.4 Rename and agent list
+Renames an agent that is already running, for example a Claude Code session started without `HQ_NAME`.
+```json
+{ "type": "rename", "match": "property-web#ab12", "name": "Rexx", "team": "red", "role": "Pentester" }
+```
+- Target: `id` (exact) if given, otherwise `match`, tried in order: exact id, displayed name (case-insensitive), id or session prefix (`"ab12"` matches `"cc-ab12cd34"`; a prefix shared by a session and its subagents picks the main session).
+- `name`, `team`, `role` are optional; at least one is required. A string sets the override (max 60 chars), `null` or `""` clears it. Clearing `team` sends `team: "office"`, so the agent walks back to its office desk.
+- Overrides are stored per agent id and applied to every published `agent_update` and `task_done`, including events translated from hooks, so later hooks (and `X-HQ-Name` headers) cannot overwrite them. Session ids are stable, so a resumed session keeps its name.
+- Persisted to `agent-hq-names.json` in the project root (env `HQ_NAMES_FILE` to change), read at start and rewritten on every rename. The file is in `.gitignore`.
+- Responses on `POST /event` (or `/api/event`): `202 {"ok":true,"id","matchedBy","before","after","override","file"}` and an `agent_update` broadcast; `404` when no agent matches (the error points at `GET /agents`); `409 {"candidates":[...]}` when a name or prefix matches several agents; `400` for invalid input. In an array of events each rename result is listed under `renames`.
+- `GET /agents` (or `/api/agents`): `{"ok":true,"agents":[{"id","name","role","team","status","renamed"}]}` to look up a name or id before renaming. Not authenticated, like `/stream` (localhost only); rename needs `HQ_TOKEN` when it is set, like every `POST /event`.
+
 ## 8. Claude Code integration
 
 ### 8.1 Mechanism
-Claude Code hooks with handler `type: "http"` POST the same JSON a command hook receives on stdin to `http://127.0.0.1:3000/api/hook` (Next.js app). The prototype bridge uses `http://127.0.0.1:8787/hook`; update the URL in the settings once M1 ships. The server translates it and always replies `200` with an empty body, so Claude Code treats it as success with no decision. Timeout is 3 s. Default `onFailure` is `continue`, so a stopped server never blocks a session.
+Claude Code hooks with handler `type: "http"` POST the same JSON a command hook receives on stdin to `http://127.0.0.1:8787/api/hook` (Next.js app). The prototype URL `http://127.0.0.1:8787/hook` is rewritten to the same route, so hook settings made for the prototype keep working. The server translates it and always replies `200` with an empty body, so Claude Code treats it as success with no decision. Timeout is 3 s. Default `onFailure` is `continue`, so a stopped server never blocks a session.
 
 Install by merging `claude-hooks.settings.json` into `~/.claude/settings.json` (all projects) or a project's `.claude/settings.json`. Hook arrays from different settings files merge.
 
@@ -148,6 +161,8 @@ Install by merging `claude-hooks.settings.json` into `~/.claude/settings.json` (
 | Team | header `X-HQ-Team` from env `HQ_TEAM` (optional) |
 
 Usage: `HQ_NAME=Rexx HQ_TEAM=red claude` in the repo you want to test. Headers use `allowedEnvVars`, so unset variables become empty strings and the server falls back.
+
+A session that is already running without `HQ_NAME` can be renamed afterwards with a `rename` event (§7.4); the override wins over the header-derived name, role, and team on every later hook.
 
 ### 8.3 Hook to event mapping
 | Hook event | Agent HQ result |
@@ -175,7 +190,7 @@ Hooks only see tool calls. Findings and alerts need the agent (or a tool) to rep
 ```md
 ## Agent HQ reporting
 After you confirm a vulnerability, report it:
-curl -s -X POST http://127.0.0.1:3000/api/event -H 'content-type: application/json' \
+curl -s -X POST http://127.0.0.1:8787/api/event -H 'content-type: application/json' \
   -d '{"type":"finding","id":"'"$HQ_ID"'","severity":"high","title":"<short title>"}'
 Only test targets listed in SCOPE.md. Never test anything outside scope.
 ```
@@ -292,6 +307,7 @@ agent-hq/
       hook/route.ts                # POST: Claude Code hook payloads, always 200 empty body
       stream/route.ts              # GET: SSE (snapshot, replay, live)
       health/route.ts              # GET
+      agents/route.ts              # GET: agent list for renames (§7.4)
   components/
     Office.tsx                     # 'use client'; mounts the engine, wires store and transport
     TopBar.tsx  FloorSwitcher.tsx  StatusChips.tsx
@@ -314,8 +330,10 @@ agent-hq/
       hooks.ts                     # Claude Code hook -> events (port of server.js hookToEvents)
       redact.ts
       auth.ts
+      overrides.ts                 # rename overrides: merge, load/save agent-hq-names.json (§7.4)
   examples/
-    claude-hooks.settings.json     # URL http://127.0.0.1:3000/api/hook
+    claude-hooks.settings.json     # URL http://127.0.0.1:8787/api/hook
+    server.js                      # standalone bridge: copy of references/server.js plus rename and /api/* URLs
     report-finding.sh
     tail-fail2ban.ts
   tests/                           # vitest unit tests, playwright visual tests
@@ -381,8 +399,8 @@ Decisions:
 
 ```bash
 # 1. start the app (bridge included)
-npm run build && npm start -- -H 127.0.0.1   # http://localhost:3000
-# prototype alternative: node reference/server.js (port 8787, URL /hook)
+npm run build && npm start                    # http://localhost:8787 (bound to 127.0.0.1)
+# prototype alternative: node references/server.js (same port; stop the app first)
 
 # 2. merge examples/claude-hooks.settings.json into ~/.claude/settings.json
 
@@ -396,9 +414,9 @@ claude                                   # normal coding session, team inferred
 ## Appendix B: manual test events
 
 ```bash
-curl -s -X POST localhost:3000/api/event -H 'content-type: application/json' \
+curl -s -X POST localhost:8787/api/event -H 'content-type: application/json' \
   -d '{"id":"demo","name":"Tester","status":"working","task":"nmap -sV staging"}'
-curl -s -X POST localhost:3000/api/event -H 'content-type: application/json' \
+curl -s -X POST localhost:8787/api/event -H 'content-type: application/json' \
   -d '{"type":"alert","severity":"high","message":"Bruteforce SSH","source_ip":"10.0.0.9"}'
 ```
 
@@ -446,4 +464,4 @@ export async function GET(req: Request) {
 Pitfalls to check:
 - If events arrive in bursts instead of live, disable response compression for the stream (`compress: false` in `next.config`, or put a reverse proxy without gzip in front).
 - `app/api/hook/route.ts` must return `new Response(null, { status: 200 })` even on parse errors, so Claude Code never logs hook failures.
-- Behind Nginx, set `proxy_buffering off;` for `/api/stream`.
+- Behind Nginx, set `proxy_buffering off;` for `/api/stream` and its alias `/stream`.

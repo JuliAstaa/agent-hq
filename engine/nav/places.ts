@@ -34,7 +34,13 @@ export interface StationPlace extends PlaceBase {
   /** Index among all stations (0..10), for tests and debug. */
   index: number;
 }
-export type Place = SpotPlace | DeskPlace | StationPlace;
+/** A spot in front of the task board where an agent picks up a new task card (deviation 14). */
+export interface BoardPlace extends PlaceBase {
+  kind: "board";
+  /** Slot index 0..2, matching the card pinned in front of it. */
+  index: number;
+}
+export type Place = SpotPlace | DeskPlace | StationPlace | BoardPlace;
 
 const PI = Math.PI;
 type XZ = [number, number];
@@ -72,10 +78,13 @@ export function createSpots(): SpotPlace[] {
 }
 
 /** 12 home desks on floor 2: 3 rows x 4, slot index = row * 4 + column. */
+// Deviation 8 (plan-m1.md): like the floor-3 stations, the chair is on the front side (+z) and the agent faces
+// the back wall, looking at a monitor that faces it (and the camera). Rows moved back 0.8 so the aisle in front
+// of each row (K2, K3, K4) clears the chairs.
 export const DESK_ROWS = [
-  { z: -4.6, hub: "K1", aisle: -6.6 },
-  { z: -1.0, hub: "K2", aisle: -3.0 },
-  { z: 2.6, hub: "K3", aisle: 0.6 },
+  { z: -5.4, hub: "K2", aisle: -3.0 },
+  { z: -1.8, hub: "K3", aisle: 0.6 },
+  { z: 1.8, hub: "K4", aisle: 4.0 },
 ];
 export const DESK_XS = [-9.6, -6.0, -2.4, 1.2];
 
@@ -89,7 +98,7 @@ export function createDeskSlots(): DeskSlot[] {
   const out: DeskSlot[] = [];
   for (const r of DESK_ROWS) {
     for (const x of DESK_XS) {
-      out.push({ x, z: r.z, place: { kind: "desk", room: "Meja kerja", floor: 2, hub: r.hub, via: [new THREE.Vector3(x, F2, r.aisle)], final: new THREE.Vector3(x, F2, r.z - 1.05), face: 0, occ: null } });
+      out.push({ x, z: r.z, place: { kind: "desk", room: "Meja kerja", floor: 2, hub: r.hub, via: [new THREE.Vector3(x, F2, r.aisle)], final: new THREE.Vector3(x, F2, r.z + 1.05), face: Math.PI, occ: null } });
     }
   }
   return out;
@@ -110,4 +119,19 @@ export function stationPlace(index: number): StationPlace {
     via: [new THREE.Vector3(aisleX, F3, aisleZ), new THREE.Vector3(x, F3, aisleZ)],
     final: new THREE.Vector3(x, F3, z + 1.05), face: Math.PI, occ: null,
   };
+}
+
+/**
+ * Task board ("PAPAN TUGAS", floor 2 left wall, deviation 14): three standing spots side by side in front of it.
+ * Reached along the row-2 aisle (z 0.6, hub K3), then straight down the gap between the wall and the first desk
+ * column (x -11.75 keeps clear of both).
+ */
+export const BOARD_X = -11.75;
+export const BOARD_SLOTS_Z = [0.95, 1.7, 2.45];
+
+export function createBoardSlots(): BoardPlace[] {
+  return BOARD_SLOTS_Z.map((z, index) => ({
+    kind: "board", index, room: "Papan Tugas", floor: 2, hub: "K3",
+    via: [new THREE.Vector3(BOARD_X, F2, 0.6)], final: new THREE.Vector3(BOARD_X, F2, z), face: -PI / 2, occ: null,
+  }));
 }

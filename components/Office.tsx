@@ -1,11 +1,17 @@
 "use client";
 
-// Mounts the Three.js engine and wires store, transport and demo. React 2D UI comes in step 5.
-import { useEffect, useRef } from "react";
+// Mounts the Three.js engine, wires store, transport and demo, and renders the React 2D UI on top.
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createEngine, type Engine } from "@/engine";
 import { createDemo } from "@/lib/demo";
+import { setLiveUrlSource } from "@/lib/rename";
 import { hqStore, type HQStore } from "@/lib/store";
-import { createTransport } from "@/lib/transport";
+import { createTransport, type Transport } from "@/lib/transport";
+import ConnectModal from "./ConnectModal";
+import LogPanel from "./LogPanel";
+import Roster from "./Roster";
+import Toast from "./Toast";
+import TopBar from "./TopBar";
 
 export interface AgentHQHandle {
   store: HQStore;
@@ -34,11 +40,18 @@ declare global {
 export default function Office() {
   const stageRef = useRef<HTMLDivElement>(null);
   const labelsRef = useRef<HTMLDivElement>(null);
+  const transportRef = useRef<Transport | null>(null);
+  const [rosterOpen, setRosterOpen] = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
+  const closeModal = useCallback(() => setModalOpen(false), []);
+  const liveUrl = useCallback(() => transportRef.current?.liveUrl ?? null, []);
 
   useEffect(() => {
     const engine = createEngine(stageRef.current!, labelsRef.current!, hqStore);
     const demo = createDemo(hqStore);
     const transport = createTransport(hqStore, demo);
+    transportRef.current = transport;
+    setLiveUrlSource(() => transport.liveUrl); // roster rename posts next to the live stream (deviation 16)
     const streamParam = new URLSearchParams(window.location.search).get("stream");
     if (process.env.NEXT_PUBLIC_HQ_STATIC === "1") demo.start();
     else if (streamParam) transport.connect(streamParam);
@@ -63,6 +76,8 @@ export default function Office() {
       transport.close();
       demo.stop();
       engine.dispose();
+      transportRef.current = null;
+      setLiveUrlSource(() => null);
       delete window.agentHQ;
     };
   }, []);
@@ -71,6 +86,17 @@ export default function Office() {
     <>
       <div ref={stageRef} className="hq-stage" />
       <div ref={labelsRef} className="hq-labels" />
+      <TopBar onConnect={() => setModalOpen(true)} onToggleRoster={() => setRosterOpen((v) => !v)} />
+      <Roster open={rosterOpen} />
+      <LogPanel />
+      <Toast />
+      <ConnectModal
+        open={modalOpen}
+        liveUrl={liveUrl}
+        onClose={closeModal}
+        onConnect={(url) => transportRef.current?.connect(url)}
+        onDemo={() => transportRef.current?.backToDemo()}
+      />
     </>
   );
 }

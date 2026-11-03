@@ -5,6 +5,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import net from "node:net";
+import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -12,7 +13,8 @@ const ROOT = path.resolve(__dirname, "../..");
 const BUILT = existsSync(path.join(ROOT, ".next/BUILD_ID"));
 const FIXTURE = path.join(ROOT, "tests/fixtures/session.jsonl");
 
-type Line = { to: "hook" | "event"; headers?: Record<string, string>; body?: unknown; raw?: string };
+// parity: false marks lines whose output intentionally differs from the prototype (B2 redaction extensions).
+type Line = { to: "hook" | "event"; headers?: Record<string, string>; body?: unknown; raw?: string; parity?: boolean };
 type Target = { name: string; base: string; paths: Record<"hook" | "event" | "stream" | "health", string>; proc: ChildProcess };
 
 const freePort = () =>
@@ -45,7 +47,8 @@ async function startPair(env: Record<string, string> = {}): Promise<[Target, Tar
   });
   const next = spawn(process.execPath, [path.join(ROOT, "node_modules/next/dist/bin/next"), "start", "-H", "127.0.0.1", "-p", String(p2)], {
     cwd: ROOT,
-    env: { ...process.env, ...env },
+    // Never read the user's agent-hq-names.json (rename overrides, deviation 11): a missing temp file = no overrides.
+    env: { ...process.env, HQ_NAMES_FILE: path.join(os.tmpdir(), `hq-parity-${process.pid}-${p2}.json`), ...env },
     stdio: "ignore",
   });
   const a: Target = { name: "prototype", base: `http://127.0.0.1:${p1}`, paths: { hook: "/hook", event: "/event", stream: "/stream", health: "/health" }, proc: ref };
@@ -100,7 +103,9 @@ async function send(t: Target, line: Line) {
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-const lines: Line[] = readFileSync(FIXTURE, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+const allLines: Line[] = readFileSync(FIXTURE, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+const lines = allLines.filter((l) => l.parity !== false);
+const b2Lines = allLines.filter((l) => l.parity === false);
 
 describe.skipIf(!BUILT)("bridge parity with references/server.js", () => {
   let pair: [Target, Target];
@@ -157,6 +162,29 @@ describe.skipIf(!BUILT)("bridge parity with references/server.js", () => {
   });
 });
 
+describe.skipIf(!BUILT)("B2 redaction extensions (app only, intentionally differs from the prototype)", () => {
+  let pair: [Target, Target];
+  beforeAll(async () => {
+    pair = await startPair();
+  }, 60000);
+  afterAll(() => {
+    for (const t of pair ?? []) t.proc.kill();
+  });
+
+  it("secrets in parity:false fixtures never reach the stream", async () => {
+    const [, nxt] = pair;
+    expect(b2Lines.length).toBeGreaterThan(0);
+    const v = viewer(nxt);
+    await sleep(300);
+    for (const line of b2Lines) expect((await send(nxt, line)).status).toBe(200);
+    await sleep(400);
+    await v.stop();
+    const raw = v.frames.join("\n");
+    expect(raw).toContain("-p***");
+    expect(raw).not.toContain("S3cretPass");
+  }, 30000);
+});
+
 describe.skipIf(!BUILT)("bridge parity with HQ_TOKEN set", () => {
   let pair: [Target, Target];
   beforeAll(async () => {
@@ -177,4 +205,65 @@ describe.skipIf(!BUILT)("bridge parity with HQ_TOKEN set", () => {
       }
     }
   }, 30000);
+});
+
+// The Next app also serves the prototype URLs (/hook, /event, /stream, /health) through rewrites in
+// next.config.ts, so hook configs written for references/server.js keep working on port 8787.
+describe.skipIf(!BUILT)("bridge parity through prototype URLs (rewrites)", () => {
+  let pair: [Target, Target];
+  beforeAll(async () => {
+    pair = await startPair();
+    pair[1] = { ...pair[1], name: "next-alias", paths: { ...pair[0].paths } };
+  }, 60000);
+  afterAll(() => {
+    for (const t of pair ?? []) t.proc.kill();
+  });
+
+  it("same HTTP responses and same live SSE output", async () => {
+    const [ref, nxt] = pair;
+    const live = [viewer(ref), viewer(nxt)];
+    await sleep(400);
+    for (const [i, line] of lines.entries()) {
+      const [r1, r2] = await Promise.all([send(ref, line), send(nxt, line)]);
+      expect({ i, ...r2 }, `fixture line ${i + 1}`).toEqual({ i, ...r1 });
+    }
+    await sleep(400);
+    const [h1, h2] = await Promise.all([fetch(ref.base + "/health").then((r) => r.json()), fetch(nxt.base + "/health").then((r) => r.json())]);
+    for (const v of live) await v.stop();
+    expect(h2).toEqual(h1);
+    const liveRef = normalizeFrames(live[0].frames);
+    expect(liveRef.length).toBeGreaterThan(40);
+    expect(normalizeFrames(live[1].frames)).toEqual(liveRef);
+  }, 60000);
+
+  it("/stream is not buffered: an event posted after connect arrives promptly", async () => {
+    const [, nxt] = pair;
+    const ctrl = new AbortController();
+    const res = await fetch(nxt.base + "/stream", { signal: ctrl.signal });
+    expect(res.headers.get("content-type")).toBe("text/event-stream");
+    expect(res.headers.get("content-encoding")).toBeNull();
+    const reader = res.body!.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    await reader.read(); // retry + snapshot
+    const t0 = Date.now();
+    await fetch(nxt.base + "/event", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: "probe", task: "unbuffered-probe" }) });
+    while (!buf.includes("unbuffered-probe")) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+    }
+    expect(buf).toContain("unbuffered-probe");
+    expect(Date.now() - t0).toBeLessThan(1000);
+    ctrl.abort();
+  }, 30000);
+
+  it("same OPTIONS preflight on /hook", async () => {
+    const [ref, nxt] = pair;
+    const [a, b] = await Promise.all([fetch(ref.base + "/hook", { method: "OPTIONS" }), fetch(nxt.base + "/hook", { method: "OPTIONS" })]);
+    expect(b.status).toBe(a.status);
+    for (const h of ["access-control-allow-origin", "access-control-allow-headers", "access-control-allow-methods"]) {
+      expect(b.headers.get(h)).toBe(a.headers.get(h));
+    }
+  });
 });

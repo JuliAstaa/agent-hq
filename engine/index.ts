@@ -9,18 +9,21 @@ import { STATUS } from "@/lib/events";
 import type { Agent, FloorMode, HQStore, Signal } from "@/lib/store";
 import { DEPTS } from "@/lib/teams";
 import { truncate } from "@/lib/format";
-import { ACT_LABEL, INK, VIEWS } from "./constants";
+import { ACT_LABEL, F2, F3, INK, VIEWS } from "./constants";
 import { animateAgent, type AgentRuntime, type AnimCtx } from "./agents/animate";
 import { buildAvatar } from "./agents/avatar";
 import { floorOf, locText, newMovement, pickSpot, placeAt, releasePlaces, workTarget, type NavCtx } from "./agents/movement";
-import { drawArcade, drawBoard, drawPlate, drawScreen, drawTV, drawWhiteboard } from "./displays/office";
+import { drawArcade, drawBoard, drawEmptyDesk, drawPlate, drawScreen, drawTaskBoard, drawTV, drawWhiteboard } from "./displays/office";
 import { drawRedWall, drawReportBoard, drawSOC, drawStation, newSocAnim } from "./displays/security";
 import { createFx } from "./fx";
-import { createDeskSlots, createSpots, type Place } from "./nav/places";
+import { createSkyEvents, type SkyEventKind } from "./skyEvents";
+import { planMeteors, planPortal, type NdcRect, type PlaceCtx, type SkyZone } from "./skyPlacement";
+import { SFX_EVENT } from "@/lib/audio";
+import { createBoardSlots, createDeskSlots, createSpots, type Place } from "./nav/places";
 import { loadFonts, resolveFonts } from "./scene/fonts";
 import { createKit, createMaterials, V } from "./scene/kit";
 import { buildSky, makeSkyTexture } from "./scene/sky";
-import { buildDesk } from "./world/props/desk";
+import { buildDesk, type Desk } from "./world/props/desk";
 import { buildIslandAndFloor1Shell, buildFloor1Props } from "./world/floor1";
 import { buildFloor2Props, buildFloor2Shell } from "./world/floor2";
 import { buildFloor3 } from "./world/floor3";
@@ -32,10 +35,21 @@ export interface Engine {
   /** Debug/test: teleport agent `id` to a place ("desk", a spot id like "coffee", or "station:N"). */
   placeAt: (id: string, placeId: string) => boolean;
   placeIds: () => string[];
+  /** Start a sky event now (portal or meteor, random when omitted); false while one is running. */
+  skyEvent: (kind?: SkyEventKind, zone?: SkyZone) => boolean;
   camera: THREE.PerspectiveCamera;
   controls: OrbitControls;
   /** Idempotent. */
   dispose: () => void;
+  /** Tests only. */
+  debug: {
+    /** Hide desks that have no agent (visual parity: the prototype has no desks without agents, deviation 7). */
+    hideEmptyDesks: (hidden: boolean) => void;
+    /** Where sky events would land from the current camera: zone counts over `n` placements (no event started). */
+    skyZones: (kind: SkyEventKind, n?: number) => Record<string, number>;
+    /** Hide the task board (visual parity: the prototype has none, deviation 14). */
+    hideTaskBoard: (hidden: boolean) => void;
+  };
 }
 
 const LOC_INTERVAL = 0.25;
@@ -58,6 +72,7 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
   renderer.shadowMap.type = THREE.PCFShadowMap;
   stage.appendChild(renderer.domElement);
   const effect = new OutlineEffect(renderer, { defaultThickness: 0.0038, defaultColor: new THREE.Color(INK).toArray(), defaultAlpha: 1 });
+  effect.autoClear = false; // renderFloors() clears once per frame, then draws the floors in passes
   const labelRenderer = new CSS2DRenderer({ element: labelsEl });
   labelRenderer.setSize(vw(), vh());
 
@@ -83,6 +98,7 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
   sun.shadow.mapSize.set(2048, 2048);
   Object.assign(sun.shadow.camera, { left: -22, right: 22, top: 22, bottom: -22, near: 1, far: 120 });
   sun.shadow.bias = -0.0008;
+  sun.shadow.normalBias = 0.04; // toon materials cast from front faces (shadowSide), avoid self-shadow acne
   scene.add(sun);
   const rim = new THREE.DirectionalLight("#ff8fd8", 0.7);
   rim.position.set(-14, 8, -10);
@@ -101,11 +117,72 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
   const props = buildFloor1Props(b, g1, tentacles, fonts);
   const p2 = buildFloor2Props(b, g2, tentacles);
   const SEC = buildFloor3(b, g2, g3, tentacles, fonts);
+  // The siren light stays in every pass (only its intensity changes per pass) so the light count, and
+  // with it the compiled shader programs, never flips between passes.
+  scene.attach(SEC.siren.light);
+  // Objects drawn in the floor-1 pass besides g1: sky (scene root) and the island slab and rocks (world root).
+  const skyObjects = new Set(scene.children.filter((o) => o !== world && !(o as THREE.Light).isLight));
+  const islandObjects = new Set(world.children.filter((o) => o !== g1 && o !== g2 && o !== g3));
   const stations = SEC.stations;
   const spots = createSpots();
+  const boards = createBoardSlots(); // task board standing spots (deviation 14)
+  drawTaskBoard(null, p2.taskBoard.face);
   const slots = createDeskSlots();
+  // All 12 home desks exist from the start (deviation 7): an agent takes the desk of its slot and leaves it
+  // empty again on removal. The prototype built a desk per agent, so an office without agents had no desks.
+  const DESK_EMPTY = "#3a3360";
+  const desks: Desk[] = slots.map((slot) => buildDesk(b, g2, slot));
+  let emptyDesksHidden = false; // tests only, see Engine.debug
+  const resetDesk = (d: Desk) => {
+    d.group.visible = !emptyDesksHidden;
+    d.strip.material.color.set(DESK_EMPTY);
+    d.ring.material.color.set(DESK_EMPTY);
+    d.glow.material.opacity = 0;
+    d.chair.position.y = 0;
+    d.group.traverse((o) => { delete o.userData.agentId; });
+    drawEmptyDesk(fontsReady ? fonts : null, d);
+  };
+  desks.forEach(resetDesk);
   const soc = newSocAnim();
   const fx = createFx(kit, world);
+  // Random sky events (deviation 13). Sounds go out as a bubbling DOM event that lib/audio.ts plays.
+  // Placement inputs, read when an event starts (skyPlacement.ts): sky bodies to avoid, the building's silhouette
+  // for the floors on show, and the screen areas covered by UI panels.
+  const placeCtx = (): PlaceCtx => {
+    const obstacles: THREE.Sphere[] = [], occluders: THREE.Sphere[] = [];
+    for (const o of scene.children) {
+      const r = o.userData.obstacleRadius as number | undefined;
+      if (!r) continue;
+      const s = new THREE.Sphere(o.getWorldPosition(new THREE.Vector3()), r);
+      obstacles.push(s);
+      if (!o.userData.smallRock) occluders.push(s);
+    }
+    const top = g3.visible ? F3 + 4.7 : g2.visible ? F2 + 5.3 : 5.4;
+    const dy = world.position.y;
+    const building: THREE.Vector3[] = [];
+    for (const x of [-14.2, 14.2]) for (const z of [-9.2, 9.2]) for (const y of [-0.8, top]) building.push(V(x, y + dy, z));
+    building.push(V(0, -9.8 + dy, 0), V(4, -13 + dy, 1.5)); // the rock under the island
+    const cr = renderer.domElement.getBoundingClientRect();
+    const uiRects: NdcRect[] = [];
+    for (const el of document.querySelectorAll<HTMLElement>("[data-hq-ui]")) {
+      const kind = el.dataset.hqUi;
+      if (kind === "toast" || kind === "modal" || kind === "audio") continue;
+      for (const part of kind === "top" ? [...el.children] : [el]) {
+        const r = part.getBoundingClientRect();
+        if (r.width < 1 || r.height < 1) continue;
+        uiRects.push({
+          x0: ((r.left - cr.left) / cr.width) * 2 - 1, x1: ((r.right - cr.left) / cr.width) * 2 - 1,
+          y0: 1 - ((r.bottom - cr.top) / cr.height) * 2, y1: 1 - ((r.top - cr.top) / cr.height) * 2,
+        });
+      }
+    }
+    return { camera, obstacles, occluders, building, uiRects };
+  };
+  const sky = createSkyEvents({
+    scene, camera, kit,
+    place: placeCtx,
+    emit: (detail) => stage.dispatchEvent(new CustomEvent(SFX_EVENT, { bubbles: true, detail })),
+  });
   const agents = new Map<string, AgentRuntime>();
   let simTime = 0;
 
@@ -114,6 +191,7 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
   const nav: NavCtx = {
     spots,
     stations: stations.map((s) => s.place),
+    boards,
     now: () => simTime,
     log: (id, message) => S().pushLog({ id, level: "move", message }),
     changed: (m) => dirty.add(m.id),
@@ -137,10 +215,12 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
     const a = S().agents.get(id);
     if (!a || a.slot == null) return;
     const slot = slots[a.slot];
-    const desk = buildDesk(b, g2, slot);
-    const av = buildAvatar(kit, M, id, () => S().select(id, true));
+    const desk = desks[a.slot];
+    desk.group.visible = true;
+    const av = buildAvatar(kit, M, id, () => toggleFocus(id));
     const home = slot.place;
     av.root.position.copy(home.final);
+    av.root.rotation.y = home.face; // spawned seated: already facing the monitor (desks face PI, deviation 8)
     const rt: AgentRuntime = { id, root: av.root, av, desk, home, mv: newMovement(home), squash: 0 };
     world.add(av.root);
     av.root.scale.setScalar(0.01);
@@ -158,9 +238,8 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
     releasePlaces(rt);
     world.remove(rt.root);
     rt.av.el.remove();
-    g2.remove(rt.desk.group);
     disposeSubtree(rt.root);
-    disposeSubtree(rt.desk.group);
+    resetDesk(rt.desk);
     agents.delete(id);
   }
 
@@ -172,6 +251,8 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
     (el.querySelector(".nm") as HTMLElement).textContent = a.name;
     let txt = "";
     if (mv.mode === "act") txt = (mv.activity && ACT_LABEL[mv.activity]) || "";
+    else if (mv.mode === "fetch" || (mv.mode === "walk" && mv.dest.kind === "board")) txt = "ambil tugas";
+    else if (mv.mode === "walk" && mv.carrying) txt = mv.dest.kind === "station" ? `bawa tugas ke ${DEPTS[mv.dest.dept].label}!` : "bawa tugas ke meja!";
     else if (mv.mode === "walk" && mv.urgent) txt = mv.dest.kind === "station" ? `ke ${DEPTS[mv.dest.dept].label}!` : "buru-buru balik!";
     else if (mv.mode === "walk") txt = "jalan-jalan";
     else if (a.task && (a.id === selectedId || a.status === "waiting" || a.status === "error")) txt = truncate(a.task, 30);
@@ -193,15 +274,60 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
     for (const r of b.roomLabels) r.o.visible = r.floor === lf;
     if (moveCam) flyTo(V(...VIEWS[f].pos), V(...VIEWS[f].target));
   }
+  /* Focus mode (deviation 12): clicking an agent (body or bubble) flies the camera to it; clicking the focused agent
+     again, or clearing the selection anywhere else, flies back to the camera pose and floor from before the focus. */
+  let preFocus: { pos: THREE.Vector3; target: THREE.Vector3; floor: FloorMode } | null = null;
+  const toggleFocus = (id: string) => S().select(S().selectedId === id ? null : id, true);
+  /* Follow cam (deviation 15): while an agent is in focus, the camera rides along with it (orbit and zoom still
+     work around it), and the floor view switches when it takes the stairs or the lift. */
+  let follow: { id: string; last: THREE.Vector3; floor: number } | null = null;
+  const floorViewFor = (fl: number, fm: FloorMode): FloorMode => (fl === 3 ? (fm === "all" ? "all" : "3") : (String(fl) as FloorMode));
+  function updateFollow() {
+    if (!follow) return;
+    const rt = agents.get(follow.id);
+    if (!rt || S().selectedId !== follow.id) {
+      follow = null;
+      return;
+    }
+    const d = rt.root.position.clone().sub(follow.last);
+    follow.last.copy(rt.root.position);
+    if (rt.mv.mode !== "walk") d.y = 0; // ignore the hover-chair bob at a desk
+    if (d.lengthSq() > 1e-10) {
+      if (fly) {
+        fly.p1.add(d);
+        fly.t1.add(d);
+      } else {
+        camera.position.add(d);
+        controls.target.add(d);
+      }
+    }
+    const fl = floorOf(rt);
+    if (fl !== follow.floor) {
+      follow.floor = fl;
+      const want = floorViewFor(fl, S().floorMode);
+      if (want !== S().floorMode) S().setFloor(want, false);
+    }
+  }
+  function unfocus() {
+    follow = null;
+    if (!preFocus) return;
+    const { pos, target, floor } = preFocus;
+    preFocus = null;
+    if (S().floorMode !== floor) S().setFloor(floor, false);
+    flyTo(pos, target);
+  }
   function focus(id: string) {
     const rt = agents.get(id);
     if (!rt) return;
     const fl = floorOf(rt);
     const fm = S().floorMode;
-    const want: FloorMode = fl === 3 ? (fm === "all" ? "all" : "3") : (String(fl) as FloorMode);
+    // Remember where the user was only when entering focus; hopping from agent to agent keeps the first pose.
+    if (!preFocus) preFocus = { pos: fly ? fly.p1.clone() : camera.position.clone(), target: fly ? fly.t1.clone() : controls.target.clone(), floor: fm };
+    const want = floorViewFor(fl, fm);
     if (want !== fm) S().setFloor(want, false);
     const tp = rt.root.position.clone().add(V(window.innerWidth > 820 ? 0.9 : 0, 1.2, 0.4));
     flyTo(tp.clone().add(V(4.6, 4.4, 7.6)), tp);
+    follow = { id, last: rt.root.position.clone(), floor: fl };
   }
 
   /* ---------------- store signals ---------------- */
@@ -256,6 +382,12 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
         if (fontsReady) drawReportBoard(fonts, SEC, S());
         break;
       case "floor":
+        // An explicit floor/camera choice (floor buttons, home) replaces the remembered pre-focus pose, otherwise
+        // the unfocus() that follows a select(null) would fly back over it on the next frame.
+        if (s.moveCam) {
+          preFocus = null;
+          follow = null; // an explicit floor/camera choice ends the follow cam
+        }
         applyFloor(s.floor, s.moveCam);
         break;
       case "focus":
@@ -289,7 +421,7 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
   const onUp = (e: PointerEvent) => {
     if (!downAt || Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) > 5) return;
     const id = pickAgent(e);
-    if (id) S().select(id, true);
+    if (id) toggleFocus(id);
   };
   const onMove = (e: PointerEvent) => {
     if (performance.now() - hoverT < 60) return;
@@ -302,10 +434,49 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
     renderer.setSize(vw(), vh());
     labelRenderer.setSize(vw(), vh());
   };
+  /* Trackpad pinch zoom (deviation 10). Chromium and Firefox deliver a pinch as wheel events with ctrlKey and a
+     small deltaY; three r160 OrbitControls scales zoom by |deltaY| / 100, so pinching barely moves, and while a
+     camera fly runs the controls are disabled, so the browser zooms the whole page instead. Safari sends
+     gesture* events. Pinch is handled here, proportional to the gesture, and never page-zooms; plain mouse
+     wheel and two-finger scroll still go to OrbitControls. */
+  const cancelFly = () => {
+    if (!fly) return;
+    fly = null;
+    controls.enabled = true;
+  };
+  const dollyBy = (factor: number) => {
+    const off = camera.position.clone().sub(controls.target);
+    const len = THREE.MathUtils.clamp(off.length() * factor, controls.minDistance, controls.maxDistance);
+    camera.position.copy(controls.target).add(off.setLength(len));
+    controls.update();
+  };
+  const onWheelCapture = (e: WheelEvent) => {
+    cancelFly(); // any wheel gesture takes over from a running camera fly
+    if (!e.ctrlKey) return; // mouse wheel / two-finger scroll: OrbitControls
+    e.preventDefault();
+    e.stopPropagation(); // keep OrbitControls' own (slow) wheel zoom out of it
+    const dy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY; // lines -> pixels
+    dollyBy(Math.exp(THREE.MathUtils.clamp(dy, -50, 50) * 0.01));
+  };
+  let gestureScale = 1;
+  const onGestureStart = (e: Event) => {
+    e.preventDefault();
+    cancelFly();
+    gestureScale = 1;
+  };
+  const onGestureChange = (e: Event) => {
+    e.preventDefault();
+    const s = (e as Event & { scale?: number }).scale ?? 1;
+    if (s > 0) dollyBy(gestureScale / s);
+    gestureScale = s;
+  };
   renderer.domElement.addEventListener("pointerdown", onDown);
   renderer.domElement.addEventListener("pointerup", onUp);
   renderer.domElement.addEventListener("pointermove", onMove);
   window.addEventListener("resize", onResize);
+  stage.addEventListener("wheel", onWheelCapture, { capture: true, passive: false });
+  stage.addEventListener("gesturestart", onGestureStart);
+  stage.addEventListener("gesturechange", onGestureChange);
 
   /* ---------------- fonts ---------------- */
   const drawStatic = () => {
@@ -316,6 +487,9 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
     props.neon.draw();
     props.sign.draw();
     for (const rt of agents.values()) rt.desk.plateName = undefined; // redrawn by animateAgent
+    const taken = new Set([...agents.values()].map((rt) => rt.desk));
+    for (const d of desks) if (!taken.has(d)) drawEmptyDesk(fonts, d);
+    drawTaskBoard(fonts, p2.taskBoard.face);
   };
   loadFonts(fonts).then(() => {
     if (disposed) return;
@@ -350,6 +524,7 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
     const s = S();
     anim.selectedId = s.selectedId;
     anim.floorMode = s.floorMode;
+    updateFollow();
     if (fly) {
       fly.k = Math.min(1, fly.k + dt / 0.9);
       const e = fly.k < 0.5 ? 4 * fly.k ** 3 : 1 - Math.pow(-2 * fly.k + 2, 3) / 2;
@@ -371,6 +546,7 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
     // bubbles: on store change, selection change, or movement change
     const selChanged = s.selectedId !== lastSel;
     lastSel = s.selectedId;
+    if (selChanged && s.selectedId === null) unfocus();
     for (const rt of agents.values()) {
       const a = s.agents.get(rt.id);
       if (!a) continue;
@@ -460,7 +636,7 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
     SEC.siren.beams.visible = alertOn;
     SEC.siren.beams.rotation.y += dt * 6;
     SEC.siren.dome.material.color.set(alertOn ? (Math.sin(t * 12) > 0 ? "#ff2a3a" : "#ffb3bb") : "#7a2030");
-    SEC.siren.light.intensity = alertOn ? 1.3 + Math.sin(t * 12) * 0.9 : 0;
+    SEC.siren.light.intensity = alertOn && g3.visible ? 1.3 + Math.sin(t * 12) * 0.9 : 0;
     SEC.pad.material.color.set(Math.sin(t * 2) > 0 ? "#ff6fd8" : "#c3a6ff");
     slowAcc += dt;
     if (slowAcc > 1) {
@@ -486,6 +662,21 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
       for (const rt of agents.values()) locs.set(rt.id, locText(rt));
       if (locs.size) S().setLocs(locs);
     }
+    // task board cards: pinned while their agent is on the way, gone once picked up (deviation 14)
+    for (const [i, slot] of boards.entries()) {
+      const card = p2.taskBoard.cards[i];
+      const rt = slot.occ ? agents.get(slot.occ) : undefined;
+      const show = !!rt && rt.mv.fetching && !rt.mv.carrying;
+      if (show && !card.g.visible) {
+        card.paper.material.color.set(rt!.av.color);
+        card.pop = 0;
+      }
+      card.g.visible = show;
+      if (show && card.pop < 1) {
+        card.pop = Math.min(1, card.pop + dt * 4);
+        card.g.scale.setScalar(Math.max(0.01, 1 + 2.4 * Math.pow(card.pop - 1, 3) + 1.4 * Math.pow(card.pop - 1, 2)));
+      }
+    }
     for (const bl of p2.blinkers) bl.m.material.color.set(Math.sin(t * bl.rate + bl.ph) > 0.2 ? bl.color : "#2a2350");
     for (const bb of p2.tankBubbles) {
       bb.position.y += bb.userData.sp * dt;
@@ -508,16 +699,60 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
     p2.clockHands.h.rotation.z = (-hh / 12) * Math.PI * 2;
     world.position.y = Math.sin(t * 0.6) * 0.08;
     fx.update(dt);
-    effect.render(scene, camera);
+    sky.update(dt);
+    renderFloors();
     labelRenderer.render(scene, camera);
   }
   raf = requestAnimationFrame(loop);
+
+  /* ---------------- per-floor render passes ----------------
+     Floor slabs do not cast shadows (otherwise every lower floor would sit in the slab's shadow).
+     Drawn in one pass, objects on upper floors would then throw their shadows straight through the
+     slabs onto the floors below. So the floors are drawn bottom to top into the same depth buffer, and
+     each pass re-renders the sun's shadow map with only that floor's objects: every floor gets the same
+     sun, but only its own shadows (dollhouse lighting). */
+  const SPLIT2 = F2 - 0.3, SPLIT3 = F3 - 0.3;
+  const floorBand = (y: number) => (y < SPLIT2 ? 1 : y < SPLIT3 ? 2 : 3);
+  const passVis: [THREE.Object3D, boolean][] = [];
+  const agentBand = new Map<THREE.Object3D, number>();
+  function renderFloors() {
+    const floors = [1];
+    if (g2.visible) floors.push(2);
+    if (g3.visible) floors.push(3);
+    const last = floors[floors.length - 1];
+    agentBand.clear();
+    for (const rt of agents.values()) agentBand.set(rt.root, floorBand(rt.root.position.y));
+    passVis.length = 0;
+    for (const o of scene.children) if (o !== world && !(o as THREE.Light).isLight) passVis.push([o, o.visible]);
+    for (const o of world.children) passVis.push([o, o.visible]);
+    const bandOf = (o: THREE.Object3D) =>
+      o === g1 ? 1 : o === g2 ? 2 : o === g3 ? 3
+        : agentBand.get(o) ?? (skyObjects.has(o) || islandObjects.has(o) ? 1 : last); // fx particles: last pass
+    const background = scene.background;
+    const siren = SEC.siren.light.intensity;
+    const autoUpdate = scene.matrixWorldAutoUpdate;
+    scene.updateMatrixWorld();
+    scene.matrixWorldAutoUpdate = false;
+    renderer.clear();
+    for (const k of floors) {
+      for (const [o, v] of passVis) o.visible = v && bandOf(o) === k;
+      scene.background = k === 1 ? background : null;
+      SEC.siren.light.intensity = k === 3 ? siren : 0;
+      effect.render(scene, camera);
+    }
+    for (const [o, v] of passVis) o.visible = v;
+    scene.background = background;
+    SEC.siren.light.intensity = siren;
+    scene.matrixWorldAutoUpdate = autoUpdate;
+  }
 
   /* ---------------- API ---------------- */
   const placeById = (rtId: string, placeId: string): Place | null => {
     const rt = agents.get(rtId);
     if (!rt) return null;
     if (placeId === "desk") return rt.home;
+    const bm = /^board:(\d+)$/.exec(placeId);
+    if (bm) return boards[Number(bm[1])] ?? null;
     const m = /^station:(\d+)$/.exec(placeId);
     if (m) return stations[Number(m[1])]?.place ?? null;
     return spots.find((sp) => sp.id === placeId) ?? null;
@@ -532,7 +767,11 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
     renderer.domElement.removeEventListener("pointerup", onUp);
     renderer.domElement.removeEventListener("pointermove", onMove);
     window.removeEventListener("resize", onResize);
+    stage.removeEventListener("wheel", onWheelCapture, { capture: true });
+    stage.removeEventListener("gesturestart", onGestureStart);
+    stage.removeEventListener("gesturechange", onGestureChange);
     controls.dispose();
+    sky.dispose();
     const geos = new Set<THREE.BufferGeometry>(), mats = new Set<THREE.Material>(), texs = new Set<THREE.Texture>();
     scene.traverse((o) => {
       const m = o as THREE.Mesh;
@@ -567,10 +806,29 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
       placeAt(nav, rt, pl);
       return true;
     },
-    placeIds: () => ["desk", ...spots.map((sp) => sp.id), ...stations.map((_, i) => `station:${i}`)],
+    placeIds: () => ["desk", ...spots.map((sp) => sp.id), ...stations.map((_, i) => `station:${i}`), ...boards.map((_, i) => `board:${i}`)],
+    skyEvent: (kind, zone) => sky.trigger(kind, zone),
     camera,
     controls,
     dispose,
+    debug: {
+      hideEmptyDesks: (hidden) => {
+        emptyDesksHidden = hidden;
+        const taken = new Set([...agents.values()].map((rt) => rt.desk));
+        for (const d of desks) if (!taken.has(d)) d.group.visible = !hidden;
+      },
+      hideTaskBoard: (hidden) => {
+        p2.taskBoard.group.visible = !hidden;
+      },
+      skyZones: (kind, n = 30) => {
+        const out: Record<string, number> = {};
+        for (let i = 0; i < n; i++) {
+          const z = (kind === "portal" ? planPortal(placeCtx()) : planMeteors(placeCtx()))?.zone ?? "none";
+          out[z] = (out[z] ?? 0) + 1;
+        }
+        return out;
+      },
+    },
   };
 }
 

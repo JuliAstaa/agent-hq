@@ -23,6 +23,8 @@ export interface AvatarProps {
   cards: THREE.Group;
   mug: THREE.Group;
   paddle: THREE.Group;
+  /** Task card carried from the task board to the desk (deviation 14), in the left hand. */
+  taskCard: THREE.Group;
 }
 
 export interface Avatar {
@@ -178,8 +180,11 @@ export function buildAvatar(kit: Kit, M: Materials, id: string, onClick: () => v
   const paddle = new THREE.Group(); paddle.position.set(0, -0.68, 0); arms[1].add(paddle);
   paddle.add(mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.18, 8), M.woodD));
   const blade = mesh(new THREE.CylinderGeometry(0.17, 0.17, 0.03, 18), M.red); blade.rotation.x = Math.PI / 2; blade.position.y = -0.2; paddle.add(blade);
-  const P: AvatarProps = { phone, phoneScreen, book, cards, mug, paddle };
-  for (const o of [phone, book, cards, mug, paddle]) o.visible = false;
+  const taskCard = new THREE.Group(); taskCard.position.set(0, -0.66, 0.1); arms[0].add(taskCard);
+  const tcPaper = mesh(rbox(0.3, 0.34, 0.02, 0.01), M.white); tcPaper.rotation.x = -0.25; taskCard.add(tcPaper);
+  const tcStripe = mesh(new THREE.PlaneGeometry(0.26, 0.07), noLine(toon(color)), false, false); tcStripe.position.set(0, 0.11, 0.012); tcPaper.add(tcStripe);
+  const P: AvatarProps = { phone, phoneScreen, book, cards, mug, paddle, taskCard };
+  for (const o of [phone, book, cards, mug, paddle, taskCard]) o.visible = false;
   // bubble (static markup; agent strings are set with textContent)
   const el = document.createElement("div");
   el.className = "bubble";

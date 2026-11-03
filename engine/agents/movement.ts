@@ -6,12 +6,17 @@ import type * as THREE from "three";
 import { ACT_LABEL, IDLE_LEAVE_DELAY, type Activity } from "../constants";
 import { lerpAngle, pick, rand } from "../scene/kit";
 import { atPlace, route, type Ref, type Waypoint } from "../nav/router";
-import type { DeskPlace, Place, SpotPlace, StationPlace } from "../nav/places";
+import type { BoardPlace, DeskPlace, Place, SpotPlace, StationPlace } from "../nav/places";
 import { DEPTS, type Dept } from "@/lib/teams";
 import type { Status } from "@/lib/events";
 
+/** Task pickup at the board (deviation 14): the card leaves the board at GRAB, the agent heads off at DONE. */
+export const FETCH_GRAB = 0.55;
+export const FETCH_DONE = 1.1;
+
 export interface Movement {
-  mode: "desk" | "walk" | "act";
+  /** desk: at a desk or station; walk: on the way; act: idle activity; fetch: picking a card off the task board. */
+  mode: "desk" | "walk" | "act" | "fetch";
   dest: Place;
   path: Waypoint[];
   lastRef: Ref;
@@ -23,6 +28,13 @@ export interface Movement {
   actT: number;
   hasMug: boolean;
   urgent: boolean;
+  /** A new task was posted: go to the task board first, then to work (deviation 14). */
+  fetching: boolean;
+  /** Holding the task card (picked up, not yet put down at the desk). */
+  carrying: boolean;
+  fetchT: number;
+  /** Status seen on the previous update, to spot the start of a new task. */
+  lastStatus: Status | null;
 }
 
 export interface Mover {
@@ -42,6 +54,8 @@ export interface NavAgent {
 export interface NavCtx {
   spots: SpotPlace[];
   stations: StationPlace[];
+  /** Task board spots; empty = agents go straight to work. */
+  boards: BoardPlace[];
   /** Simulation time in seconds. */
   now: () => number;
   /** Movement log line ("move" level). */
@@ -51,7 +65,10 @@ export interface NavCtx {
 }
 
 export function newMovement(home: DeskPlace): Movement {
-  return { mode: "desk", dest: home, path: [], lastRef: atPlace(home), yaw: 0, speed: 2.4, idleSince: null, switchAt: 0, activity: null, actT: 0, hasMug: false, urgent: false };
+  return {
+    mode: "desk", dest: home, path: [], lastRef: atPlace(home), yaw: home.face, speed: 2.4, idleSince: null, switchAt: 0,
+    activity: null, actT: 0, hasMug: false, urgent: false, fetching: false, carrying: false, fetchT: 0, lastStatus: null,
+  };
 }
 
 export function pickSpot(ctx: NavCtx, m: Mover): SpotPlace | null {
@@ -81,6 +98,8 @@ export function startActivity(ctx: NavCtx, m: Mover) {
 /** Teleport (used for snapshot placement on connect). */
 export function placeAt(ctx: NavCtx, m: Mover, sp: Place) {
   const mv = m.mv;
+  mv.fetching = false;
+  mv.carrying = false;
   reserve(m, sp);
   mv.path = [];
   mv.lastRef = atPlace(sp);
@@ -88,7 +107,12 @@ export function placeAt(ctx: NavCtx, m: Mover, sp: Place) {
   mv.yaw = sp.face;
   m.root.rotation.y = sp.face;
   if (sp.kind === "spot") startActivity(ctx, m);
-  else {
+  else if (sp.kind === "board") {
+    mv.mode = "fetch";
+    mv.fetching = true;
+    mv.fetchT = 0;
+    ctx.changed(m);
+  } else {
     mv.mode = "desk";
     mv.activity = null;
     ctx.changed(m);
@@ -112,26 +136,66 @@ export function goTo(ctx: NavCtx, m: Mover, dest: Place, urgent = false) {
   mv.speed = urgent ? 4.6 : 2.3;
   mv.mode = "walk";
   mv.activity = null;
-  const where = dest.kind === "desk" ? "balik ke meja" : dest.kind === "station" ? `ke ${dest.room} (Lt.3)` : `jalan ke ${dest.room} (Lt.${dest.floor})`;
+  const where =
+    dest.kind === "board" ? "ambil tugas di papan" :
+    dest.kind === "desk" ? (mv.carrying ? "bawa tugas ke meja" : "balik ke meja") :
+    dest.kind === "station" ? `${mv.carrying ? "bawa tugas " : ""}ke ${dest.room} (Lt.3)` :
+    `jalan ke ${dest.room} (Lt.${dest.floor})`;
   ctx.log(m.id, urgent ? `Buru-buru ${where}` : `Jalan santai, ${where.replace("jalan ke ", "ke ")}`);
   ctx.changed(m);
 }
 
 export function arrive(ctx: NavCtx, m: Mover) {
   const mv = m.mv;
-  if (mv.dest.kind !== "spot") {
+  if (mv.dest.kind === "board") {
+    mv.mode = "fetch";
+    mv.fetchT = 0;
+    mv.activity = null;
+  } else if (mv.dest.kind !== "spot") {
     mv.mode = "desk";
     mv.activity = null;
     mv.hasMug = false;
+    mv.carrying = false; // the card goes on the desk
   } else startActivity(ctx, m);
   mv.yaw = mv.dest.face;
   m.squash = 0.5;
   ctx.changed(m);
 }
 
+/** A free task-board spot, or null when all are taken. */
+function freeBoard(ctx: NavCtx, m: Mover): BoardPlace | null {
+  return ctx.boards.find((b) => !b.occ || b.occ === m.id) ?? null;
+}
+
+/** Stop a pickup that is no longer needed: the task ended before it started (idle: off to relax) or the agent
+ *  went offline (back to its desk, like any offline agent). */
+function cancelFetch(ctx: NavCtx, m: Mover, offline: boolean) {
+  const mv = m.mv;
+  if (!mv.fetching && !mv.carrying && mv.mode !== "fetch") return;
+  mv.fetching = false;
+  mv.carrying = false;
+  if (mv.mode === "fetch" || mv.dest.kind === "board") goTo(ctx, m, offline ? m.home : (pickSpot(ctx, m) ?? m.home));
+  ctx.changed(m);
+}
+
 export function updateNav(ctx: NavCtx, m: Mover, a: NavAgent, dt: number) {
   const mv = m.mv;
   const now = ctx.now();
+  // A new task starts when an idle or offline agent begins thinking or working (a prompt arrived): it first picks
+  // the card up at the task board. Agents that appear already busy (snapshot, first event) go straight to work.
+  const prev = mv.lastStatus;
+  mv.lastStatus = a.status;
+  const newTask = (prev === "idle" || prev === "offline") && (a.status === "thinking" || a.status === "working");
+  if (newTask && !mv.fetching) {
+    const slot = freeBoard(ctx, m);
+    if (slot) {
+      mv.fetching = true;
+      mv.carrying = false;
+      mv.idleSince = null;
+      goTo(ctx, m, slot, true);
+    }
+  }
+  if (a.status === "idle" || a.status === "offline") cancelFetch(ctx, m, a.status === "offline");
   if (a.status === "idle") {
     if (mv.idleSince === null) mv.idleSince = now;
     if (mv.mode === "desk" && now - mv.idleSince > IDLE_LEAVE_DELAY) {
@@ -147,8 +211,18 @@ export function updateNav(ctx: NavCtx, m: Mover, a: NavAgent, dt: number) {
     }
   } else {
     mv.idleSince = null;
-    const tgt = workTarget(ctx, m, a);
-    if (mv.dest !== tgt) goTo(ctx, m, tgt, true);
+    if (mv.mode === "fetch") {
+      mv.fetchT += dt;
+      if (!mv.carrying && mv.fetchT >= FETCH_GRAB) {
+        mv.carrying = true;
+        ctx.changed(m);
+      }
+      if (mv.fetchT >= FETCH_DONE) mv.fetching = false;
+    }
+    if (!mv.fetching) {
+      const tgt = workTarget(ctx, m, a);
+      if (mv.dest !== tgt) goTo(ctx, m, tgt, true);
+    }
   }
   if (mv.path.length) {
     mv.mode = "walk";
@@ -168,10 +242,11 @@ export function updateNav(ctx: NavCtx, m: Mover, a: NavAgent, dt: number) {
 
 /** Release every place this agent holds (called when the agent is removed). */
 export function releasePlaces(m: Mover) {
-  // PROTOTYPE PARITY: references/agent-hq.html removeAgent() only frees spots, so a removed agent
-  // keeps its floor-3 station reserved. Fix (free stations too) is proposed in plan-m1.md, pending approval.
+  // Fix B1 (approved 2026-11-03): the prototype's removeAgent() only freed spots, so a removed agent kept its
+  // floor-3 station reserved forever. An agent only ever holds its current destination (reserve() releases the
+  // previous one), including while still walking there, so freeing every non-desk destination is enough.
   const d = m.mv.dest;
-  if (d.kind === "spot" && d.occ === m.id) d.occ = null;
+  if (d.kind !== "desk" && d.occ === m.id) d.occ = null;
 }
 
 export function floorOf(m: { root: THREE.Object3D } | null): number {
@@ -187,6 +262,11 @@ export function locText(m: Mover | null): { where: string; what: string } {
   if (mv.mode === "desk") {
     return mv.dest.kind === "station" ? { where: `${mv.dest.room} · ${fl}`, what: DEPTS[mv.dest.dept].label } : { where: `Meja kerja · ${fl}`, what: "" };
   }
-  if (mv.mode === "walk") return { where: fl, what: mv.dest.kind === "desk" ? "jalan balik ke meja" : `jalan ke ${mv.dest.room}` };
+  if (mv.mode === "fetch") return { where: `Papan Tugas · ${fl}`, what: "ambil tugas" };
+  if (mv.mode === "walk") {
+    if (mv.dest.kind === "board") return { where: fl, what: "jalan ke Papan Tugas" };
+    if (mv.carrying) return { where: fl, what: mv.dest.kind === "station" ? `bawa tugas ke ${mv.dest.room}` : "bawa tugas ke meja" };
+    return { where: fl, what: mv.dest.kind === "desk" ? "jalan balik ke meja" : `jalan ke ${mv.dest.room}` };
+  }
   return { where: `${mv.dest.room} · ${fl}`, what: (mv.activity && ACT_LABEL[mv.activity]) || "santai" };
 }

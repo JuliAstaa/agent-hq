@@ -15,7 +15,24 @@ const nextConfig: NextConfig = {
   env: {
     NEXT_PUBLIC_HQ_STATIC: isStatic ? "1" : "",
   },
-  ...(isStatic ? { output: "export" as const, pageExtensions: ["tsx"] } : {}),
+  ...(isStatic
+    ? // Output goes to out/. Note: the export still uses .next for intermediate files, so it replaces the server
+      // build there; run `npm run build` again before `npm start` (distDir only renames out/ in Next 16).
+      { output: "export" as const, pageExtensions: ["tsx"] }
+    : {
+        // Prototype URLs (references/server.js) keep working on the same port: /hook, /event, /stream and
+        // /health are served by the /api routes. Rewrites are internal (no proxy hop), so SSE on /stream
+        // streams like /api/stream. Static exports cannot rewrite, hence only in the server build.
+        async rewrites() {
+          return [
+            { source: "/hook", destination: "/api/hook" },
+            { source: "/event", destination: "/api/event" },
+            { source: "/stream", destination: "/api/stream" },
+            { source: "/health", destination: "/api/health" },
+            { source: "/agents", destination: "/api/agents" }, // not in the prototype: agent list for renames
+          ];
+        },
+      }),
   turbopack: {
     rules: {
       "*.css": {

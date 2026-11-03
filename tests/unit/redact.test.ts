@@ -25,10 +25,51 @@ describe("redact (prd.md §8.4)", () => {
     expect(redact("mysqldump -pXYZ db | mysql x")).toBe("mysqldump -p*** db | mysql x");
     expect(redact("grep -pfoo file")).toBe("grep -pfoo file");
   });
-  // KNOWN GAP in the prototype regex: `-p<pw>` is only hidden when the word mysql comes AFTER it.
-  // Kept for M1 parity; fix proposed to the user (plan-m1.md, "Usulan perbaikan").
-  it.fails("mysql -p<password> after the mysql word is hidden", () => {
-    expect(redact("mysql -u root -pS3cret db")).toBe("mysql -u root -p*** db");
+  describe("B2 extensions (approved 2026-11-03)", () => {
+    const hidden: [string, string][] = [
+      // mysql family, password after the command word
+      ["mysql -u root -pS3cret db", "mysql -u root -p*** db"],
+      ["mysql -h db.staging -u root -pS3cretPass -e 'show databases'", "mysql -h db.staging -u root -p*** -e 'show databases'"],
+      ["mysqldump -uroot -p'my pass' shop > dump.sql", "mysqldump -uroot -p*** shop > dump.sql"],
+      ["mysqladmin -u root -ph0rse status", "mysqladmin -u root -p*** status"],
+      ["mariadb -u app -pApp_2024 -e 'select 1'", "mariadb -u app -p*** -e 'select 1'"],
+      ["mariadb-dump -u app -pX9 db", "mariadb-dump -u app -p*** db"],
+      // The prototype rule (-p before a later "mysql") also eats the ";" — both secrets are still hidden.
+      ["mysql -pA; mysql -pB", "mysql -p*** mysql -p***"],
+      // curl user:pass
+      ["curl -u admin:hunter2 https://h/api", "curl -u admin:*** https://h/api"],
+      ["curl -s --user admin:hunter2 https://h", "curl -s --user admin:*** https://h"],
+      ["curl --user=admin:hunter2 https://h", "curl --user=admin:*** https://h"],
+      ["curl -uadmin:pw https://h", "curl -uadmin:*** https://h"],
+      ["curl -u 'admin:p w' https://h", "curl -u 'admin:***' https://h"],
+      ["curl -x proxy:3128 -U bob:pr0xy https://h", "curl -x proxy:3128 -U bob:*** https://h"],
+      ["curl --proxy-user bob:pr0xy https://h", "curl --proxy-user bob:*** https://h"],
+      // credentials in URLs
+      ["git clone https://bob:ghs_tok3n@github.com/x/y.git", "git clone https://bob:***@github.com/x/y.git"],
+      ["psql postgres://admin:s3cr3t@db:5432/app", "psql postgres://admin:***@db:5432/app"],
+      ["redis-cli -u redis://default:pw@cache:6379", "redis-cli -u redis://default:***@cache:6379"],
+      // sshpass
+      ["sshpass -p 'S3cret' ssh root@10.0.0.5", "sshpass -p *** ssh root@10.0.0.5"],
+      ["sshpass -pS3cret scp a b:/tmp", "sshpass -p*** scp a b:/tmp"],
+      ["sshpass -p pw ssh -p 2222 u@h", "sshpass -p *** ssh -p 2222 u@h"],
+    ];
+    it.each(hidden)("%s", (input, want) => {
+      expect(redact(input)).toBe(want);
+    });
+    const untouched = [
+      "mysql -u root -p shop", // bare -p prompts for the password
+      "mysql -h db -P 3306 -u app shop", // -P is the port
+      "curl -A 'x' --user-agent Mozilla https://h",
+      "curl -u alice https://h", // no password, curl prompts
+      "curl https://example.com/a?b=c",
+      "git push https://github.com/x/y.git",
+      "ssh -p 2222 user@host",
+      "sshpass -f ~/.pw ssh host",
+      "echo user@example.com",
+    ];
+    it.each(untouched)("leaves %s alone", (input) => {
+      expect(redact(input)).toBe(input);
+    });
   });
   it("tricky: several secrets in one command", () => {
     const out = redact("TOKEN=a1 curl -H 'authorization: Bearer zz9' https://h/?api_key=k&secret=s ghp_0123456789abcdef");

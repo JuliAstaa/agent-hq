@@ -37,6 +37,12 @@ export function describeTool(name: string, input: any = {}): string {
 
 export const QUIET_TOOLS = new Set(["Read", "Grep", "Glob", "TodoWrite", "TaskUpdate", "TaskCreate"]);
 
+/** Agent id for a hook payload: cc-<8 of session_id>, subagents cc-<6 of session_id>-<8 of agent_id>. */
+export function hookAgentId(h: HookPayload): string {
+  const sid = String(h.session_id || "unknown");
+  return h.agent_id ? `cc-${sid.slice(0, 6)}-${String(h.agent_id).slice(0, 8)}` : `cc-${sid.slice(0, 8)}`;
+}
+
 export function hookToEvents(
   h: HookPayload,
   hdr: HeaderGet,
@@ -46,7 +52,7 @@ export function hookToEvents(
   const sid = String(h.session_id || "unknown");
   const proj = base(h.cwd) || "claude";
   const isSub = !!h.agent_id;
-  const id = isSub ? `cc-${sid.slice(0, 6)}-${String(h.agent_id).slice(0, 8)}` : `cc-${sid.slice(0, 8)}`;
+  const id = hookAgentId(h);
   const team = (hdr("x-hq-team") || "").trim();
   const who = {
     id,

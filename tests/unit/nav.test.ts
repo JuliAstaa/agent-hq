@@ -1,9 +1,9 @@
 import * as THREE from "three";
 import { describe, expect, it } from "vitest";
 import { ADJ, N, shortest } from "@/engine/nav/graph";
-import { createDeskSlots, createSpots, stationPlace, STATION_LAYOUT, type Place } from "@/engine/nav/places";
+import { createBoardSlots, createDeskSlots, createSpots, stationPlace, STATION_LAYOUT, type Place } from "@/engine/nav/places";
 import { atPlace, chainOf, route } from "@/engine/nav/router";
-import { floorOf, locText, newMovement, pickSpot, placeAt, releasePlaces, updateNav, workTarget, type Mover, type NavAgent, type NavCtx } from "@/engine/agents/movement";
+import { FETCH_DONE, FETCH_GRAB, floorOf, locText, newMovement, pickSpot, placeAt, releasePlaces, updateNav, workTarget, type Mover, type NavAgent, type NavCtx } from "@/engine/agents/movement";
 import { F2, F3 } from "@/engine/constants";
 import type { Dept } from "@/lib/teams";
 
@@ -25,7 +25,7 @@ describe("router", () => {
   const spots = createSpots();
   const desks = createDeskSlots();
   const stations = STATION_LAYOUT.map((_, i) => stationPlace(i));
-  const all: Place[] = [...spots, ...desks.map((d) => d.place), ...stations];
+  const all: Place[] = [...spots, ...desks.map((d) => d.place), ...stations, ...createBoardSlots()];
   const floorOfY = (y: number) => (y > 8.4 ? 3 : y > 2.8 ? 2 : 1);
 
   it("every place is reachable from every desk, ending at its final point", () => {
@@ -45,7 +45,7 @@ describe("router", () => {
     expect(r[0].p.equals(desk.final)).toBe(true);
     expect(r[1].p.equals(desk.via[0])).toBe(true);
     const ids = r.filter((w) => w.ref.t === "node").map((w) => (w.ref as { id: string }).id);
-    expect(ids).toEqual(["K1", "K2", "K3", "HL", "Top2", "ST", "SB", "Land1", "L1a", "H1", "PH"]);
+    expect(ids).toEqual(["K2", "K3", "HL", "Top2", "ST", "SB", "Land1", "L1a", "H1", "PH"]);
     expect(r.slice(-4).map((w) => w.p.toArray())).toEqual(chainOf(coffee).slice(1).map((w) => w.p.toArray()));
     // height only changes on the stairs segment
     const ys = r.map((w) => floorOfY(w.p.y));
@@ -89,6 +89,7 @@ function setup() {
   const ctx: NavCtx = {
     spots: createSpots(),
     stations: STATION_LAYOUT.map((_, i) => stationPlace(i)),
+    boards: createBoardSlots(),
     now: () => now,
     log: (id, m) => logs.push(`${id}: ${m}`),
     changed: () => {},
@@ -110,6 +111,18 @@ function setup() {
 }
 
 describe("agent behavior (prd.md §10)", () => {
+  it("an agent spawned at its desk faces the monitor (desk face PI), and keeps facing it while working", () => {
+    const { mk, run } = setup();
+    for (const slot of [0, 5, 11]) {
+      const m = mk(`seat${slot}`, slot);
+      expect(m.home.face).toBe(Math.PI);
+      expect(m.mv.yaw).toBe(Math.PI);
+      run(m, { status: "working", dept: null }, 1);
+      expect(m.mv.mode).toBe("desk");
+      expect(Math.abs(Math.cos(m.root.rotation.y) - Math.cos(Math.PI))).toBeLessThan(1e-3);
+    }
+  });
+
   it("idle >= 3 s at the desk: strolls to a free lounge spot and starts an activity", () => {
     const { logs, mk, run } = setup();
     const m = mk("zorp");
@@ -207,7 +220,7 @@ describe("agent behavior (prd.md §10)", () => {
     expect(m.mv.idleSince).toBeGreaterThan(3.2);
   });
 
-  it("removal frees a spot; station stays reserved (prototype parity, fix pending approval)", () => {
+  it("removal frees a spot and a station (fix B1)", () => {
     const { ctx, mk } = setup();
     const m = mk("q");
     const coffee = ctx.spots.find((s) => s.id === "coffee")!;
@@ -217,6 +230,112 @@ describe("agent behavior (prd.md §10)", () => {
     const st = ctx.stations[4];
     placeAt(ctx, m, st);
     releasePlaces(m);
-    expect(st.occ).toBe("q");
+    expect(st.occ).toBeNull();
+  });
+
+  it("removal while walking to a station frees it for the next agent (fix B1)", () => {
+    const { ctx, mk, run } = setup();
+    const reds = Array.from({ length: 4 }, (_, i) => mk("r" + i, i));
+    for (const m of reds) placeAt(ctx, m, workTarget(ctx, m, { status: "working", dept: "red" }));
+    const late = mk("late", 5);
+    run(late, { status: "working", dept: "red" }, 0.05);
+    expect(late.mv.dest).toBe(late.home); // all 4 red stations taken
+    releasePlaces(reds[2]);
+    const walker = mk("walker", 6);
+    run(walker, { status: "working", dept: "red" }, 0.05);
+    expect(walker.mv.mode).toBe("walk");
+    expect(walker.mv.dest.kind).toBe("station");
+    releasePlaces(walker); // removed mid-walk
+    expect(workTarget(ctx, late, { status: "working", dept: "red" }).kind).toBe("station");
   });
 });
+
+describe("task board (deviation 14)", () => {
+  /** Run until `pred` holds (or `max` seconds pass); returns the elapsed time. */
+  const until = (run: (m: Mover, a: NavAgent, s: number) => void, m: Mover, a: NavAgent, pred: () => boolean, max = 40) => {
+    let t = 0;
+    while (!pred() && t < max) { run(m, a, 0.05); t += 0.05; }
+    return t;
+  };
+
+  it("a new prompt: the idle agent fetches the card at the board, then carries it to its desk", () => {
+    const { logs, mk, run } = setup();
+    const m = mk("rexx", 5);
+    run(m, { status: "idle", dept: null }, 1); // just finished, still at the desk
+    const busy: NavAgent = { status: "thinking", dept: null };
+    run(m, busy, 0.05);
+    expect(m.mv).toMatchObject({ mode: "walk", fetching: true, carrying: false, urgent: true });
+    expect(m.mv.dest.kind).toBe("board");
+    expect(m.mv.dest.occ).toBe("rexx");
+    expect(logs.at(-1)).toBe("rexx: Buru-buru ambil tugas di papan");
+    expect(locText(m)).toEqual({ where: "Lt.2", what: "jalan ke Papan Tugas" });
+    until(run, m, busy, () => m.mv.mode === "fetch");
+    const board = m.mv.dest;
+    expect(m.root.position.distanceTo(board.final)).toBeLessThan(1e-6);
+    expect(locText(m)).toEqual({ where: "Papan Tugas · Lt.2", what: "ambil tugas" });
+    run(m, busy, FETCH_GRAB + 0.05);
+    expect(m.mv.carrying).toBe(true);
+    run(m, busy, FETCH_DONE - FETCH_GRAB);
+    expect(m.mv).toMatchObject({ mode: "walk", fetching: false, carrying: true });
+    expect(m.mv.dest.kind).toBe("desk");
+    expect(board.occ).toBeNull(); // the next agent can use that spot
+    expect(logs.at(-1)).toBe("rexx: Buru-buru bawa tugas ke meja");
+    until(run, m, busy, () => m.mv.mode === "desk");
+    expect(m.root.position.distanceTo(m.home.final)).toBeLessThan(1e-6);
+    expect(m.mv.carrying).toBe(false); // card put down on the desk
+  });
+
+  it("from the lounge, a security agent goes board first, then its floor-3 station", () => {
+    const { ctx, mk, run } = setup();
+    const m = mk("sentra", 2);
+    placeAt(ctx, m, ctx.spots.find((s) => s.id === "coffee")!);
+    run(m, { status: "idle", dept: null }, 0.1);
+    const busy: NavAgent = { status: "working", dept: "blue" };
+    run(m, busy, 0.05);
+    expect(m.mv.dest.kind).toBe("board");
+    until(run, m, busy, () => m.mv.mode === "fetch");
+    expect(floorOf(m)).toBe(2);
+    until(run, m, busy, () => m.mv.mode === "desk", 60);
+    expect(m.mv.dest.kind).toBe("station");
+    expect(floorOf(m)).toBe(3);
+  });
+
+  it("no board detour for agents that are already busy, mid-task status changes, or a full board", () => {
+    const { ctx, mk, run } = setup();
+    const first = mk("a", 0);
+    run(first, { status: "working", dept: null }, 0.1); // first status seen is busy (snapshot / first event)
+    expect(first.mv.fetching).toBe(false);
+    run(first, { status: "waiting", dept: null }, 0.1);
+    run(first, { status: "working", dept: null }, 0.1); // waiting -> working is the same task
+    expect(first.mv.dest.kind).toBe("desk");
+    for (const [i, b] of ctx.boards.entries()) b.occ = "other" + i;
+    const m = mk("b", 1);
+    run(m, { status: "idle", dept: null }, 0.1);
+    run(m, { status: "working", dept: null }, 0.1);
+    expect(m.mv.fetching).toBe(false);
+    expect(m.mv.dest.kind).toBe("desk");
+  });
+
+  it("task over before the pickup: the card is dropped and the agent goes to relax; offline: back to its desk", () => {
+    const { ctx, mk, run } = setup();
+    const m = mk("c", 7);
+    run(m, { status: "idle", dept: null }, 0.1);
+    run(m, { status: "thinking", dept: null }, 0.5);
+    const slot = m.mv.dest;
+    expect(slot.kind).toBe("board");
+    run(m, { status: "idle", dept: null }, 0.05);
+    expect(m.mv.fetching).toBe(false);
+    expect(slot.occ).toBeNull();
+    expect(["spot", "desk"]).toContain(m.mv.dest.kind);
+    const n = mk("d", 8);
+    run(n, { status: "offline", dept: null }, 0.1);
+    run(n, { status: "working", dept: null }, 0.05);
+    expect(n.mv.dest.kind).toBe("board");
+    until(run, n, { status: "working", dept: null }, () => n.mv.mode === "fetch");
+    run(n, { status: "offline", dept: null }, 0.05);
+    expect(n.mv).toMatchObject({ fetching: false, carrying: false });
+    expect(n.mv.dest).toBe(n.home);
+    expect(ctx.boards.every((b) => b.occ !== "d")).toBe(true);
+  });
+});
+

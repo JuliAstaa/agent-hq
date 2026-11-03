@@ -11,6 +11,7 @@ import type { AgentRuntime } from "../agents/animate";
 import type { Fonts } from "../scene/fonts";
 import { pick, rand, type CanvasTex } from "../scene/kit";
 import type { Floor2Props } from "../world/floor2";
+import type { Desk } from "../world/props/desk";
 
 export function drawScreen(F: Fonts, rt: AgentRuntime, a: Agent, t: number) {
   const { ctx, tex } = rt.desk.scr, W = 256, H = 160;
@@ -47,6 +48,9 @@ export function drawScreen(F: Fonts, rt: AgentRuntime, a: Agent, t: number) {
     if (away && mv.dest.kind === "station") {
       ctx.fillStyle = DEPTS[mv.dest.dept].color; ctx.font = `44px ${F.bungee}`; ctx.textAlign = "center"; ctx.fillText("DI LT.3", W / 2, 80);
       ctx.font = `600 20px ${F.fredoka}`; ctx.fillStyle = "#fff6e3"; ctx.fillText(mv.dest.room, W / 2, 118);
+    } else if (away && (mv.fetching || mv.carrying)) {
+      ctx.fillStyle = "#ffd23f"; ctx.font = `34px ${F.bungee}`; ctx.textAlign = "center"; ctx.fillText("TUGAS BARU", W / 2, 82 + Math.sin(t * 4) * 3);
+      ctx.font = `600 18px ${F.fredoka}`; ctx.fillStyle = "#fff6e3"; ctx.fillText(mv.carrying ? "lagi dibawa ke meja" : "diambil di papan", W / 2, 120);
     } else if (away) {
       ctx.fillStyle = "#59c3ff"; ctx.font = `50px ${F.bungee}`; ctx.textAlign = "center"; ctx.fillText("AFK", W / 2, 82 + Math.sin(t * 2) * 4);
       ctx.font = `600 18px ${F.fredoka}`; ctx.fillStyle = "#fff6e3"; ctx.fillText(truncate(locText(rt).what || "santai", 22), W / 2, 120);
@@ -60,6 +64,32 @@ export function drawScreen(F: Fonts, rt: AgentRuntime, a: Agent, t: number) {
     ctx.fillStyle = "rgba(255,255,255,.15)"; ctx.fillRect(0, H - 8, W, 8);
     ctx.fillStyle = col; ctx.fillRect(0, H - 8, W * a.progress, 8);
   }
+  tex.needsUpdate = true;
+}
+
+/** Unassigned desk: dark monitor with STANDBY (same style as empty floor-3 stations) and a blank name plate.
+ *  Text is drawn only once fonts are ready; before that both stay blank. */
+export function drawEmptyDesk(F: Fonts | null, d: Desk) {
+  const s = d.scr;
+  s.ctx.fillStyle = "#150e2c"; s.ctx.fillRect(0, 0, 256, 160);
+  if (F) {
+    s.ctx.fillStyle = "rgba(255,255,255,.25)"; s.ctx.font = `24px ${F.bungee}`; s.ctx.textAlign = "center";
+    s.ctx.fillText("STANDBY", 128, 90);
+  }
+  s.tex.needsUpdate = true;
+  d.plate.ctx.fillStyle = "#fff6e3"; d.plate.ctx.fillRect(0, 0, 256, 64);
+  d.plate.tex.needsUpdate = true;
+  d.plateName = undefined;
+}
+
+/** Cork face of the task board (deviation 14). Text only once fonts are ready. */
+export function drawTaskBoard(F: Fonts | null, face: CanvasTex) {
+  const { ctx, tex } = face, W = 512, H = 320;
+  ctx.fillStyle = "#c98a4b"; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = "rgba(90,50,20,.18)";
+  for (let i = 0; i < 260; i++) ctx.fillRect((i * 97) % W, (i * 57) % H, 3 + (i % 3), 2 + (i % 2));
+  ctx.fillStyle = "#1b1530"; ctx.fillRect(0, 0, W, 56);
+  if (F) { ctx.fillStyle = "#ffd23f"; ctx.font = `30px ${F.bungee}`; ctx.textAlign = "center"; ctx.fillText("PAPAN TUGAS", W / 2, 40); }
   tex.needsUpdate = true;
 }
 

@@ -107,7 +107,7 @@ export function createKit(): Kit {
   gradientMap.needsUpdate = true;
   return {
     gradientMap,
-    toon: (color, extra = {}) => new THREE.MeshToonMaterial({ color, gradientMap, ...(extra as THREE.MeshToonMaterialParameters) }),
+    toon: (color, extra = {}) => new THREE.MeshToonMaterial({ color, gradientMap, shadowSide: THREE.FrontSide, ...(extra as THREE.MeshToonMaterialParameters) }),
     flat: (color, extra = {}) => new THREE.MeshBasicMaterial({ color, ...(extra as THREE.MeshBasicMaterialParameters) }),
   };
 }

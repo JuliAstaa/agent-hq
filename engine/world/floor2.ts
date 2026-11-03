@@ -4,6 +4,7 @@
 import * as THREE from "three";
 import { F2, INK } from "../constants";
 import { boxAt, canvasTex, cyl, mesh, noLine, pick, rbox, shade, thin, V, type CanvasTex } from "../scene/kit";
+import { BOARD_SLOTS_Z } from "../nav/places";
 import { alienPlant } from "./props/alienPlant";
 import { floorPlane, makeWall, partition, plankTexture, rail, roomLabel, type Build } from "./structure";
 
@@ -61,6 +62,16 @@ export interface Floor2Props {
   board: CanvasTex;
   clockHands: { h: THREE.Group; m: THREE.Group; s: THREE.Group };
   wb: CanvasTex & { strokes: number; cx: number; cy: number };
+  taskBoard: TaskBoard;
+}
+
+/** Cork task board (deviation 14): a header and one card spot per standing spot (BOARD_SLOTS_Z). */
+export interface TaskBoard {
+  group: THREE.Group;
+  /** Cork face with the "PAPAN TUGAS" header, drawn once fonts are ready. */
+  face: CanvasTex;
+  /** Card pinned for agent `occ` while it is on its way; hidden once picked up. */
+  cards: { g: THREE.Group; paper: THREE.Mesh<THREE.BufferGeometry, THREE.MeshToonMaterial>; pop: number }[];
 }
 
 export function buildFloor2Props(b: Build, g2: THREE.Group, tentacles: THREE.Group[]): Floor2Props {
@@ -175,5 +186,25 @@ export function buildFloor2Props(b: Build, g2: THREE.Group, tentacles: THREE.Gro
     roomLabel(b, g2, "POJOK BACA", -0.8, F2 + 0.2, 8.0, 2);
   }
   roomLabel(b, g2, "KANTOR", -4.2, F2 + 0.2, -7.2, 2);
-  return { blinkers, tankBubbles, board, clockHands: clockHands!, wb: wb! };
+  // task board (deviation 14): left wall between the mission board and the meeting room
+  const BOARD_Z = 1.7;
+  const face = canvasTex(512, 320);
+  const cards: TaskBoard["cards"] = [];
+  const tbGroup = new THREE.Group();
+  {
+    const g = tbGroup; g.position.set(-12.55, F2 + 2.15, BOARD_Z); g.rotation.y = Math.PI / 2; g2.add(g);
+    g.add(mesh(rbox(3.2, 2.0, 0.14, 0.08), M.woodD));
+    const cork = mesh(new THREE.PlaneGeometry(2.95, 1.78), noLine(flat("#ffffff", { map: face.tex })), false, false);
+    cork.position.z = 0.075; g.add(cork);
+    for (const z of BOARD_SLOTS_Z) {
+      const c = new THREE.Group(); c.position.set(-(z - BOARD_Z), -0.18, 0.1); c.visible = false; g.add(c);
+      const paper = mesh(rbox(0.6, 0.66, 0.025, 0.02), toon("#fff6e3"), false, false) as TaskBoard["cards"][number]["paper"];
+      paper.rotation.z = (Math.random() - 0.5) * 0.18; c.add(paper);
+      for (const ly of [0.12, 0.0, -0.12]) { const line = mesh(new THREE.PlaneGeometry(0.4, 0.035), noLine(flat(INK, { transparent: true, opacity: 0.35 })), false, false); line.position.set(0, ly, 0.016); paper.add(line); }
+      const pin = mesh(new THREE.SphereGeometry(0.06, 10, 8), toon("#ff4f5e"), false, false); pin.position.set(0, 0.28, 0.04); c.add(pin);
+      cards.push({ g: c, paper, pop: 0 });
+    }
+  }
+
+  return { blinkers, tankBubbles, board, clockHands: clockHands!, wb: wb!, taskBoard: { group: tbGroup, face, cards } };
 }

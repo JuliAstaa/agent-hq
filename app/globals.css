@@ -1,4 +1,8 @@
-@import "tailwindcss";
+/* Tailwind without preflight: the prototype relies on browser defaults (h1/h2 bold, pre margins, line-height
+   normal), so the reset is left out to keep the 2D UI pixel-identical. Theme + utilities only. */
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
 
 /* Palette and fonts from references/agent-hq.html (prd.md §12). */
 :root {
@@ -46,7 +50,8 @@ body {
   color: var(--ink);
 }
 
-@keyframes pulse {
+/* Connection pill pulse (named hq-pulse to avoid Tailwind's own `pulse` keyframes). */
+@keyframes hq-pulse {
   50% {
     transform: scale(1.35);
   }

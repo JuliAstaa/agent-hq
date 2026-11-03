@@ -28,16 +28,16 @@ Step plan and approved deviations: `plan-m1.md`. Do not start M2+ work.
 ## Commands
 
 ```bash
-npm run dev          # next dev on 127.0.0.1:3000
+npm run dev          # next dev on 127.0.0.1:8787 (same port as the prototype bridge)
 npm run build        # production build (bridge included)
-npm start            # next start -H 127.0.0.1
+npm start            # next start on 127.0.0.1:8787
 npm run build:demo   # static demo export to out/ (no bridge, demo mode only)
 npm run lint
 npm run typecheck    # tsc --noEmit
 npm test             # vitest run (unit + bridge integration)
 npm run test:e2e     # playwright (visual parity, dispose/leak, console errors); needs `npm run build` first.
-                     # Next allows one `next dev` per folder: if one is running, set HQ_E2E_DEV_URL=http://localhost:3000
-node references/server.js   # prototype bridge on :8787, used by parity tests
+                     # Next allows one `next dev` per folder: if one is running, set HQ_E2E_DEV_URL=http://localhost:8787
+node references/server.js   # prototype bridge (default :8787; parity tests start it on a free port)
 ```
 
 ## Layout
@@ -47,7 +47,7 @@ app/            layout.tsx (next/font), page.tsx (server shell), globals.css, ap
 components/     React 2D UI: Office, OfficeLoader, TopBar, FloorSwitcher, StatusChips, Roster, AgentCard, LogPanel, ConnectModal, Toast
 engine/         framework-free Three.js: index.ts (createEngine), scene/, world/, agents/, nav/, displays/
 lib/            events.ts, teams.ts, store.ts, transport.ts, demo.ts, bridge/{hub,hooks,redact,auth}.ts
-examples/       claude-hooks.settings.json (URL http://127.0.0.1:3000/api/hook)
+examples/       claude-hooks.settings.json (URL http://127.0.0.1:8787/api/hook)
 tests/          unit/, integration/, e2e/, fixtures/*.jsonl
 ```
 
@@ -65,6 +65,9 @@ tests/          unit/, integration/, e2e/, fixtures/*.jsonl
 - Canvas text uses font families resolved from the CSS variables set by `next/font` (names are hashed).
   Never hard-code `'Bungee'` in `ctx.font`. Canvas text is drawn only after `document.fonts.ready`
   (load each family explicitly first); before that, text textures stay blank.
+- Floors are rendered in separate passes by `renderFloors()` (approved deviation 6 in `plan-m1.md`): each pass
+  re-renders the sun's shadow map with only that floor's objects, so nothing shadows another floor through a slab.
+  Do not merge back into a single `effect.render`. New world-root objects must be assigned to a pass in `bandOf`.
 - Keep the prototype's redraw rates: desk screens, TV, arcade every 120 ms; floor 3 displays every 150 ms
   and only while floor 3 is visible; whiteboard every 90 ms; mission board and roster "ago" text every 1 s.
 - Do not chase identical `Math.random()` call order with the prototype. Randomness (books, stars, plants,
@@ -80,9 +83,17 @@ tests/          unit/, integration/, e2e/, fixtures/*.jsonl
 - Same payloads in, same SSE out as `references/server.js`. Parity is checked by replaying fixtures to both.
 - `/api/hook` always answers `200` with an empty body, including bad JSON. Only a wrong token gives `401`.
 - Hub state lives on `globalThis.__hq` so it survives `next dev` reloads.
+- Rename overrides (`lib/bridge/overrides.ts`, prd.md §7.4) are applied inside `publish()` to every `agent_update` and
+  `task_done`. Every event, including hook translations, must go through `publish()` so a rename cannot be bypassed.
 - `redact()` runs on prompts, commands, and log messages before anything is broadcast.
   Extend its patterns; never remove one. Commands truncated to 90 chars.
 - Response compression stays off (`compress: false`) so SSE is not buffered.
+- Token totals (`lib/bridge/tokens.ts`) come from Claude Code transcripts: all four usage fields, deduped per
+  `message.id`, cumulative per session. Read only allowed roots (`~/.claude/projects`, `HQ_TRANSCRIPT_ROOTS`), after
+  the hook response (`after()`), incrementally. The transcript format is undocumented: never throw on odd lines.
+- Port 8787 on 127.0.0.1 for `dev` and `start`. `next.config.ts` rewrites the prototype URLs `/hook`, `/event`,
+  `/stream`, `/health` to `/api/*` (server build only; static export cannot rewrite). Keep both URL sets working;
+  `tests/integration/bridge-parity.test.ts` checks the aliases, including that `/stream` is not buffered.
 - `cacheComponents` and `partialPrefetching` are OFF (decision D1). Every `app/api/*/route.ts` exports
   `runtime = 'nodejs'` and `dynamic = 'force-dynamic'`. After `npm run build`, every `/api/*` route must
   show as dynamic (`ƒ`) in the route table; none may be prerendered.
@@ -96,6 +107,11 @@ tests/          unit/, integration/, e2e/, fixtures/*.jsonl
 - Original characters only. No characters, logos, or effects from existing shows or brands.
 - Engine-owned DOM (`.bubble`, `.room`) is styled with plain CSS classes in `globals.css`.
   React-owned UI uses Tailwind utilities with the prototype's exact sizes, borders, and shadows.
+- Tailwind is imported WITHOUT preflight (`app/globals.css`: theme + utilities only), so browser defaults match the
+  prototype (h1/h2 bold, `pre` margins, `line-height: normal`). Side effect: `border-dashed`/`border-dotted` set the
+  style on all four sides and unset sides fall back to `medium` width; use e.g. `[border-top:2px_dashed_var(--ink)]`.
+- Every 2D UI root carries `data-hq-ui` so visual tests can hide the overlay and compare the scene only.
+- If built CSS looks stale (e.g. old rules after editing `globals.css`), rebuild; check `.next/static/chunks/*.css`.
 
 ### Security
 - Bind `127.0.0.1` by default. Support `HQ_TOKEN` (`Authorization: Bearer` or `x-hq-token`).

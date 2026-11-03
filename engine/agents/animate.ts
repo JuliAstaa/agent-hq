@@ -72,12 +72,23 @@ export function animateAgent(ctx: AnimCtx, rt: AgentRuntime, a: Agent, t: number
     legL = s * 0.65; legR = -s * 0.65;
     setArms(-0.15 - s * 0.55, -0.2, -0.15 + s * 0.55, 0.2);
     lookX = 0; lookY = mv.urgent ? 0 : 0.05; lidOpen = mv.urgent ? 0.05 : 0.5;
+    if (mv.carrying) { L.rotation.x = -1.05; L.rotation.z = 0.3; } // hold the task card out in front
+  } else if (mode === "fetch") {
+    // Task board (deviation 14): reach up for the card, then tuck it in and turn to go.
+    const k = mv.fetchT;
+    if (!mv.carrying) {
+      setArms(-0.3, -0.2, -2.5 + Math.sin(k * 14) * 0.12, 0.25);
+      lookY = 0.35; lookX = 0.05; lidOpen = 0.05; mouthK = 1.1;
+    } else {
+      setArms(-1.2, 0.3, -0.3, 0.2);
+      lookY = -0.25; lookX = -0.2; mouthK = 1.4; by = Math.abs(Math.sin(k * 12)) * 0.05;
+    }
   } else if (mode === "desk") {
     if (st === "working") {
       by = Math.abs(Math.sin(t * 7)) * 0.03; rx = 0.08;
       setArms(-1.15 + Math.sin(t * 16) * 0.18, -0.15, -1.15 + Math.sin(t * 16 + Math.PI) * 0.18, 0.15);
-      if (mv.dest.kind === "station") { lookX = Math.sin(t * 0.9 + v.lookPh) * 0.35; lookY = -0.12; }
-      else { lookX = -0.55; lookY = -0.25; }
+      // Desks and stations both put the monitor straight ahead (deviation 8).
+      lookX = Math.sin(t * 0.9 + v.lookPh) * 0.35; lookY = -0.12;
     } else if (st === "thinking") {
       rz = Math.sin(t * 1.6) * 0.07; by = Math.sin(t * 1.6) * 0.02; setArms(-0.4, -0.15, -2.2, -0.55);
       lookX = Math.sin(t * 0.7 + v.lookPh) * 0.4; lookY = 0.45; mouthK = 0.3;
@@ -185,6 +196,8 @@ export function animateAgent(ctx: AnimCtx, rt: AgentRuntime, a: Agent, t: number
   P.book.visible = act === "read";
   P.cards.visible = act === "cards";
   P.paddle.visible = act === "pingpong";
+  P.taskCard.visible = mv.carrying;
+  P.taskCard.rotation.x = -L.rotation.x * 0.6;
   P.mug.visible = mv.hasMug && (mode === "walk" || ["coffee", "sip", "tv", "gaze"].includes(act as string)) && !(act === "coffee" && mv.actT < 5);
   P.mug.rotation.x = -R.rotation.x;
   // blink + eyes

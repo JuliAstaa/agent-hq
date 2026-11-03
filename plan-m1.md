@@ -1,6 +1,6 @@
 # Rencana M1: Port Agent HQ ke Next.js (parity)
 
-Status: **disetujui 2026-11-02**. Langkah 0-4 **selesai**, berhenti di checkpoint: menunggu user meninjau screenshot 4 lantai (mode demo) sebelum langkah 5 (UI React).
+Status: **disetujui 2026-11-02**. Checkpoint langkah 4 disetujui user 2026-11-03 (beserta B1, B2, perketat tes visual). UI 2D disetujui user 2026-11-03 ("okee"). Langkah 6 **selesai**. Token per sesi (item M2) disisipkan atas permintaan user dan **selesai**. Berikutnya langkah 7 (verifikasi M1).
 
 ## Progres
 
@@ -10,19 +10,46 @@ Status: **disetujui 2026-11-02**. Langkah 0-4 **selesai**, berhenti di checkpoin
 | 1. `lib/events.ts`, `lib/teams.ts` | selesai | `tests/unit/events.test.ts`, `teams.test.ts` |
 | 2. Bridge | selesai | 50 payload rekaman (`tests/fixtures/session.jsonl`) -> respons HTTP + SSE identik dengan `references/server.js`, juga dengan `HQ_TOKEN`; semua `/api/*` = `ƒ` |
 | 3. Store, transport, demo | selesai | `tests/unit/store.test.ts` |
-| 4. Engine | selesai | `tests/unit/nav.test.ts`; `tests/e2e/visual.spec.ts` (gedung kosong 4 view vs prototipe, toleransi 4%, lolos); `tests/e2e/dispose.spec.ts` (StrictMode: 2 konteks dibuat, 1 di-lose, 1 canvas, 1 loop; `dispose()` 2x aman) |
-| 5-7 | belum | |
+| 4. Engine | selesai | `tests/unit/nav.test.ts`; `tests/e2e/visual.spec.ts` (gedung kosong 4 view vs prototipe, toleransi terkalibrasi, lolos); `tests/e2e/dispose.spec.ts` (StrictMode: 2 konteks dibuat, 1 di-lose, 1 canvas, 1 loop; `dispose()` 2x aman) |
+| B1, B2, tes visual | selesai | lihat bagian di bawah |
+| 5. UI React | selesai | `components/*`; `tests/e2e/ui.spec.ts` (pill koneksi, modal, Esc, kembali ke demo, lantai, ⌂, pilih/lepas kartu, filter log, minimize, string agen = teks); geometri UI identik dengan prototipe (h1, tombol, kartu, header, log diukur sama persis); screenshot `test-results/visual/ui-*.png` |
+| 6. Demo statis + contoh | selesai | `npm run build:demo` -> `out/`, `tests/e2e/static.spec.ts` (disajikan server statis, mode demo, 11 agen, 0 request ke bridge, 0 console error, offline); `examples/claude-hooks.settings.json` valid (12 event, `http://127.0.0.1:8787/api/hook`, timeout 3 s). Catatan: export memakai `.next` yang sama dengan build server (di Next 16 `distDir` hanya mengganti nama `out/`), jadi `npm run build` lagi setelah `build:demo` (dicatat di README). |
+| Sisipan: token per sesi (M2, diminta user 2026-11-03) | selesai | `lib/bridge/tokens.ts`; `tests/unit/tokens.test.ts` (14), `tests/integration/tokens.test.ts` (next start: 5120 -> 5220 setelah Stop -> 5422 saat sesi lanjut, snapshot ikut). Dicek langsung di dev server: sesi asli tercatat. |
+| 7 | belum | |
 
-## Usulan perbaikan bug prototipe (menunggu persetujuan user)
-
-Saat ini di-port **apa adanya** (parity). Masing-masing satu perubahan kecil.
+## Perbaikan bug prototipe (disetujui user 2026-11-03, selesai)
 
 | # | Bug di prototipe | Dampak | Usulan |
 |---|---|---|---|
-| B1 | `removeAgent()` hanya melepas reservasi spot, bukan stasiun Lt.3 (dikonfirmasi penulis prototipe sebagai bug). | Agen yang dihapus saat di stasiun membuat stasiun itu terkunci selamanya. Contoh: demo -> live, stasiun Rexx/Quill/Sentra tetap terpakai "hantu". | `releasePlaces()` melepas semua tujuan non-meja (`kind !== 'desk'`). Ada di `engine/agents/movement.ts`, tes sudah menandai perilaku sekarang. |
-| B2 | `redact()` hanya menyamarkan `-p<password>` kalau kata `mysql` muncul **setelah** `-p`. | `mysql -u root -pS3cret` bocor apa adanya ke log dan SSE. | Tambah pola untuk `-p<pw>` setelah `mysql`/`mysqldump`/`mariadb` (memperluas daftar, sesuai PRD §8.4). Tes `it.fails` di `tests/unit/redact.test.ts` sudah siap dibalik. |
+| B1 | `removeAgent()` hanya melepas reservasi spot, bukan stasiun Lt.3 (dikonfirmasi penulis prototipe sebagai bug). | Agen yang dihapus saat di stasiun membuat stasiun itu terkunci selamanya. Contoh: demo -> live, stasiun Rexx/Quill/Sentra tetap terpakai "hantu". | **Selesai.** `releasePlaces()` melepas semua tujuan non-meja, termasuk saat agen masih berjalan ke sana. Tes di `tests/unit/nav.test.ts`. |
+| B2 | `redact()` hanya menyamarkan `-p<password>` kalau kata `mysql` muncul **setelah** `-p`. | `mysql -u root -pS3cret` bocor apa adanya ke log dan SSE. | **Selesai.** Pola baru (pola lama tetap): `mysql`/`mysqldump`/`mysqladmin`/`mariadb -p<pw>`, `curl -u`/`--user`/`-U`/`--proxy-user user:pass` (user tetap terlihat), kredensial di URL `scheme://user:pass@host`, `sshpass -p <pw>`. Flag case-sensitive (`-P` = port tidak ikut). Tes per pola + kasus negatif di `tests/unit/redact.test.ts`. Baris fixture mysql ditandai `"parity": false` dan dikeluarkan dari perbandingan prototipe; tes integrasi khusus memastikan rahasianya tidak sampai ke SSE. |
+
+## Tes visual "gedung tanpa agen" diperketat (disetujui user 2026-11-03, selesai)
+
+Hasil: 12 meja kosong disembunyikan (`engine.debug.hideEmptyDesks`), UI 2D disembunyikan di kedua sisi, hanya piksel di dalam outline gedung (convex hull kotak gedung terproyeksi) yang dihitung, metrik YIQ threshold 0,2 (`tests/e2e/diff.ts`). Kalibrasi 10 run (min-max): Semua 1,50-1,80%, Lt.3 0,85-1,23%, Lt.2 0,88-1,01%, Lt.1 0,66-1,73% (outlier Lt.1: batu acak terlihat lewat jendela belakang). Batas: Semua 2,1%, Lt.3 1,5%, Lt.2 1,3%, Lt.1 2,0% (sebelumnya 4% untuk semua). Kalibrasi ulang: `HQ_VISUAL_KEEP=1 npx playwright test -g "building without agents" --repeat-each=5`.
+
+Usulan awal:
+
+Selisih terukur vs prototipe: Semua 2,2%, Lt.3 1,0%, Lt.2 2,9%, Lt.1 0,8%, dengan batas 4%. Noise acak (batu melayang, warna buku) sekitar 1%,
+dan 12 meja deviasi 7 hanya menaikkan Lt.2 ke 2,9%, jadi tes tidak akan menangkap regresi sebesar satu baris perabot.
+1. Sembunyikan 12 meja kosong di sisi Next khusus untuk tes ini (hook debug, bukan perilaku app).
+2. Bandingkan hanya kotak pembungkus gedung (`clip` screenshot per view), supaya batu melayang di langit tidak ikut dihitung (usulan sesi agent-hq-9d).
+3. Jalankan beberapa kali, catat rasio diff maksimum per view, set toleransi sedikit di atasnya (bukan angka tetap 1,5%, supaya tidak flaky).
+
+## Token per sesi (sisipan M2, keputusan user 2026-11-03)
+
+- Total = input + cache-write + cache-read + output dari `message.usage` di transcript sesi, dedupe per `message.id` (satu balasan tercatat di beberapa baris dengan usage identik; dicek: 259 dari 259 duplikat identik). Kumulatif: sesi yang lanjut setelah selesai terus bertambah.
+- Sumber: `transcript_path` (sesi utama), `agent_transcript_path` di SubagentStop, atau `<sesi>/subagents/agent-<id>.jsonl` saat subagen masih jalan. Format transcript tidak didokumentasikan Claude Code, jadi baris yang tidak cocok diabaikan dan tidak ada event kalau tidak ada usage.
+- Dibaca setelah respons hook terkirim (`after()`), bertahap dari offset terakhir (maks 4 MB per langkah), plus baca ulang 1,5 s setelah Stop/SubagentStop (transcript ditulis asinkron).
+- Keamanan: hanya `.jsonl` dengan realpath di bawah `~/.claude/projects` atau `$CLAUDE_CONFIG_DIR/projects` (atur dengan `HQ_TRANSCRIPT_ROOTS`); symlink keluar root ditolak; hanya angka yang dikirim.
+- Belum: rincian per jenis token di UI, biaya ($). Angka didominasi cache-read (contoh nyata: ~120 juta untuk sesi panjang).
 
 ## Catatan teknis (tanpa perubahan perilaku yang terlihat)
+
+- Tombol ⌂ dan pilihan lantai saat sedang fokus (deviasi 12): `unfocus()` jalan di frame berikutnya dan menimpa fly ke view yang dipilih. Fix: sinyal lantai dengan `moveCam` membuang `preFocus` (`engine/index.ts`).
+- Tailwind tanpa preflight supaya default browser sama dengan prototipe; geometri UI diukur identik.
+- Toast "Tersambung ke /api/stream" muncul saat app membuka koneksi otomatis lalu pindah ke demo (sama seperti prototipe yang di-serve `server.js`).
+- Pinch-zoom di atas bubble agen atau panel UI 2D masih memicu zoom halaman browser (listener deviasi 10 hanya di area 3D). Belum diubah, menunggu keputusan user.
 
 - Body > 2 MB: prototipe memutus socket; Route Handler tidak bisa, jadi membalas `400 {"ok":false,"error":"body terlalu besar"}`.
 - Lookup alias status/tim pakai `hasOwnProperty` (prototipe pakai `in`, sehingga kata seperti `constructor` lolos sebagai status).
@@ -44,10 +71,21 @@ Sumber: `prd.md` §5, §6, §7, §8, §14, §15 (M1), §16; prototipe di `refere
 ## Perbedaan yang disengaja dari prototipe
 
 1. **Koneksi awal.** Halaman otomatis connect ke `/api/stream` (same origin), sama seperti prototipe yang di-inject `AGENT_HQ_STREAM` oleh `server.js`. Bedanya: kalau koneksi **pertama** gagal, jatuh ke mode demo (PRD §14). Kalau sudah live lalu putus, tetap retry dengan backoff 1.5 s x1.7 sampai 15 s seperti prototipe. `?stream=` tetap didukung.
-2. **Teks modal "Sambungkan".** `node server.js` / `localhost:8787` diganti `npm start` / `localhost:3000`, default URL `http://localhost:3000/api/stream`. Kalimat lain sama persis.
+2. **Teks modal "Sambungkan".** `node server.js` diganti `npm start`; port tetap `localhost:8787` (diubah user 2026-11-03), default URL `http://localhost:8787/api/stream`. Kalimat lain sama persis.
 3. **Lokasi dan aktivitas di roster** di-update lewat store dengan throttle 250 ms (keputusan PRD §14), bukan langsung tiap frame.
 4. **Font** di-host sendiri lewat `next/font` (bukan link Google Fonts). Tampilan sama.
 5. Build static demo (`npm run build:demo`) tidak punya bridge, langsung mode demo.
+6. **Bayangan per lantai** (diminta user, 2026-11-03; dikerjakan sesi agent-hq-9d). Di prototipe slab lantai tidak melempar bayangan, sehingga benda di lantai atas melempar bayangan menembus slab ke lantai bawah (misalnya bayangan tanaman Lt.3 muncul di lobi Lt.1). Sekarang `renderFloors()` di `engine/index.ts` menggambar lantai 1, 2, 3 berurutan ke depth buffer yang sama, dan tiap pass merender ulang shadow map matahari hanya dengan benda lantai itu (agen ikut lantai sesuai posisi y, partikel fx di pass terakhir). Lampu sirene dipindah ke root scene dan hanya menyala di pass Lt.3. Tes visual gedung tanpa agen tetap lolos terhadap prototipe. Tambahan: material toon memakai `shadowSide: FrontSide` dan `sun.shadow.normalBias = 0.04`, supaya sisi yang membelakangi matahari (misalnya sisi luar tembok belakang) gelap rata, tanpa bayangan perabot dalam yang tembus.
+7. **12 meja Lt.2 selalu ada** (diminta user, 2026-11-03; dikerjakan sesi agent-hq-9d). Di prototipe meja baru dibangun saat agen datang, jadi kantor tanpa agen (misalnya mode live sebelum hook terpasang) tidak punya meja. Sekarang semua meja dibangun di `createEngine`; meja kosong menampilkan layar STANDBY, papan nama kosong, strip dan ring `#3a3360`, glow mati. Agen memakai meja slot-nya; saat agen dihapus, meja kembali kosong (`resetDesk`), tidak dibuang. Catatan: tes visual "gedung tanpa agen" tetap lolos dalam toleransi walau view Lt.2 kini berisi meja.
+8. **Meja Lt.2 menghadap seperti stasiun Lt.3** (diminta user, 2026-11-03; dikerjakan sesi agent-hq-9d). Di prototipe monitor membelakangi kursi supaya layarnya terlihat kamera, jadi agen menatap punggung monitor. Sekarang meja diputar PI seperti stasiun: kursi di sisi depan (+z), agen menghadap dinding belakang, satu monitor di belakang meja menghadap agen dan kamera, papan nama di pojok depan. Baris meja digeser 0,8 ke belakang (z -5.4, -1.8, 1.8) dengan lorong di depan tiap baris (hub K2, K3, K4); node K1 tidak dipakai meja lagi. Agen di meja kini melihat lurus ke monitor (sama dengan stasiun). Ekspektasi rute di `tests/unit/nav.test.ts` disesuaikan.
+9. **Port 8787 dan URL prototipe** (diminta user, 2026-11-03; dikerjakan sesi agent-hq-9d). `npm run dev` dan `npm start` di `127.0.0.1:8787`. `next.config.ts` me-rewrite `/hook`, `/event`, `/stream`, `/health` ke `/api/*` (bukan di build static), jadi setting hook dan link untuk prototipe tetap jalan. Dites dengan `curl -N` (dev dan start: event tiba 15-64 ms, tanpa content-encoding) dan 3 tes baru di `tests/integration/bridge-parity.test.ts`.
+10. **Zoom cubit trackpad** (diminta user, 2026-11-03; dikerjakan sesi agent-hq-9d). three r160 OrbitControls membagi deltaY dengan 100, jadi cubitan trackpad (wheel + ctrlKey, deltaY kecil) hampir tidak menggeser kamera, dan selama animasi kamera kontrol mati sehingga browser memperbesar seluruh halaman. Sekarang `engine/index.ts` menangkap cubitan (wheel + ctrlKey di Chromium/Firefox, gesture* di Safari) di fase capture pada `stage`, men-zoom proporsional terhadap gerakan (`exp(deltaY * 0.01)`, dibatasi min/maxDistance), membatalkan animasi kamera yang sedang jalan, dan tidak pernah page-zoom. Scroll mouse biasa tetap lewat OrbitControls. Listener dilepas di `dispose()`.
+11. **Rename agen yang sedang jalan** (fitur baru diminta user, 2026-11-03; dikerjakan sesi agent-hq-9d; di luar parity prototipe). Event `{"type":"rename"}` di `POST /event` dan endpoint `GET /api/agents` (alias `/agents`), override nama/role/team per id di `lib/bridge/overrides.ts` + `hub.ts`, disimpan di `agent-hq-names.json` (`HQ_NAMES_FILE`, di-gitignore). Event biasa tanpa rename tetap identik dengan prototipe. Salinan bridge mandiri dengan fitur yang sama di `examples/server.js` (`references/` tidak diubah). Tes: `tests/unit/rename.test.ts`, `tests/integration/rename.test.ts`. Spesifikasi: prd.md §7.4.
+12. **Keluar dari fokus kamera** (diminta user, 2026-11-03; dikerjakan sesi agent-hq-9d). Di prototipe klik agen menerbangkan kamera ke agen tanpa jalan kembali (selain tombol ⌂). Sekarang klik agen yang sedang dipilih (badan atau bubble) melepas pilihan, dan setiap kali pilihan menjadi kosong (dari mana pun, termasuk kartu roster nanti) kamera terbang kembali ke posisi dan lantai sebelum fokus pertama. Pindah fokus dari agen ke agen tetap mengingat posisi awal. Ada di `engine/index.ts` (`toggleFocus`, `unfocus`, `preFocus`).
+13. **BGM, efek suara, event langit acak** (fitur baru diminta user, 2026-11-03; dikerjakan sesi agent-hq-9d). `lib/audio.ts`: BGM dari `public/audio/agent-hq.mp3` milik user (env `NEXT_PUBLIC_HQ_BGM`), efek suara disintesis dengan Web Audio (tanpa file), volume musik dan efek suara terpisah (kurva kuadrat) + mute, tersimpan di localStorage (preferensi versi lama dimigrasi), default mati, mulai setelah gestur user, efek lewat DynamicsCompressor. `components/AudioControl.tsx`: tombol speaker (mute cepat) + tombol roda gigi yang membuka panel Pengaturan (slider Musik, slider Efek suara dengan tombol Tes; tutup dengan Esc/klik di luar), dipasang di TopBar. `engine/skyEvents.ts`: portal desain sendiri (cincin pink-cyan, jendela ungu berbintang) jauh di latar belakang sejauh planet, dengan pesawat kurir yang keluar lalu terbang menjauh ke luar angkasa tanpa pernah melintas di depan gedung (permintaan user), suara portal lebih pelan karena jauh, dan meteor (kadang hujan 2-4); penempatan oleh `engine/skyPlacement.ts`: zona acak kiri/tengah/kanan, selalu di belakang bola pembatas gedung, tidak menembus planet/bulan/batu (cek segmen-bola 3D), tidak di bawah panel UI atau di luar layar, boleh sebagian di balik atap/planet; zona yang tertutup pindah ke zona lain, tidak ada tempat sama sekali = dilewati dan dicoba lagi 8 s kemudian; event pertama 25-50 s lalu tiap 45-120 s, semua objek dibuang saat event selesai; suara diminta lewat event DOM `hq:sfx`. API debug `engine.skyEvent(kind?)`. Tes: `tests/unit/sky-audio.test.ts`.
+14. **Papan Tugas** (fitur baru diminta user, 2026-11-03; dikerjakan sesi agent-hq-9d). Saat status agen berubah dari idle/offline ke thinking/working (tugas baru), agen lebih dulu ke Papan Tugas di dinding kiri Lt.2 (3 tempat berdiri, `createBoardSlots`, hub K3 lewat lorong z 0.6 lalu x -11.75), meraih kartu (mode `fetch`: kartu terlepas di 0.55 s, jalan lagi di 1.1 s), lalu membawa kartu ke meja atau stasiun Lt.3; kartu diletakkan saat tiba. Kartu berwarna agen tampil di papan selama agen menuju papan. Tanpa detour: agen yang sibuk sejak event pertama/snapshot, perubahan status dalam tugas yang sama, atau papan penuh. Batal: idle sebelum mengambil (ke area santai), offline (ke meja). Bubble, roster, dan layar meja menampilkan ambil tugas / bawa tugas. Kode: `engine/agents/movement.ts`, `engine/nav/places.ts`, `engine/world/floor2.ts` (TaskBoard), `engine/agents/animate.ts`, `engine/agents/avatar.ts` (prop taskCard), `engine/index.ts`. Tes: `tests/unit/nav.test.ts` (describe task board). Tes visual menyembunyikan papan lewat `engine.debug.hideTaskBoard(true)`.
+15. **Kamera mengikuti agen** (diminta user, 2026-11-03; dikerjakan sesi agent-hq-9d). Saat agen difokus (klik badan, bubble, atau kartu), kamera dan target OrbitControls ikut bergeser sebesar gerakan agen tiap frame (`updateFollow` di `engine/index.ts`; selama animasi terbang, titik akhirnya yang digeser), jadi orbit dan zoom tetap bisa dipakai. Naik/turun lantai mengganti tampilan lantai otomatis. Berhenti saat fokus dilepas, agen dihapus, atau user memilih lantai / tombol ⌂.
+16. **Rename dari Daftar Agen** (diminta user, 2026-11-03; dikerjakan sesi agent-hq-9d). Tombol ✎ di kartu (`components/AgentCard.tsx`) membuka form Nama / Peran / Tim (Tetap, Kantor, Red Team, Laporan VA, Blue Team) plus "Pakai nama asli". `lib/rename.ts`: mode live mengirim `{"type":"rename"}` ke endpoint event di samping URL stream yang aktif (`/api/stream` -> `/api/event`, didaftarkan oleh `Office.tsx` lewat `setLiveUrlSource`); mode demo hanya mengubah store lokal; 401 (HQ_TOKEN) dan error bridge ditampilkan di form. Tes: `tests/unit/rename-ui.test.ts`.
 
 ## Langkah
 
@@ -68,7 +106,7 @@ Sumber: `prd.md` §5, §6, §7, §8, §14, §15 (M1), §16; prototipe di `refere
 - `redact.ts`, `auth.ts`, `hooks.ts` (port `hookToEvents` + `describeTool` + `QUIET_TOOLS` + `scheduleRemove`), `hub.ts` (`remember`, `publish`, `lastSeen`, timer, subscriber, buffer 80, di `globalThis.__hq`).
 - Route: `POST /api/event` (202 `{ok,received}`, 400 JSON rusak, 401 token salah, batas body 2 MB), `POST /api/hook` (selalu 200 kosong), `GET /api/stream` (`retry: 2000`, snapshot, replay 30 dengan `_replay: true`, ping 15 s, cleanup saat abort), `GET /api/health`. CORS dan `OPTIONS` 204 seperti prototipe.
 - Tes: unit redact (termasuk rahasia yang licin), unit hooks untuk tiap event §8.3.
-- Tes parity: rekam fixture `tests/fixtures/*.jsonl` (payload hook Claude Code + event §7), kirim ke `node references/server.js` (:8787) dan `next start` (:3000), bandingkan output SSE (abaikan `ts`). Harus identik.
+- Tes parity: rekam fixture `tests/fixtures/*.jsonl` (payload hook Claude Code + event §7), kirim ke `node references/server.js` dan `next start` (keduanya di port bebas yang dipilih tes), bandingkan output SSE (abaikan `ts`). Harus identik.
 
 ### 3. Store, transport, demo (`lib/store.ts`, `lib/transport.ts`, `lib/demo.ts`)
 - Port `applyEvent`, `raiseAlert`, `addFinding`, `pushLog` (maks 220), event per agen (maks 60, tampil 12), `stats`, `soc`, `vuln`, `clearAgents`, toast.
@@ -110,6 +148,9 @@ Port 1:1 dari `agent-hq.html`, dipecah sesuai PRD §14:
 - [ ] Dispose bersih: StrictMode double-mount dan remount lewat tes tidak menambah konteks WebGL (hitung `getContext`) dan hanya ada satu loop animasi.
 - [ ] Unit test normalisasi untuk semua tipe event §7.
 - [ ] Mode demo 5 menit tanpa console error atau hydration warning (Playwright).
+- [ ] Performa: ukur fps view Semua dengan 12 agen (demo + agen dummy), target 60 fps (PRD §13). Render 3 pass per frame sejak deviasi 6.
+  Kalau di bawah target, opsi dari yang paling murah (usulan sesi agent-hq-9d): (1) lewati pass lantai yang tidak terlihat (sudah untuk mode Lt.1/Lt.2);
+  (2) `sun.shadow.mapSize` 1024 hanya untuk pass Lt.1/Lt.2; (3) cache shadow map statis per lantai. **(2) dan (3) mengubah kualitas bayangan: tanya user dulu.**
 - [ ] Manual: curl Lampiran B PRD, plus satu sesi Claude Code asli dengan hook terpasang.
 
 ## Di luar M1
