@@ -252,7 +252,7 @@ Endpoint `/api/cron`, `/api/hermes`, dan `/api/terminal` hanya ada dengan awalan
   `mysql -p...`, `curl -u user:pass`, dan password di URL.
 - **Terminal web (opsional):** tombol Terminal hanya menampilkan ttyd yang jalan terpisah di `127.0.0.1` dengan
   password sendiri, dibuka lewat tunnel SSH. Agent HQ tidak menjalankan perintah dan tidak melihat isi terminal.
-  Lihat `docs/terminal.md` bagian 6.
+  Lihat `docs/terminal.md` bagian 7.
 - **Batas Red Team:** fitur Red Team hanya memvisualisasikan. Agen pentest-mu hanya boleh menguji target milikmu
   sendiri atau yang sudah kamu kantongi izin tertulisnya.
 

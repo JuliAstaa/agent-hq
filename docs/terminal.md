@@ -20,11 +20,12 @@ lewat tunnel SSH). Kalau Agent HQ jalan di laptopmu sendiri, terminal biasa suda
 2. [Jalankan ttyd](#2-jalankan-ttyd)
 3. [Nyalakan tombol di Agent HQ](#3-nyalakan-tombol-di-agent-hq)
 4. [Buka dari laptop](#4-buka-dari-laptop)
-5. [Pakai](#5-pakai)
-6. [Keamanan](#6-keamanan)
-7. [Masalah umum](#7-masalah-umum)
-8. [Mencopot](#8-mencopot)
-9. [Cara kerjanya](#9-cara-kerjanya)
+5. [Lewat domain (tanpa tunnel)](#5-lewat-domain-tanpa-tunnel)
+6. [Pakai](#6-pakai)
+7. [Keamanan](#7-keamanan)
+8. [Masalah umum](#8-masalah-umum)
+9. [Mencopot](#9-mencopot)
+10. [Cara kerjanya](#10-cara-kerjanya)
 
 ## 1. Pasang ttyd
 
@@ -42,7 +43,7 @@ ttyd --version
 sudo apt install -y tmux          # biasanya sudah terpasang
 ```
 
-tmux tidak wajib, tapi sangat disarankan: dengan tmux, perintah tetap jalan saat panel ditutup (bagian 5).
+tmux tidak wajib, tapi sangat disarankan: dengan tmux, perintah tetap jalan saat panel ditutup (bagian 6).
 
 ## 2. Jalankan ttyd
 
@@ -97,7 +98,50 @@ bagian 2. Browser biasanya menawarkan menyimpan password-nya.
 Kalau port 7681 di laptop sudah terpakai, pakai port lain di sisi laptop dan samakan `HQ_TERMINAL_URL`, misalnya
 `-L 7781:127.0.0.1:7681` dengan `HQ_TERMINAL_URL=http://localhost:7781`.
 
-## 5. Pakai
+## 5. Lewat domain (tanpa tunnel)
+
+Kalau Agent HQ sudah dibuka lewat domain https di belakang nginx (misalnya `https://agent.contoh.id` diteruskan ke
+`127.0.0.1:8787`), terminal bisa ditaruh di `https://agent.contoh.id/terminal/` di server nginx yang sama, jadi bisa
+dibuka dari mana saja, termasuk HP, tanpa tunnel.
+
+**Risikonya lebih besar.** Shell-mu sekarang terbuka ke internet dan hanya dijaga password ttyd. Kalau user di VPS
+punya `sudo` tanpa password, siapa pun yang mendapat password itu (atau menemukan bug di ttyd) jadi root. Lebih
+aman: tunnel (bagian 4), atau Cloudflare Access/Tailscale di depan nginx. Kalau tetap memilih ini:
+
+1. Batasi percobaan login. Buat `/etc/nginx/conf.d/agent-hq-terminal.conf` (konteks `http`):
+
+   ```nginx
+   limit_req_zone $binary_remote_addr zone=hq_terminal:10m rate=30r/m;
+   ```
+
+2. Di blok `server` domain Agent HQ (yang `listen 443 ssl`), tambahkan sebelum `location /`. `proxy_pass` yang
+   diakhiri `/` membuang awalan `/terminal`, jadi ttyd tetap jalan dengan skrip yang sama tanpa diubah:
+
+   ```nginx
+   location = /terminal { return 301 /terminal/; }
+   location /terminal/ {
+       limit_req zone=hq_terminal burst=20 nodelay;
+       proxy_pass http://127.0.0.1:7681/;
+       proxy_http_version 1.1;
+       proxy_set_header Host $host;
+       proxy_set_header X-Forwarded-Proto $scheme;
+       proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+       proxy_set_header Upgrade $http_upgrade;
+       proxy_set_header Connection "upgrade";
+       proxy_read_timeout 1h;
+   }
+   ```
+
+3. Cek dan muat ulang: `sudo nginx -t && sudo systemctl reload nginx`. Tanpa login, `curl -sI
+   https://agent.contoh.id/terminal/` harus menjawab `401`.
+4. Arahkan tombol ke alamat itu, lalu restart Agent HQ:
+   `HQ_TERMINAL_URL=https://agent.contoh.id/terminal/` di `~/agent-hq/.env.local`, lalu `pm2 restart agent-hq`.
+
+`--check-origin` tetap jalan di belakang nginx karena `Host` diteruskan apa adanya. Catatan: terminal ini satu
+origin dengan halaman kantor, jadi celah XSS di halaman kantor bisa memakai sesi terminal yang sedang login. Agent
+HQ menampilkan semua teks agen sebagai teks biasa (bukan HTML) untuk mencegah itu.
+
+## 6. Pakai
 
 - Panel **TERMINAL** muncul di kanan. Panel Hermes dan panel terminal memakai tempat yang sama, jadi membuka
   yang satu menutup yang lain.
@@ -113,7 +157,7 @@ Kalau port 7681 di laptop sudah terpakai, pakai port lain di sisi laptop dan sam
 - `./start.sh` boleh dijalankan dari terminal ini. Hanya `agent-hq` yang restart; panel terminal tetap
   tersambung, dan kantor tersambung lagi sendiri setelah build selesai.
 
-## 6. Keamanan
+## 7. Keamanan
 
 Terminal ini memberi shell penuh sebagai user yang menjalankan ttyd. Lapisannya:
 
@@ -129,11 +173,11 @@ Terminal ini memberi shell penuh sebagai user yang menjalankan ttyd. Lapisannya:
 - **VPS pribadi saja.** Password terlihat di daftar proses (`ps`) karena diberikan lewat argumen ttyd, dan user
   lain di VPS yang sama bisa membuka `127.0.0.1:7681`. Jangan pakai terminal web di VPS yang dipakai bersama.
 - **Ganti password:** hapus `~/.config/agent-hq/terminal.cred`, lalu `pm2 restart agent-hq-terminal`.
-- **Dari HP atau tanpa SSH** berarti terminal terbuka ke internet. Jangan cuma mengandalkan password ttyd: taruh di
-  belakang Tailscale atau Cloudflare Access, dan pakai https. Halaman https tidak bisa menampilkan terminal http,
-  jadi `HQ_TERMINAL_URL` juga harus https.
+- **Dari HP atau tanpa SSH** berarti terminal terbuka ke internet (bagian 5). Sebaiknya taruh di belakang
+  Tailscale atau Cloudflare Access, dan selalu pakai https. Halaman https tidak bisa menampilkan terminal http
+  selain `localhost`, jadi `HQ_TERMINAL_URL` lewat domain juga harus https.
 
-## 7. Masalah umum
+## 8. Masalah umum
 
 | Masalah | Penyebab dan solusi |
 |---|---|
@@ -143,9 +187,11 @@ Terminal ini memberi shell penuh sebagai user yang menjalankan ttyd. Lapisannya:
 | Log pm2: `ttyd terlalu lama` | Yang terpakai ttyd versi `apt`. Pasang binary GitHub (bagian 1), `sudo apt remove ttyd`, lalu `pm2 restart agent-hq-terminal`. |
 | Log pm2: `Jangan jalankan terminal web sebagai root` | pm2 jalan sebagai root. Jalankan pm2 sebagai user biasa (`docs/hermes.md` bagian 3). |
 | Terminal tampil tapi tidak bisa mengetik | ttyd dijalankan langsung tanpa `--writable`. Jalankan lewat `examples/terminal/ttyd.sh`. |
-| Panel kosong saat Agent HQ dibuka lewat https | Browser memblokir halaman http di dalam halaman https. Terminal juga harus https (bagian 6). |
+| Panel kosong saat Agent HQ dibuka lewat https | Browser memblokir halaman http di dalam halaman https. Terminal juga harus https (bagian 5 dan 7). |
+| Lewat domain: `502 Bad Gateway` | ttyd mati (`pm2 status`), atau `proxy_pass` tidak menunjuk `127.0.0.1:7681` (bagian 5). |
+| Lewat domain: halaman tampil tapi tidak tersambung | Baris `Upgrade`/`Connection` hilang dari blok nginx, atau `Host` tidak diteruskan (`--check-origin` menolak). |
 
-## 8. Mencopot
+## 9. Mencopot
 
 ```bash
 pm2 delete agent-hq-terminal && pm2 save
@@ -155,7 +201,10 @@ rm -f ~/.config/agent-hq/terminal.cred
 sudo rm -f /usr/local/bin/ttyd
 ```
 
-## 9. Cara kerjanya
+Lewat domain: hapus juga blok `location /terminal` dari konfigurasi nginx dan
+`/etc/nginx/conf.d/agent-hq-terminal.conf`, lalu `sudo nginx -t && sudo systemctl reload nginx`.
+
+## 10. Cara kerjanya
 
 - `GET /api/terminal` (`app/api/terminal/route.ts`) menjawab `{"ok": true, "url": ...}` dari `HQ_TERMINAL_URL`, atau
   `"url": null` kalau kosong atau tidak valid. Tanpa CORS. Pemeriksaan alamatnya ada di `lib/terminal.ts`.

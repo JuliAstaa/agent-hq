@@ -174,6 +174,7 @@ Not in the prototype. A Terminal button opens the server's shell next to the off
 - `GET /api/terminal` -> `{"ok": true, "url"}` from `HQ_TERMINAL_URL`, the address as seen from the viewer's browser (usually `http://localhost:7681` through the SSH tunnel). `url` is `null` (no button) when unset, not `http(s)`, or carrying a user or password. No CORS.
 - The panel shows that URL in an iframe and takes the Hermes panel's spot (opening one closes the other). An open panel stays connected while the office stream reconnects.
 - `examples/terminal/ttyd.sh` runs ttyd on loopback only (`--interface lo`), writable, `--check-origin`, Basic auth `hq:<random>` from `~/.config/agent-hq/terminal.cred` (blocks DNS rebinding), refuses root, and attaches to the tmux session `agent-hq` when tmux exists.
+- Without a tunnel, the same ttyd can sit behind the office's https reverse proxy at `/terminal/` (prefix stripped, WebSocket upgrade, `limit_req`); docs/terminal.md section 5 records the risk (a public shell behind one password).
 
 ## 8. Claude Code integration
 

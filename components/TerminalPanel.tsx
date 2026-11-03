@@ -29,6 +29,14 @@ export function useTerminalUrl(liveUrl: () => string | null): string | null {
   return live ? url : null;
 }
 
+/** Hint under the frame: a loopback address goes through the SSH tunnel, anything else through a proxy. */
+function hintFor(url: string): string {
+  const u = new URL(url);
+  return /^(localhost|127(?:\.\d{1,3}){3}|\[::1\])$/.test(u.hostname)
+    ? `Tidak muncul? Pastikan tunnel SSH juga meneruskan port terminal (${u.host}).`
+    : `Tidak muncul? Cek ttyd di server dan proxy untuk ${u.host}${u.pathname}.`;
+}
+
 export default function TerminalPanel({ url, onClose }: { url: string; onClose: () => void }) {
   const [attempt, setAttempt] = useState(0); // a new key remounts the frame, so ttyd connects again
   return (
@@ -64,7 +72,7 @@ export default function TerminalPanel({ url, onClose }: { url: string; onClose: 
         className="flex-1 min-h-0 w-full border-0 bg-ink"
       />
       <p className="m-0 px-3 py-[5px] border-t-[3px] border-ink text-[12px] font-semibold rounded-b-[11px]">
-        Tidak muncul? Pastikan tunnel SSH juga meneruskan port terminal ({new URL(url).host}).
+        {hintFor(url)}
       </p>
     </section>
   );
