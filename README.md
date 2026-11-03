@@ -88,6 +88,9 @@ perintah (lihat [bagian 4](#4-membaca-tampilan)).
 Kalau Agent HQ mati, Claude Code tetap jalan normal: hook-nya cuma menunggu maksimal 3 detik dan kegagalannya
 tidak memblokir apa pun.
 
+Memakai Hermes Agent (Nous Research) di VPS Ubuntu? Lihat `docs/hermes.md`: hook dan server MCP siap pakai
+di `examples/hermes/`.
+
 ## 3. Mengganti nama agen yang sudah jalan
 
 **Dari Daftar Agen (paling gampang):** klik tombol ✎ di kartu agen, ubah Nama, Peran, atau Tim, lalu Simpan.
@@ -281,6 +284,7 @@ Dokumen lain:
 
 - `prd.md`: spesifikasi lengkap (protokol event, integrasi Claude Code, dunia, perilaku agen).
 - `plan-m1.md`: rencana port ke Next.js dan daftar perbedaan yang disengaja dari prototipe.
+- `docs/hermes.md`: menyambungkan Hermes Agent di VPS Ubuntu (hook dan MCP).
 - `CLAUDE.md`: aturan kerja untuk AI agent yang mengerjakan repo ini.
 
 ## 12. Musik, efek suara, dan event langit
