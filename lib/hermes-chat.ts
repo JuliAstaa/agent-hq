@@ -75,6 +75,8 @@ export interface ChatSession {
   messages: number;
   /** Name of the session's office character when it was renamed (pinned), else "". */
   agent: string;
+  /** Live phase in Agent HQ (older bridges may omit it). */
+  phase?: ChatPhase;
 }
 
 /** Teams a chat agent can start in ("office" = no team, its desk on floor 2). */

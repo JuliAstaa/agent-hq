@@ -157,8 +157,7 @@ describe("a turn", () => {
     expect((await send("a")).status).toBe(202);
     await until(() => release !== null);
     expect((await send("b")).status).toBe(409);
-    expect((await chatAction({ action: "new" })).status).toBe(409);
-    expect((await chatAction({ action: "open", sessionId: "api_x" })).status).toBe(409);
+    expect((await chatAction({ action: "open", sessionId: "api_x" })).status).toBe(404);
     release!();
     await idle();
     expect((await chatAction({ action: "new" })).status).toBe(200);
@@ -432,7 +431,7 @@ describe("Riwayat", () => {
     expect(r.status).toBe(200);
     const rows = r.body.sessions as ChatSession[];
     expect(rows.map((s) => s.id)).toEqual(["api_b", "api_a"]);
-    expect(rows[1]).toEqual({ id: "api_a", title: "Agent HQ · cek disk", preview: "cek disk pakai password=***", lastActive: 1793700000000, messages: 4, agent: "Budi" });
+    expect(rows[1]).toEqual({ id: "api_a", title: "Agent HQ · cek disk", preview: "cek disk pakai password=***", lastActive: 1793700000000, messages: 4, agent: "Budi", phase: "idle" });
     expect(fake.calls.at(-1)?.path).toBe("/api/sessions?source=api_server&limit=50");
     expect(r.body).toMatchObject({ current: null, now: expect.any(Number) }); // server clock for "5 mnt lalu"
   });
@@ -528,6 +527,125 @@ describe("Riwayat", () => {
     expect((await chatAction({ action: "delete", sessionId: "api_x" })).status).toBe(200);
     expect(chat.view.sessionId).toBe(fake.sessions[0].id);
     expect(chat.view.items).toHaveLength(3);
+  });
+});
+
+describe("parallel conversations", () => {
+  it("new/open preserve running streams, separate answers and models, and keep both agents working", async () => {
+    const turns = new Map<string, import("../helpers/fake-hermes-api").Turn>();
+    const releases = new Map<string, () => void>();
+    fake.script = async (t) => {
+      turns.set(t.sessionId, t);
+      t.send("run.started");
+      t.send("assistant.delta", { delta: `mulai ${t.message}` });
+      await new Promise<void>((resolve) => releases.set(t.sessionId, resolve));
+      t.send("assistant.completed", { content: `hasil ${t.message}` });
+      t.send("run.completed");
+      t.send("done");
+    };
+    const a = await chatAction({ action: "new", agent: { name: "A" }, model: { provider: "p", model: "model-a" } });
+    const aid = a.body.sessionId as string;
+    await send("tugas A");
+    await until(() => chat.view.items.some((i) => i.kind === "assistant"));
+    const b = await chatAction({ action: "new", agent: { name: "B" }, model: { provider: "p", model: "model-b" } });
+    expect(b.status).toBe(200);
+    const bid = b.body.sessionId as string;
+    await send("tugas B");
+    await until(() => chat.view.items.some((i) => i.kind === "assistant"));
+    expect(hub.agents.get(hermesAgentId(aid))?.status).toBe("thinking");
+    expect(hub.agents.get(hermesAgentId(bid))?.status).toBe("thinking");
+    expect(streams().map((s) => s.body)).toEqual([
+      expect.objectContaining({ message: "tugas A", model: "model-a" }),
+      expect.objectContaining({ message: "tugas B", model: "model-b" }),
+    ]);
+    expect((await chatAction({ action: "delete", sessionId: aid })).status).toBe(409);
+    expect((await chatAction({ action: "open", sessionId: aid })).status).toBe(200);
+    expect(chat.view).toMatchObject({ sessionId: aid, phase: "running", model: { model: "model-a" } });
+    const before = events.length;
+    turns.get(bid)!.send("assistant.delta", { delta: " rahasia B" });
+    releases.get(bid)!();
+    await until(() => chat.sessions.get(bid)?.view.phase === "idle");
+    expect(chat.view.phase).toBe("running");
+    expect(events.slice(before).filter((e) => e.type === "chat_item" || e.type === "chat_delta")).toEqual([]);
+    expect(JSON.stringify(chat.view.items)).not.toContain("hasil tugas B");
+    releases.get(aid)!();
+    await idle();
+    expect(chat.view.items.at(-1)).toMatchObject({ kind: "assistant", text: "hasil tugas A" });
+    await chatAction({ action: "open", sessionId: bid });
+    expect(chat.view.items.at(-1)).toMatchObject({ kind: "assistant", text: "hasil tugas B" });
+    expect((await chatAction({ action: "send", sessionId: "missing", text: "stale" })).status).toBe(409);
+  });
+
+  it("a stop targets one session while the other stream stays connected", async () => {
+    const gone = new Set<string>();
+    fake.script = async (t) => {
+      t.send("run.started");
+      void t.gone.then(() => gone.add(t.sessionId));
+      await t.stopped;
+      t.send("run.cancelled");
+      t.send("done");
+    };
+    await chatAction({ action: "new" });
+    const aid = chat.view.sessionId!;
+    await send("A");
+    await until(() => !!chat.sessions.get(aid)?.runId);
+    await chatAction({ action: "new" });
+    const bid = chat.view.sessionId!;
+    await send("B");
+    await until(() => !!chat.sessions.get(bid)?.runId);
+    expect((await chatAction({ action: "stop", sessionId: aid })).status).toBe(202);
+    await until(() => chat.sessions.get(aid)?.view.phase === "idle");
+    expect(chat.view).toMatchObject({ sessionId: bid, phase: "running" });
+    expect(gone.has(bid)).toBe(false);
+    expect(fake.calls.filter((c) => c.path.endsWith("/stop"))).toHaveLength(1);
+    await chatAction({ action: "stop", sessionId: bid });
+    await idle();
+  });
+
+  it("switching retains each session's approval and answers only the requested item", async () => {
+    const choices = new Map<string, unknown>();
+    fake.script = async (t) => {
+      t.send("run.started");
+      choices.set(t.sessionId, (await t.approval()).choice);
+      t.send("run.completed");
+      t.send("done");
+    };
+    await send("A");
+    await until(() => chat.view.phase === "approval");
+    const aid = chat.view.sessionId!;
+    const approvalA = chat.view.items.find((i) => i.kind === "approval")!;
+    await chatAction({ action: "new" });
+    await send("B");
+    await until(() => chat.view.phase === "approval");
+    const bid = chat.view.sessionId!;
+    const approvalB = chat.view.items.find((i) => i.kind === "approval")!;
+    expect((await chatAction({ action: "approve", sessionId: bid, id: approvalA.id, choice: "deny" })).status).toBe(409);
+    await chatAction({ action: "open", sessionId: aid });
+    expect(chat.view.phase).toBe("approval");
+    expect((await chatAction({ action: "approve", sessionId: aid, id: approvalA.id, choice: "once" })).status).toBe(200);
+    await idle();
+    expect(choices.get(aid)).toBe("once");
+    expect(choices.has(bid)).toBe(false);
+    expect((await chatAction({ action: "approve", sessionId: bid, id: approvalB.id, choice: "deny" })).status).toBe(200);
+    await until(() => choices.get(bid) === "deny");
+  });
+
+  it("switching during session creation does not adopt the starting turn into the new panel", async () => {
+    let release = () => {};
+    fake.script = async (t) => {
+      t.send("run.started");
+      await new Promise<void>((r) => { release = r; });
+      t.send("run.completed");
+      t.send("done");
+    };
+    const pending = send("A");
+    const b = await chatAction({ action: "new", agent: { name: "B" } });
+    const a = await pending;
+    expect(a.status).toBe(202);
+    expect(chat.view).toMatchObject({ sessionId: b.body.sessionId, items: [], phase: "idle" });
+    expect(chat.sessions.get(a.body.sessionId as string)?.view.phase).toBe("running");
+    release();
+    await until(() => chat.sessions.get(a.body.sessionId as string)?.view.phase === "idle");
   });
 });
 

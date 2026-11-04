@@ -451,7 +451,7 @@ muncul kalau Agent HQ punya `HQ_HERMES_API_KEY`.
 - Sesi diberi judul dari pesan pertamanya, misalnya `Agent HQ · cek disk penuh` (judul di Hermes harus unik,
   jadi kalau sudah dipakai, jamnya ditambahkan).
 
-**Banyak sesi, satu memori.** Satu sesi terbuka pada satu waktu, tapi sesi lama tetap bisa dilanjutkan:
+**Banyak sesi, satu memori.** Panel menampilkan satu sesi pada satu waktu; beberapa sesi bisa bekerja bersamaan:
 
 - **Baru** membuka form **Sesi baru**: Nama, Peran, Tim (Kantor, Red Team, Laporan VA, Blue Team), dan Model.
   Setelah **Mulai sesi**, Hermes langsung membuat sesinya dan agen baru masuk ke kantor, meski hook belum
@@ -463,8 +463,12 @@ muncul kalau Agent HQ punya `HQ_HERMES_API_KEY`.
   menambahkannya ke system prompt untuk pesan itu saja; memori, skill, dan transkrip tidak diubah.
 - **Riwayat** menampilkan sesi API server, yang terakhir dipakai paling atas, dengan potongan pesan terakhir.
   **Buka** melanjutkan sesi (riwayat, model, dan agennya ikut), **Ganti nama** mengganti judulnya, **Hapus**
-  menghapus sesi dari Hermes beserta agen dan namanya. Pindah sesi hanya bisa saat Hermes tidak sedang bekerja.
-  Agen sesi yang ditinggalkan keluar dari kantor, dan masuk lagi saat sesinya dibuka.
+  menghapus sesi dari Hermes beserta agen dan namanya. **Baru** dan **Buka** tetap bisa dipakai saat sesi lain
+  bekerja. Tiap sesi punya stream, jawaban, model, dan permintaan izin sendiri. **Hentikan** hanya menghentikan
+  sesi yang dipilih. Riwayat menunjukkan sesi yang sedang bekerja atau menunggu izin; sesi yang sedang bekerja
+  tidak bisa dihapus. Agen sesi yang masih bekerja tetap di kantor saat panel pindah; agen sesi idle keluar dan
+  masuk lagi saat sesinya dibuka. Sesi latar yang selesai normal keluar dari kantor, hasilnya tetap bisa dibuka.
+  Batas run bersamaan dari Hermes/provider tetap berlaku; kalau penuh, panel menampilkan pesan dari Hermes.
 - Sesi CLI, Telegram, dan Discord tidak muncul di Riwayat. Hermes hanya mengizinkan API server melanjutkan sesi
   buatannya sendiri (sesi lain ditolak dengan `409 permission_denied`).
 - **Memori Hermes** (MEMORY.md, USER.md), skill, dan `session_search` berlaku untuk semua sesi, termasuk sesi

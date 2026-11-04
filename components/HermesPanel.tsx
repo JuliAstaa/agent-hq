@@ -6,7 +6,7 @@
 // Riwayat switches between sessions, Baru starts one with its own office character, and each session can have its
 // own model. Every Hermes string is rendered as React text.
 
-import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "react";
 import { useStore } from "zustand";
 import { ago } from "@/lib/cron";
 import {
@@ -69,13 +69,11 @@ function MemoryLine({ options }: { options: ModelOptions | null }) {
 }
 
 function SessionRow({
-  s, now, current, locked, busy, onOpen, onRename, onDelete,
+  s, now, current, busy, onOpen, onRename, onDelete,
 }: {
   s: ChatSession;
   now: number;
   current: boolean;
-  /** Hermes is working: no switching. */
-  locked: boolean;
   busy: boolean;
   onOpen: () => void;
   onRename: (title: string) => Promise<boolean>;
@@ -85,6 +83,7 @@ function SessionRow({
   const [draft, setDraft] = useState("");
   const [confirm, setConfirm] = useState(false);
   const title = displayTitle(s.title) || "(tanpa judul)";
+  const running = !!s.phase && s.phase !== "idle";
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     if (draft.trim() && (await onRename(draft.trim()))) setRenaming(false);
@@ -120,6 +119,7 @@ function SessionRow({
                 Dibuka
               </span>
             )}
+            {running && <span className={PILL} style={{ background: PHASE_LABEL[s.phase!].color }}>{PHASE_LABEL[s.phase!].label}</span>}
           </div>
           {s.preview && <div className="truncate text-[12px] opacity-75">{s.preview}</div>}
           <div className="text-[11.5px] opacity-70">
@@ -128,7 +128,7 @@ function SessionRow({
           {confirm ? (
             <div className="mt-[6px] flex gap-[6px] items-center flex-wrap text-[12px]">
               <span className="font-semibold">Hapus sesi ini dari Hermes? Riwayatnya dan agennya ikut hilang.</span>
-              <Button size="log" tone="alert" className={OFF} disabled={busy || (current && locked)} onClick={onDelete}>
+              <Button size="log" tone="alert" className={OFF} disabled={busy || running} onClick={onDelete}>
                 Ya, hapus
               </Button>
               <Button size="log" onClick={() => setConfirm(false)}>
@@ -138,7 +138,7 @@ function SessionRow({
           ) : (
             <div className="mt-[6px] flex gap-[6px] flex-wrap">
               {!current && (
-                <Button size="log" tone="primary" className={OFF} disabled={busy || locked} title={locked ? "Tunggu Hermes selesai dulu" : "Lanjutkan sesi ini"} onClick={onOpen}>
+                <Button size="log" tone="primary" className={OFF} disabled={busy} title="Lanjutkan sesi ini" onClick={onOpen}>
                   Buka
                 </Button>
               )}
@@ -153,7 +153,7 @@ function SessionRow({
               >
                 Ganti nama
               </Button>
-              <Button size="log" className={OFF} disabled={busy || (current && locked)} onClick={() => setConfirm(true)}>
+              <Button size="log" className={OFF} disabled={busy || running} onClick={() => setConfirm(true)}>
                 Hapus
               </Button>
             </div>
@@ -245,7 +245,12 @@ export default function HermesPanel({ onClose, liveUrl }: { onClose: () => void;
   const [conn, setConn] = useState<Conn>("connecting");
   const [connErr, setConnErr] = useState("");
   const [err, setErr] = useState("");
-  const [draft, setDraft] = useState("");
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const draftKey = view.sessionId ?? "";
+  const draft = drafts[draftKey] ?? "";
+  const setDraft = (value: string | ((previous: string) => string)) => setDrafts((all) => ({
+    ...all, [draftKey]: typeof value === "function" ? value(all[draftKey] ?? "") : value,
+  }));
   const [busy, setBusy] = useState(false);
   const [tokenDraft, setTokenDraft] = useState("");
   const [tokenRev, setTokenRev] = useState(0);
@@ -330,7 +335,7 @@ export default function HermesPanel({ onClose, liveUrl }: { onClose: () => void;
   }, [view, mode]);
 
   /** POST one action. Returns the reply, or the error text (also shown in the panel unless `quiet`). */
-  async function request(body: Record<string, unknown>, quiet = false): Promise<Reply | string> {
+  const request = useCallback(async (body: Record<string, unknown>, quiet = false): Promise<Reply | string> => {
     if (!url) return "Chat tidak tersambung";
     try {
       const token = readToken();
@@ -353,13 +358,14 @@ export default function HermesPanel({ onClose, liveUrl }: { onClose: () => void;
       if (!quiet) setErr(why);
       return why;
     }
-  }
+  }, [url]);
 
   /** Like request(), with the buttons disabled meanwhile; true when it worked. */
   async function post(body: Record<string, unknown>): Promise<boolean> {
     setBusy(true);
     try {
-      return typeof (await request(body)) !== "string";
+      const targeted = ["send", "approve", "stop", "model"].includes(String(body.action));
+      return typeof (await request(targeted ? { ...body, sessionId: view.sessionId } : body)) !== "string";
     } finally {
       setBusy(false);
     }
@@ -394,13 +400,19 @@ export default function HermesPanel({ onClose, liveUrl }: { onClose: () => void;
     return () => ac.abort();
   }, [modelsWanted, url]);
 
-  async function loadSessions() {
+  const loadSessions = useCallback(async () => {
     setSessionsErr("");
     const r = await request({ action: "sessions" }, true);
     if (typeof r === "string") return setSessionsErr(r);
     setSessionsAt(typeof r.now === "number" ? r.now : 0);
     setSessions(Array.isArray(r.sessions) ? (r.sessions as ChatSession[]) : []);
-  }
+  }, [request]);
+
+  useEffect(() => {
+    if (mode !== "history" || !ready) return;
+    const timer = setInterval(() => void loadSessions(), 3000);
+    return () => clearInterval(timer);
+  }, [mode, ready, loadSessions]);
 
   async function send() {
     const text = draft.trim();
@@ -480,7 +492,7 @@ export default function HermesPanel({ onClose, liveUrl }: { onClose: () => void;
           tone={mode === "new" ? "primary" : "paper"}
           title="Mulai sesi baru dengan agen baru di kantor. Sesi lama tetap tersimpan di Hermes."
           aria-pressed={mode === "new"}
-          disabled={!ready || working || busy}
+          disabled={!ready || busy}
           onClick={() => {
             if (mode === "new") return setMode("chat");
             setNewAgent((a) => ({ ...a, model: view.model }));
@@ -574,7 +586,7 @@ export default function HermesPanel({ onClose, liveUrl }: { onClose: () => void;
               Kembali
             </Button>
           </div>
-          {working && <p className={cn(NOTE, "bg-[#ffe6a6]")}>Hermes sedang bekerja. Pindah sesi setelah pekerjaannya selesai.</p>}
+          <p className={cn(NOTE, "bg-[#ffe6a6]")}>Sesi yang sedang bekerja tetap berjalan saat kamu membuka sesi lain atau membuat sesi baru.</p>
           {sessionsErr && <p className={cn(NOTE, "bg-[#ffd0d4]")}>{sessionsErr}</p>}
           {sessions === null && !sessionsErr && <p className="m-0 text-[13px] opacity-70">Memuat riwayat...</p>}
           {sessions?.length === 0 && <p className="m-0 text-[13px] opacity-70">Belum ada sesi. Tekan Baru untuk mulai.</p>}
@@ -584,7 +596,6 @@ export default function HermesPanel({ onClose, liveUrl }: { onClose: () => void;
               s={s}
               now={sessionsAt}
               current={s.id === view.sessionId}
-              locked={working}
               busy={busy}
               onOpen={() => void openSession(s.id)}
               onRename={(title) => renameSession(s.id, title)}
@@ -643,7 +654,7 @@ export default function HermesPanel({ onClose, liveUrl }: { onClose: () => void;
           </p>
           <div className="flex gap-2 justify-end">
             <Button onClick={() => setMode("chat")}>Batal</Button>
-            <Button tone="primary" type="submit" className={OFF} disabled={!ready || working || busy}>
+            <Button tone="primary" type="submit" className={OFF} disabled={!ready || busy}>
               {busy ? "Membuat..." : "Mulai sesi"}
             </Button>
           </div>

@@ -93,6 +93,14 @@ test("server room click opens the Server panel", async ({ page }) => {
   await blockExternal(page);
   await page.goto("/");
   await expect(page.locator('[data-hq-ui="top"] [data-mode]')).toHaveAttribute("data-mode", "live", { timeout: 15_000 });
+  // Stable room data; host RAM pressure must not replace UI toasts or change the expected room state.
+  await page.waitForFunction(() => !!(window as any).agentHQ);
+  await page.evaluate(() => (window as any).agentHQ.applyEvent({
+    type: "server_stats", platform: "linux", interval_ms: 60_000, cpu: 0.2, cores: 4, load: [0.2, 0.3, 0.4],
+    mem_used: 2 * 1024 ** 3, mem_total: 4 * 1024 ** 3,
+    disk_used: 20 * 1024 ** 3, disk_avail: 20 * 1024 ** 3, disk_size: 40 * 1024 ** 3,
+    uptime_s: 86400, app_rss: 200 * 1024 ** 2,
+  }));
   await page.waitForFunction(() => !!(window as any).agentHQ?.store.getState().server, null, { timeout: 20_000 });
   await page.evaluate(() => (window as any).agentHQ.setFloor("2"));
   await page.waitForFunction(() => (window as any).agentHQ.controls.enabled, null, { timeout: 60_000 }); // camera fly done

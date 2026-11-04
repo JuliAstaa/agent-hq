@@ -7,7 +7,7 @@ import http from "node:http";
 import net from "node:net";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { startFakeHermes, type FakeHermes } from "../helpers/fake-hermes-api";
+import { helloTurn, startFakeHermes, type FakeHermes, type Turn } from "../helpers/fake-hermes-api";
 
 const ROOT = path.resolve(__dirname, "../..");
 const BUILT = fs.existsSync(path.join(ROOT, ".next/BUILD_ID"));
@@ -152,5 +152,52 @@ describe.skipIf(!BUILT)("Hermes chat on next start", { timeout: 60_000 }, () => 
     const off = await start({});
     expect(await (await fetch(off.url + "/api/hermes")).json()).toEqual({ ok: true, enabled: false });
     expect((await post(off.url, { action: "send", text: "x" })).status).toBe(404);
+  });
+
+  it("two sessions run concurrently across panel switches and reconnects; stop affects only its target", async () => {
+    const turns = new Map<string, Turn>();
+    fake.script = async (t) => {
+      turns.set(t.sessionId, t);
+      t.send("run.started");
+      await t.stopped;
+      t.send("run.cancelled");
+      t.send("done");
+    };
+    const { url } = await start({ HQ_HERMES_API_KEY: fake.key, HQ_HERMES_API_URL: fake.url });
+    let sse = listen(url);
+    try {
+      expect(await sse.status).toBe(200);
+      const a = await (await post(url, { action: "new", agent: { name: "A" } })).json();
+      expect((await post(url, { action: "send", sessionId: a.sessionId, text: "kerja A" })).status).toBe(202);
+      await until(() => turns.has(a.sessionId));
+      const b = await (await post(url, { action: "new", agent: { name: "B" } })).json();
+      expect(b.ok).toBe(true);
+      expect((await post(url, { action: "send", sessionId: b.sessionId, text: "kerja B" })).status).toBe(202);
+      await until(() => turns.has(b.sessionId));
+      const list = await (await post(url, { action: "sessions" })).json();
+      expect(list.sessions).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: a.sessionId, phase: "running" }),
+        expect.objectContaining({ id: b.sessionId, phase: "running" }),
+      ]));
+      const agents = (await (await fetch(url + "/api/agents")).json()).agents;
+      expect(agents).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: a.agentId, status: "thinking" }),
+        expect.objectContaining({ id: b.agentId, status: "thinking" }),
+      ]));
+      expect((await post(url, { action: "open", sessionId: a.sessionId })).status).toBe(200);
+      sse.stop();
+      sse = listen(url);
+      expect(await sse.status).toBe(200);
+      await until(() => sse.events.some((e) => e.type === "chat_snapshot" && (e.view as { sessionId: string }).sessionId === a.sessionId));
+      expect((await post(url, { action: "stop", sessionId: a.sessionId })).status).toBe(202);
+      await until(() => sse.events.some((e) => e.type === "chat_state" && e.sessionId === a.sessionId && e.phase === "idle"));
+      const still = await (await post(url, { action: "sessions" })).json();
+      expect(still.sessions).toContainEqual(expect.objectContaining({ id: b.sessionId, phase: "running" }));
+      expect((await post(url, { action: "stop", sessionId: b.sessionId })).status).toBe(202);
+    } finally {
+      sse.stop();
+      for (const t of turns.values()) t.drop();
+      fake.script = helloTurn;
+    }
   });
 });

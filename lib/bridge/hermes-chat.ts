@@ -7,7 +7,7 @@
 //   chatGuard() because a message to Hermes can run anything Hermes' tools can run.
 // The conversation is shown with redact() applied (like logs); Hermes itself receives the message as typed.
 //
-// One session is open at a time. The Riwayat list switches between the API server's sessions; they all share
+// One session is shown at a time; each session keeps its own running turn when Riwayat switches the panel. They share
 // Hermes' memory, skills and session_search, so a new session still knows what earlier ones taught Hermes.
 // Each session has an office character with the id the Hermes hook gives it (so hook and chat move the same
 // character), and may have a model of its own (kept in HQ_HERMES_CHAT_FILE).
@@ -132,25 +132,34 @@ interface SessionPrefs {
   updatedAt: string;
 }
 
-interface ChatHub {
+interface ChatRuntime {
   view: ChatView;
   /** Hermes run id of the turn in progress ("" before run.started). */
   runId: string;
   /** Pending approval item id -> Hermes request id ("" when the event had none). */
   approvals: Map<string, string>;
   abort: AbortController | null;
-  subs: Set<(ev: ChatEvent) => void>;
-  seq: number;
   /** Assistant item that text deltas append to; closed by a tool call or an approval. */
   openText: string | null;
   outcome: "" | "completed" | "failed" | "cancelled";
-  /** Look-up of the newest "Agent HQ" session in Hermes, once per server start (retried if Hermes was down). */
-  resumed: Promise<void> | null;
   stopTimer: ReturnType<typeof setTimeout> | null;
   /** Bumped by resetChat(): a stream from before the reset must not touch the new state. */
   epoch: number;
   /** The title is still the automatic date one: the first message renames the session after its topic. */
   autoTitle: boolean;
+  /** A delete in progress cannot race a new message in this session. */
+  deleting: boolean;
+}
+
+interface ChatHub {
+  current: ChatRuntime;
+  /** Live/cached sessions, including turns running outside the selected conversation. */
+  sessions: Map<string, ChatRuntime>;
+  view: ChatView;
+  subs: Set<(ev: ChatEvent) => void>;
+  seq: number;
+  /** Look-up of the newest "Agent HQ" session in Hermes, once per server start (retried if Hermes was down). */
+  resumed: Promise<void> | null;
   /** Model per Hermes session id, persisted in `prefsFile`. */
   prefs: Map<string, SessionPrefs>;
   prefsFile: string;
@@ -184,21 +193,29 @@ function loadPrefs(file: string): Map<string, SessionPrefs> {
   return out;
 }
 
+const newRuntime = (): ChatRuntime => ({
+  view: emptyChatView(),
+  runId: "",
+  approvals: new Map(),
+  abort: null,
+  openText: null,
+  outcome: "",
+  stopTimer: null,
+  epoch: 0,
+  autoTitle: false,
+  deleting: false,
+});
+
 const newHub = (): ChatHub => {
   const prefsFile = chatPrefsFile();
   return {
-    view: emptyChatView(),
-    runId: "",
-    approvals: new Map(),
-    abort: null,
+    current: newRuntime(),
+    sessions: new Map(),
+    get view() { return this.current.view; },
+    set view(view: ChatView) { this.current.view = view; },
     subs: new Set(),
     seq: 0,
-    openText: null,
-    outcome: "",
     resumed: null,
-    stopTimer: null,
-    epoch: 0,
-    autoTitle: false,
     prefs: loadPrefs(prefsFile),
     prefsFile,
     models: null,
@@ -213,8 +230,14 @@ if (!chat.prefs) {
   chat.prefs = loadPrefs(chat.prefsFile);
 }
 chat.models ??= null;
-chat.autoTitle ??= false;
-chat.view = { ...emptyChatView(), ...chat.view };
+// Migrate the older single-session hub during dev reloads.
+if (!chat.current) {
+  const legacy = chat as ChatHub & Partial<ChatRuntime>;
+  chat.current = { ...newRuntime(), ...legacy, view: { ...emptyChatView(), ...legacy.view } };
+  chat.sessions = new Map();
+  if (chat.view.sessionId) chat.sessions.set(chat.view.sessionId, chat.current);
+  Object.defineProperty(chat, "view", { configurable: true, get: () => chat.current.view, set: (v: ChatView) => { chat.current.view = v; } });
+}
 
 /** Write the model choices atomically (temp file + rename); a failure is logged, the choice still holds in memory. */
 function savePrefs(): void {
@@ -245,7 +268,8 @@ function rememberModel(sessionId: string | null, model: ModelChoice | null): voi
 
 const nextId = (prefix: string) => `${prefix}${++chat.seq}`;
 
-function emit(ev: ChatEvent): void {
+function emit(ev: ChatEvent, ctx: ChatRuntime = chat.current): void {
+  if (ctx !== chat.current) return;
   for (const send of chat.subs) {
     try {
       send(ev);
@@ -258,22 +282,22 @@ function emit(ev: ChatEvent): void {
 export const chatSnapshot = (): ChatView => ({ ...chat.view, items: chat.view.items.slice() });
 const emitSnapshot = () => emit({ type: "chat_snapshot", view: chatSnapshot() });
 
-function putItem(item: ChatItem): void {
-  chat.view.items = upsertItem(chat.view.items, item);
-  emit({ type: "chat_item", item });
+function putItem(item: ChatItem, ctx: ChatRuntime = chat.current): void {
+  ctx.view.items = upsertItem(ctx.view.items, item);
+  emit({ type: "chat_item", item }, ctx);
 }
 
 const stateOf = (v: ChatView): ChatState => ({
   sessionId: v.sessionId, title: v.title, phase: v.phase, thinking: v.thinking, agentId: v.agentId, model: v.model, runtime: v.runtime,
 });
 
-function setState(p: Partial<ChatState>): void {
-  Object.assign(chat.view, p);
-  emit({ type: "chat_state", ...stateOf(chat.view) });
+function setState(p: Partial<ChatState>, ctx: ChatRuntime = chat.current): void {
+  Object.assign(ctx.view, p);
+  emit({ type: "chat_state", ...stateOf(ctx.view) }, ctx);
 }
 
-const note = (text: string, tone: "info" | "error" = "info") => putItem({ kind: "note", id: nextId("n"), text, tone, at: Date.now() });
-const find = (id: string | null) => (id ? chat.view.items.find((x) => x.id === id) : undefined);
+const note = (text: string, tone: "info" | "error" = "info", ctx: ChatRuntime = chat.current) => putItem({ kind: "note", id: nextId("n"), text, tone, at: Date.now() }, ctx);
+const find = (id: string | null, ctx: ChatRuntime = chat.current) => (id ? ctx.view.items.find((x) => x.id === id) : undefined);
 
 /** Subscribe a panel stream; returns the unsubscribe function. */
 export function subscribeChat(send: (ev: ChatEvent) => void): () => void {
@@ -302,14 +326,14 @@ function showAgent(sessionId: string, title: string, who?: ChatAgentInput): { id
 }
 
 /** The open session's character leaves the office. */
-function hideAgent(): void {
-  const id = chat.view.agentId;
+function hideAgent(ctx: ChatRuntime = chat.current): void {
+  const id = ctx.view.agentId;
   if (id && hub.agents.has(id)) publish({ type: "remove", id });
 }
 
 /** Status of the open session's character (Agent HQ shows the chat even without the Hermes hook). */
-function agentSays(fields: Record<string, unknown>): void {
-  const id = chat.view.agentId;
+function agentSays(fields: Record<string, unknown>, ctx: ChatRuntime = chat.current): void {
+  const id = ctx.view.agentId;
   if (!id) return;
   publish({ type: "agent_update", id, ...(hub.agents.has(id) ? {} : DEFAULT_CHAT_AGENT), ...fields });
 }
@@ -476,6 +500,7 @@ export function sessionRows(data: unknown[]): { id: string; title: string; row: 
         lastActive: toMs(r.last_active ?? r.started_at),
         messages: typeof r.message_count === "number" ? r.message_count : 0,
         agent: hub.overrides.get(hermesAgentId(id))?.name ?? "",
+        phase: chat.sessions.get(id)?.view.phase ?? "idle",
       };
       return { id, title, row };
     });
@@ -484,19 +509,25 @@ export function sessionRows(data: unknown[]): { id: string; title: string; row: 
 }
 
 /**
- * Make `s` the open session: its history, its model, its character in the office (the previous character leaves).
+ * Make `s` the open session. Running sessions retain their stream, character, and pending approvals.
  * `model` given = the session's new model; otherwise the one remembered for it.
  */
 function switchTo(s: { id: string; title: string }, items: ChatItem[], opts: { who?: ChatAgentInput; model?: ModelChoice | null; autoTitle?: boolean } = {}): void {
-  hideAgent();
+  if (chat.view.phase === "idle") hideAgent();
+  const cached = chat.sessions.get(s.id);
+  if (cached) {
+    chat.current = cached;
+    if (cached.view.phase === "idle") showAgent(s.id, cached.view.title);
+    emitSnapshot();
+    return;
+  }
+  chat.current = newRuntime();
+  const ctx = chat.current;
+  chat.sessions.set(s.id, ctx);
   const agent = showAgent(s.id, s.title, opts.who);
   if (opts.model !== undefined) rememberModel(s.id, opts.model);
-  chat.approvals.clear();
-  chat.openText = null;
-  chat.runId = "";
-  chat.outcome = "";
   chat.resumed = Promise.resolve(); // an explicit choice must not be replaced by the newest session
-  chat.autoTitle = !!opts.autoTitle;
+  ctx.autoTitle = !!opts.autoTitle;
   chat.view = {
     ...emptyChatView(),
     sessionId: s.id,
@@ -507,14 +538,20 @@ function switchTo(s: { id: string; title: string }, items: ChatItem[], opts: { w
   };
   emitSnapshot();
   if (agent.error) note(`Nama agen tidak tersimpan: ${trunc(agent.error, 160)}`, "error");
+  // Bound retained transcripts; never evict the selected session or a running turn.
+  for (const [id, session] of chat.sessions) {
+    if (chat.sessions.size <= 50) break;
+    if (session !== chat.current && session.view.phase === "idle" && !session.deleting) chat.sessions.delete(id);
+  }
 }
 
 /** A session made for the draft (first message, no session yet) keeps the draft's items and model. */
-function adoptNew(s: { id: string; title: string }): void {
+function adoptNew(s: { id: string; title: string }, ctx: ChatRuntime = chat.current): void {
   const agent = showAgent(s.id, s.title);
-  rememberModel(s.id, chat.view.model);
-  chat.autoTitle = true;
-  setState({ sessionId: s.id, title: redact(s.title), agentId: agent.id });
+  rememberModel(s.id, ctx.view.model);
+  ctx.autoTitle = true;
+  chat.sessions.set(s.id, ctx);
+  setState({ sessionId: s.id, title: redact(s.title), agentId: agent.id }, ctx);
 }
 
 /**
@@ -541,7 +578,7 @@ export function resumeLatest(): Promise<void> {
 export const topicOf = (msg: string): string => trunc(redact(msg), AUTO_TOPIC);
 
 /** Name a new session after its first message: "Agent HQ · <topic>" (titles are unique in Hermes; add the time if taken). */
-async function retitle(sessionId: string, msg: string): Promise<void> {
+async function retitle(sessionId: string, msg: string, ctx: ChatRuntime = chat.current): Promise<void> {
   const topic = topicOf(msg);
   if (!topic) return;
   for (const title of [CHAT_TOPIC_PREFIX + topic, `${CHAT_TOPIC_PREFIX}${topic} (${clock()})`]) {
@@ -550,7 +587,7 @@ async function retitle(sessionId: string, msg: string): Promise<void> {
       if (res.status === 400) continue;
       if (!res.ok) return;
       const s = (await readJson(res))?.session;
-      if (chat.view.sessionId === sessionId) setState({ title: redact(isObj(s) && s.title ? str(s.title) : title) });
+      if (ctx.view.sessionId === sessionId) setState({ title: redact(isObj(s) && s.title ? str(s.title) : title) }, ctx);
       return;
     } catch {
       return;
@@ -560,54 +597,54 @@ async function retitle(sessionId: string, msg: string): Promise<void> {
 
 /* ---------------- one turn ---------------- */
 
-function closeText(): void {
-  const it = find(chat.openText);
-  chat.openText = null;
-  if (it?.kind === "assistant" && it.streaming) putItem({ ...it, streaming: false });
+function closeText(ctx: ChatRuntime = chat.current): void {
+  const it = find(ctx.openText, ctx);
+  ctx.openText = null;
+  if (it?.kind === "assistant" && it.streaming) putItem({ ...it, streaming: false }, ctx);
 }
 
-function appendText(delta: string): void {
-  const it = find(chat.openText);
+function appendText(delta: string, ctx: ChatRuntime = chat.current): void {
+  const it = find(ctx.openText, ctx);
   const d = redact(dropDataUrls(delta));
   if (it?.kind === "assistant") {
-    chat.view.items = upsertItem(chat.view.items, { ...it, text: appendCapped(it.text, d) });
-    emit({ type: "chat_delta", id: it.id, delta: d });
+    ctx.view.items = upsertItem(ctx.view.items, { ...it, text: appendCapped(it.text, d) });
+    emit({ type: "chat_delta", id: it.id, delta: d }, ctx);
     return;
   }
   const item: ChatItem = { kind: "assistant", id: nextId("m"), text: d.slice(0, MAX_CHAT_TEXT), streaming: true, at: Date.now() };
-  chat.openText = item.id;
-  putItem(item);
+  ctx.openText = item.id;
+  putItem(item, ctx);
 }
 
 /** assistant.completed carries the final answer: it replaces what was streamed for it. */
-function finalText(content: string): void {
-  const it = find(chat.openText);
-  chat.openText = null;
+function finalText(content: string, ctx: ChatRuntime = chat.current): void {
+  const it = find(ctx.openText, ctx);
+  ctx.openText = null;
   if (it?.kind === "assistant") {
-    putItem({ ...it, text: content ? shown(content) : it.text, streaming: false });
+    putItem({ ...it, text: content ? shown(content) : it.text, streaming: false }, ctx);
     return;
   }
-  if (content) putItem({ kind: "assistant", id: nextId("m"), text: shown(content), streaming: false, at: Date.now() });
+  if (content) putItem({ kind: "assistant", id: nextId("m"), text: shown(content), streaming: false, at: Date.now() }, ctx);
 }
 
 /** The model that answered (`runtime` on assistant.completed / run.*), shown next to the picker. */
-function noteRuntime(v: unknown): void {
+function noteRuntime(v: unknown, ctx: ChatRuntime = chat.current): void {
   if (!isObj(v)) return;
   const model = cleanId(v.model);
   if (!model) return;
   const rt = { provider: cleanId(v.provider, 80), model };
-  if (modelKey(rt) !== modelKey(chat.view.runtime)) setState({ runtime: rt });
+  if (modelKey(rt) !== modelKey(ctx.view.runtime)) setState({ runtime: rt }, ctx);
 }
 
 /**
  * Context compression can move the conversation to a new session id (the turn's `session_id`). Follow it, so the
  * next message continues the compressed transcript; the character and the model move along.
  */
-function followSession(v: unknown): void {
+function followSession(v: unknown, ctx: ChatRuntime = chat.current): void {
   const next = cleanId(v);
-  const prev = chat.view.sessionId;
+  const prev = ctx.view.sessionId;
   if (!next || !prev || next === prev) return;
-  const from = chat.view.agentId;
+  const from = ctx.view.agentId;
   const to = hermesAgentId(next);
   const pinned = from ? hub.overrides.get(from) : undefined;
   if (pinned && !hub.overrides.has(to)) {
@@ -618,109 +655,112 @@ function followSession(v: unknown): void {
       console.warn(`[hq] gagal menyimpan ${hub.overridesFile}:`, (e as Error).message);
     }
   }
-  rememberModel(next, chat.prefs.get(prev)?.model ?? chat.view.model);
+  rememberModel(next, chat.prefs.get(prev)?.model ?? ctx.view.model);
   const was = from ? hub.agents.get(from) : undefined;
-  hideAgent();
+  chat.sessions.delete(prev);
+  chat.sessions.set(next, ctx);
+  hideAgent(ctx);
   publish({ type: "agent_update", id: to, ...(hub.agents.has(to) ? {} : DEFAULT_CHAT_AGENT), status: was?.status ?? "working", task: was?.task ?? "" });
-  setState({ sessionId: next, agentId: to });
+  setState({ sessionId: next, agentId: to }, ctx);
 }
 
 /** Apply one event of the Hermes session stream (/api/sessions/{id}/chat/stream). */
-export function handleHermesEvent(name: string, d: Record<string, unknown>): void {
+export function handleHermesEvent(name: string, d: Record<string, unknown>, ctx: ChatRuntime = chat.current): void {
   switch (name) {
     case "run.started":
-      chat.runId = str(d.run_id);
+      ctx.runId = str(d.run_id);
       break;
     case "assistant.delta": {
       const delta = str(d.delta);
       if (!delta) break;
-      if (chat.view.thinking) setState({ thinking: false });
-      appendText(delta);
+      if (ctx.view.thinking) setState({ thinking: false }, ctx);
+      appendText(delta, ctx);
       break;
     }
     case "assistant.commentary":
       if (d.already_streamed === true || !str(d.text).trim()) break;
-      closeText();
-      putItem({ kind: "assistant", id: nextId("m"), text: shown(str(d.text)), streaming: false, at: Date.now() });
+      closeText(ctx);
+      putItem({ kind: "assistant", id: nextId("m"), text: shown(str(d.text)), streaming: false, at: Date.now() }, ctx);
       break;
     case "tool.progress":
-      if (d.tool_name === "_thinking" && !chat.view.thinking) setState({ thinking: true });
+      if (d.tool_name === "_thinking" && !ctx.view.thinking) setState({ thinking: true }, ctx);
       break;
     case "tool.started": {
-      closeText();
-      if (chat.view.thinking) setState({ thinking: false });
+      closeText(ctx);
+      if (ctx.view.thinking) setState({ thinking: false }, ctx);
       const item: ChatItem = { kind: "tool", id: nextId("t"), name: str(d.tool_name) || "alat", preview: toolPreview(d.preview, d.args), status: "running", at: Date.now() };
-      putItem(item);
-      agentSays({ status: "working", task: trunc(`${item.name}: ${item.preview}`, 140) });
+      putItem(item, ctx);
+      agentSays({ status: "working", task: trunc(`${item.name}: ${item.preview}`, 140) }, ctx);
       break;
     }
     case "tool.completed":
     case "tool.failed": {
       const name2 = str(d.tool_name);
-      const running = chat.view.items.filter((x) => x.kind === "tool" && x.status === "running");
+      const running = ctx.view.items.filter((x) => x.kind === "tool" && x.status === "running");
       const it = running.find((x) => x.kind === "tool" && x.name === name2) ?? running[0];
-      if (it?.kind === "tool") putItem({ ...it, status: name === "tool.failed" || d.is_error === true || d.error === true ? "error" : "ok" });
+      if (it?.kind === "tool") putItem({ ...it, status: name === "tool.failed" || d.is_error === true || d.error === true ? "error" : "ok" }, ctx);
       break;
     }
     case "approval.request": {
-      closeText();
+      closeText(ctx);
       const choices = (Array.isArray(d.choices) ? d.choices : []).filter((c): c is ApprovalChoice => APPROVAL_CHOICES.includes(c as ApprovalChoice));
       const id = nextId("a");
       const command = trunc(redact(str(d.command)), 300);
       const description = trunc(redact(str(d.description)), 300);
-      putItem({ kind: "approval", id, command, description, choices: choices.length ? choices : ["once", "deny"], status: "pending", at: Date.now() });
-      chat.approvals.set(id, str(d.request_id || d.prompt_id));
-      if (!chat.runId) chat.runId = str(d.run_id);
-      if (chat.view.phase !== "stopping") setState({ phase: "approval", thinking: false });
-      agentSays({ status: "waiting", task: trunc(`Minta izin: ${command || description || "perintah"}`, 140) });
+      putItem({ kind: "approval", id, command, description, choices: choices.length ? choices : ["once", "deny"], status: "pending", at: Date.now() }, ctx);
+      ctx.approvals.set(id, str(d.request_id || d.prompt_id));
+      if (!ctx.runId) ctx.runId = str(d.run_id);
+      if (ctx.view.phase !== "stopping") setState({ phase: "approval", thinking: false }, ctx);
+      agentSays({ status: "waiting", task: trunc(`Minta izin: ${command || description || "perintah"}`, 140) }, ctx);
       break;
     }
     case "assistant.completed":
-      finalText(str(d.content));
-      if (d.partial === true) note("Jawaban Hermes terpotong.");
-      noteRuntime(d.runtime);
-      followSession(d.session_id);
+      finalText(str(d.content), ctx);
+      if (d.partial === true) note("Jawaban Hermes terpotong.", "info", ctx);
+      noteRuntime(d.runtime, ctx);
+      followSession(d.session_id, ctx);
       break;
     case "run.completed":
-      chat.outcome = "completed";
-      noteRuntime(d.runtime);
-      followSession(d.session_id);
+      ctx.outcome = "completed";
+      noteRuntime(d.runtime, ctx);
+      followSession(d.session_id, ctx);
       break;
     case "run.failed":
-      chat.outcome = "failed";
-      note(`Gagal: ${trunc(redact(str(d.error) || str(d.turn_exit_reason) || "Hermes tidak menyelesaikan pekerjaan"), 240)}`, "error");
+      ctx.outcome = "failed";
+      note(`Gagal: ${trunc(redact(str(d.error) || str(d.turn_exit_reason) || "Hermes tidak menyelesaikan pekerjaan"), 240)}`, "error", ctx);
       break;
     case "run.cancelled":
-      chat.outcome = "cancelled";
-      note("Dihentikan.");
+      ctx.outcome = "cancelled";
+      note("Dihentikan.", "info", ctx);
       break;
     case "error":
-      note(`Error dari Hermes: ${trunc(redact(str(d.message)), 240)}`, "error");
+      note(`Error dari Hermes: ${trunc(redact(str(d.message)), 240)}`, "error", ctx);
       break;
   }
 }
 
-function finishTurn(): void {
-  closeText();
-  for (const it of chat.view.items) {
-    if (it.kind === "tool" && it.status === "running") putItem({ ...it, status: chat.outcome === "completed" ? "ok" : "error" });
+function finishTurn(ctx: ChatRuntime = chat.current): void {
+  closeText(ctx);
+  for (const it of ctx.view.items) {
+    if (it.kind === "tool" && it.status === "running") putItem({ ...it, status: ctx.outcome === "completed" ? "ok" : "error" }, ctx);
   }
-  for (const id of chat.approvals.keys()) {
-    const it = find(id);
-    if (it?.kind === "approval" && it.status === "pending") putItem({ ...it, status: "expired" });
+  for (const id of ctx.approvals.keys()) {
+    const it = find(id, ctx);
+    if (it?.kind === "approval" && it.status === "pending") putItem({ ...it, status: "expired" }, ctx);
   }
-  chat.approvals.clear();
-  if (chat.stopTimer) clearTimeout(chat.stopTimer);
-  chat.stopTimer = null;
-  chat.abort = null;
-  chat.runId = "";
-  setState({ phase: "idle", thinking: false });
-  agentSays(chat.outcome === "completed" ? { status: "idle", task: "Menunggu pesan berikutnya" } : chat.outcome === "cancelled" ? { status: "idle", task: "Dihentikan" } : { status: "error" });
+  ctx.approvals.clear();
+  if (ctx.stopTimer) clearTimeout(ctx.stopTimer);
+  ctx.stopTimer = null;
+  ctx.abort = null;
+  ctx.runId = "";
+  setState({ phase: "idle", thinking: false }, ctx);
+  agentSays(ctx.outcome === "completed" ? { status: "idle", task: "Menunggu pesan berikutnya" } : ctx.outcome === "cancelled" ? { status: "idle", task: "Dihentikan" } : { status: "error" }, ctx);
+  if (ctx !== chat.current && ctx.outcome === "completed") hideAgent(ctx);
 }
 
-async function consume(res: Response, abort: AbortController): Promise<void> {
-  const epoch = chat.epoch;
-  const current = () => chat.epoch === epoch;
+async function consume(res: Response, abort: AbortController, ctx: ChatRuntime = chat.current): Promise<void> {
+  const epoch = ctx.epoch;
+  const current = () => ctx.epoch === epoch;
   try {
     for await (const { event, data } of sseFrames(res.body!)) {
       if (!current()) return;
@@ -731,90 +771,102 @@ async function consume(res: Response, abort: AbortController): Promise<void> {
         continue;
       }
       if (!isObj(payload)) continue;
-      handleHermesEvent(event || str(payload.event), payload);
+      handleHermesEvent(event || str(payload.event), payload, ctx);
       if (event === "done") break;
     }
-    if (current() && !chat.outcome && !abort.signal.aborted) note("Stream Hermes selesai tanpa hasil akhir.", "error");
+    if (current() && !ctx.outcome && !abort.signal.aborted) note("Stream Hermes selesai tanpa hasil akhir.", "error", ctx);
   } catch {
     if (!current()) return;
     if (abort.signal.aborted) {
-      if (!chat.outcome) note("Dihentikan.");
-    } else note("Koneksi ke Hermes terputus di tengah jalan. Hermes biasanya ikut menghentikan pekerjaannya.", "error");
+      if (!ctx.outcome) note("Dihentikan.", "info", ctx);
+    } else note("Koneksi ke Hermes terputus di tengah jalan. Hermes biasanya ikut menghentikan pekerjaannya.", "error", ctx);
   } finally {
-    if (current()) finishTurn();
+    if (current()) finishTurn(ctx);
   }
 }
 
 /* ---------------- actions (POST /api/hermes) ---------------- */
 
 /** Body of one turn: the message as typed, the session's model, and who its character is. */
-function turnBody(msg: string): Record<string, unknown> {
+function turnBody(msg: string, ctx: ChatRuntime = chat.current): Record<string, unknown> {
   const body: Record<string, unknown> = { message: msg };
-  const m = chat.view.model;
+  const m = ctx.view.model;
   if (m) {
     body.model = m.model;
     if (m.provider) body.provider = m.provider;
   }
-  const persona = personaPrompt(chat.view.agentId);
+  const persona = personaPrompt(ctx.view.agentId);
   if (persona) body.system_message = persona;
   return body;
 }
 
-export async function sendMessage(text: unknown): Promise<Reply> {
+export async function sendMessage(text: unknown, ctx: ChatRuntime = chat.current): Promise<Reply> {
+  const epoch = ctx.epoch;
   const msg = typeof text === "string" ? text.trim() : "";
   if (!msg) return fail(400, "Pesan kosong");
   if (msg.length > MAX_CHAT_MESSAGE) return fail(413, `Pesan terlalu panjang (maks ${MAX_CHAT_MESSAGE} karakter)`);
-  if (chat.view.phase !== "idle") return fail(409, "Hermes masih mengerjakan pesan sebelumnya. Tunggu atau tekan Hentikan.");
+  if (ctx.deleting) return fail(409, "Sesi sedang dihapus");
+  if (ctx.view.phase !== "idle") return fail(409, "Hermes masih mengerjakan pesan sebelumnya. Tunggu atau tekan Hentikan.");
   const abort = new AbortController();
-  chat.abort = abort;
-  chat.runId = "";
-  chat.outcome = "";
-  chat.openText = null;
-  setState({ phase: "starting", thinking: false });
-  putItem({ kind: "user", id: nextId("u"), text: shown(msg), at: Date.now() });
+  ctx.abort = abort;
+  ctx.runId = "";
+  ctx.outcome = "";
+  ctx.openText = null;
+  setState({ phase: "starting", thinking: false }, ctx);
+  putItem({ kind: "user", id: nextId("u"), text: shown(msg), at: Date.now() }, ctx);
   const open = () =>
-    hermes(`/api/sessions/${enc(chat.view.sessionId!)}/chat/stream`, { method: "POST", body: turnBody(msg), signal: abort.signal, accept: "text/event-stream" });
+    hermes(`/api/sessions/${enc(ctx.view.sessionId!)}/chat/stream`, { method: "POST", body: turnBody(msg, ctx), signal: abort.signal, accept: "text/event-stream" });
   try {
     await resumeLatest();
-    if (!chat.view.sessionId) adoptNew(await createSession());
-    agentSays({ status: "thinking", task: trunc(redact(msg), 140), progress: null });
+    if (!ctx.view.sessionId) {
+      const s = await createSession();
+      if (ctx.epoch !== epoch) return fail(409, "Percakapan sudah direset");
+      abort.signal.throwIfAborted();
+      adoptNew(s, ctx);
+    }
+    agentSays({ status: "thinking", task: trunc(redact(msg), 140), progress: null }, ctx);
     let res = await open();
     if (res.status === 404) {
-      note("Sesi lama tidak ada lagi di Hermes, jadi percakapan baru dimulai.");
-      hideAgent();
-      setState({ sessionId: null, title: "", agentId: null });
-      adoptNew(await createSession());
-      agentSays({ status: "thinking", task: trunc(redact(msg), 140), progress: null });
+      note("Sesi lama tidak ada lagi di Hermes, jadi percakapan baru dimulai.", "info", ctx);
+      hideAgent(ctx);
+      if (ctx.view.sessionId) chat.sessions.delete(ctx.view.sessionId);
+      setState({ sessionId: null, title: "", agentId: null }, ctx);
+      const s = await createSession();
+      if (ctx.epoch !== epoch) return fail(409, "Percakapan sudah direset");
+      abort.signal.throwIfAborted();
+      adoptNew(s, ctx);
+      agentSays({ status: "thinking", task: trunc(redact(msg), 140), progress: null }, ctx);
       res = await open();
     }
     if (!res.ok || !res.body) throw await upstreamError(res);
-    setState({ phase: "running" });
-    if (chat.autoTitle) {
-      chat.autoTitle = false;
-      void retitle(chat.view.sessionId!, msg);
+    if (ctx.epoch !== epoch) return fail(409, "Percakapan sudah direset");
+    setState({ phase: "running" }, ctx);
+    if (ctx.autoTitle) {
+      ctx.autoTitle = false;
+      void retitle(ctx.view.sessionId!, msg, ctx);
     }
-    void consume(res, abort);
-    return { status: 202, body: { ok: true, sessionId: chat.view.sessionId } };
+    void consume(res, abort, ctx);
+    return { status: 202, body: { ok: true, sessionId: ctx.view.sessionId } };
   } catch (e) {
     const stopped = abort.signal.aborted;
-    if (chat.abort !== abort) return fail(409, "Percakapan sudah direset");
-    note(stopped ? "Dihentikan sebelum Hermes mulai." : (e as Error).message, stopped ? "info" : "error");
-    chat.abort = null;
-    setState({ phase: "idle", thinking: false });
-    agentSays(stopped ? { status: "idle", task: "Dihentikan" } : { status: "error" });
+    if (ctx.abort !== abort) return fail(409, "Percakapan sudah direset");
+    note(stopped ? "Dihentikan sebelum Hermes mulai." : (e as Error).message, stopped ? "info" : "error", ctx);
+    ctx.abort = null;
+    setState({ phase: "idle", thinking: false }, ctx);
+    agentSays(stopped ? { status: "idle", task: "Dihentikan" } : { status: "error" }, ctx);
     if (stopped) return ok({ stopped: true });
     return fail(e instanceof HermesError ? e.status : 502, (e as Error).message);
   }
 }
 
 /** Answer a pending approval ({"choice", "id"?}; id defaults to the oldest pending one). */
-export async function answerApproval(choice: unknown, itemId?: unknown): Promise<Reply> {
-  const id = typeof itemId === "string" && chat.approvals.has(itemId) ? itemId : [...chat.approvals.keys()][0];
-  const it = find(id ?? null);
+export async function answerApproval(choice: unknown, itemId?: unknown, ctx: ChatRuntime = chat.current): Promise<Reply> {
+  const id = typeof itemId === "string" ? itemId : [...ctx.approvals.keys()][0];
+  const it = find(id ?? null, ctx);
   if (!id || it?.kind !== "approval" || it.status !== "pending") return fail(409, "Tidak ada permintaan izin yang menunggu");
   if (!it.choices.includes(choice as ApprovalChoice)) return fail(400, "Pilihan izin tidak valid");
-  if (!chat.runId) return fail(409, "Run Hermes belum dikenal, coba lagi sebentar");
-  const runPath = `/v1/runs/${enc(chat.runId)}`;
+  if (!ctx.runId) return fail(409, "Run Hermes belum dikenal, coba lagi sebentar");
+  const runPath = `/v1/runs/${enc(ctx.runId)}`;
   try {
     // A gateway with the canonical session owner wants the exact prompt id and generation from the run status;
     // an older gateway takes the choice alone (plus the request id when the event had one).
@@ -823,46 +875,44 @@ export async function answerApproval(choice: unknown, itemId?: unknown): Promise
     const s = st.ok ? await readJson(st) : null;
     const pc = s?.pending_controls;
     const prompts = Array.isArray(pc) ? pc.filter(isObj).filter((x) => x.kind === "approval") : [];
-    const want = chat.approvals.get(id) || "";
+    const want = ctx.approvals.get(id) || "";
     const p = prompts.find((x) => x.prompt_id === want) ?? prompts[0];
     if (p && typeof s?.execution_generation === "number") body = { request_id: str(p.prompt_id), execution_generation: s.execution_generation, choice };
     else if (want) body.request_id = want;
     const res = await hermes(`${runPath}/approval`, { method: "POST", body });
     if (!res.ok) throw await upstreamError(res);
-    chat.approvals.delete(id);
-    putItem({ ...it, status: choice as ApprovalChoice });
-    if (chat.view.phase === "approval" && !chat.approvals.size) setState({ phase: "running" });
-    agentSays({ status: choice === "deny" ? "thinking" : "working" });
+    ctx.approvals.delete(id);
+    putItem({ ...it, status: choice as ApprovalChoice }, ctx);
+    if (ctx.view.phase === "approval" && !ctx.approvals.size) setState({ phase: "running" }, ctx);
+    agentSays({ status: choice === "deny" ? "thinking" : "working" }, ctx);
     return ok();
   } catch (e) {
     return fail(e instanceof HermesError ? e.status : 502, (e as Error).message);
   }
 }
 
-export async function stopRun(): Promise<Reply> {
-  const phase = chat.view.phase;
+export async function stopRun(ctx: ChatRuntime = chat.current): Promise<Reply> {
+  const phase = ctx.view.phase;
   if (phase === "idle") return fail(409, "Tidak ada pekerjaan yang berjalan");
   if (phase === "stopping") return { status: 202, body: { ok: true } };
-  const abort = chat.abort;
-  if (!chat.runId) {
+  const abort = ctx.abort;
+  if (!ctx.runId) {
     abort?.abort(); // still starting: dropping the stream stops the turn
     return { status: 202, body: { ok: true } };
   }
-  setState({ phase: "stopping" });
-  chat.stopTimer = setTimeout(() => {
-    if (chat.view.phase === "stopping" && chat.abort === abort) abort?.abort();
+  setState({ phase: "stopping" }, ctx);
+  ctx.stopTimer = setTimeout(() => {
+    if (ctx.view.phase === "stopping" && ctx.abort === abort) abort?.abort();
   }, STOP_FALLBACK_MS);
-  chat.stopTimer.unref?.();
+  ctx.stopTimer.unref?.();
   try {
-    const res = await hermes(`/v1/runs/${enc(chat.runId)}/stop`, { method: "POST", body: {} });
+    const res = await hermes(`/v1/runs/${enc(ctx.runId)}/stop`, { method: "POST", body: {} });
     if (!res.ok && res.status !== 409) abort?.abort();
   } catch {
     abort?.abort();
   }
   return { status: 202, body: { ok: true } };
 }
-
-const BUSY_SWITCH = "Hermes masih bekerja. Tunggu selesai atau tekan Hentikan sebelum pindah sesi.";
 
 /** {"name"?, "role"?, "team"?} of a new session's character; null when none was given. */
 function parseAgent(v: unknown): ChatAgentInput | null | { error: string } {
@@ -884,7 +934,6 @@ function parseAgent(v: unknown): ChatAgentInput | null | { error: string } {
  * The old session stays in Hermes and in Riwayat.
  */
 export async function newConversation(agent?: unknown, model?: unknown): Promise<Reply> {
-  if (chat.view.phase !== "idle") return fail(409, "Hentikan dulu pekerjaan yang sedang berjalan");
   const who = parseAgent(agent);
   if (who && "error" in who) return fail(400, who.error);
   let m = chat.view.model;
@@ -893,7 +942,6 @@ export async function newConversation(agent?: unknown, model?: unknown): Promise
     if (model !== null && !m) return fail(400, MODEL_ERR);
   }
   const s = await createSession();
-  if (chat.view.phase !== "idle") return fail(409, "Hermes mulai mengerjakan pesan lain. Sesi baru tetap tersimpan di Riwayat.");
   switchTo(s, [], { who: who ?? undefined, model: m, autoTitle: true });
   return ok({ sessionId: s.id, agentId: chat.view.agentId });
 }
@@ -907,12 +955,17 @@ export async function listSessions(): Promise<Reply> {
   return ok({ sessions: rows.map((r) => r.row), current: chat.view.sessionId, now: Date.now() });
 }
 
-/** Continue another session: load its history, its model, and its character. Only while Hermes is idle. */
+/** Continue another session while every other session's turn keeps running. */
 export async function openSession(sessionId: unknown): Promise<Reply> {
   const id = cleanId(sessionId);
   if (!id) return fail(400, "sessionId tidak valid");
-  if (chat.view.phase !== "idle") return fail(409, BUSY_SWITCH);
   if (id === chat.view.sessionId) return ok({ sessionId: id });
+  const cached = chat.sessions.get(id);
+  if (cached?.deleting) return fail(409, "Sesi sedang dihapus");
+  if (cached) {
+    switchTo({ id, title: cached.view.title }, []);
+    return ok({ sessionId: id });
+  }
   const res = await hermes(`/api/sessions/${enc(id)}`);
   if (res.status === 404) return fail(404, "Sesi itu tidak ada lagi di Hermes");
   if (!res.ok) throw await upstreamError(res);
@@ -923,7 +976,6 @@ export async function openSession(sessionId: unknown): Promise<Reply> {
     return fail(409, `Sesi dari ${trunc(source, 30)} tidak bisa dilanjutkan dari panel ini. Hermes hanya mengizinkan sesi yang dibuat lewat API server.`);
   }
   const items = await loadHistory(id);
-  if (chat.view.phase !== "idle") return fail(409, BUSY_SWITCH);
   switchTo({ id, title: str(s.title) }, items);
   return ok({ sessionId: id });
 }
@@ -941,9 +993,10 @@ export async function renameSession(sessionId: unknown, title: unknown): Promise
   if (!res.ok) throw await upstreamError(res);
   const s = (await readJson(res))?.session;
   const next = redact(isObj(s) && s.title ? str(s.title) : CHAT_TOPIC_PREFIX + topic);
-  if (id === chat.view.sessionId) {
-    chat.autoTitle = false;
-    setState({ title: next });
+  const ctx = chat.sessions.get(id);
+  if (ctx) {
+    ctx.autoTitle = false;
+    setState({ title: next }, ctx);
   }
   return ok({ sessionId: id, title: next });
 }
@@ -952,30 +1005,35 @@ export async function renameSession(sessionId: unknown, title: unknown): Promise
 export async function deleteSession(sessionId: unknown): Promise<Reply> {
   const id = cleanId(sessionId);
   if (!id) return fail(400, "sessionId tidak valid");
-  const current = id === chat.view.sessionId;
-  if (current && chat.view.phase !== "idle") return fail(409, "Hentikan dulu pekerjaan yang sedang berjalan");
-  const res = await hermes(`/api/sessions/${enc(id)}`, { method: "DELETE" });
-  if (res.status === 409) return fail(409, "Hermes masih mengerjakan sesi ini. Tunggu atau hentikan dulu.");
-  if (!res.ok && res.status !== 404) throw await upstreamError(res);
-  const agentId = hermesAgentId(id);
-  if (current) {
-    hideAgent();
-    chat.view = { ...emptyChatView(), model: chat.view.model };
-    chat.approvals.clear();
-    chat.openText = null;
-    chat.autoTitle = false;
-    chat.resumed = Promise.resolve();
-    emitSnapshot();
-  } else if (hub.agents.has(agentId)) publish({ type: "remove", id: agentId });
-  if (hub.overrides.delete(agentId)) {
-    try {
-      saveOverrides(hub.overrides, hub.overridesFile);
-    } catch (e) {
-      console.warn(`[hq] gagal menyimpan ${hub.overridesFile}:`, (e as Error).message);
+  const ctx = chat.sessions.get(id);
+  if (ctx && (ctx.view.phase !== "idle" || ctx.deleting)) return fail(409, "Hentikan dulu pekerjaan yang sedang berjalan");
+  if (ctx) ctx.deleting = true;
+  try {
+    const res = await hermes(`/api/sessions/${enc(id)}`, { method: "DELETE" });
+    if (res.status === 409) return fail(409, "Hermes masih mengerjakan sesi ini. Tunggu atau hentikan dulu.");
+    if (!res.ok && res.status !== 404) throw await upstreamError(res);
+    const agentId = hermesAgentId(id);
+    if (id === chat.view.sessionId) {
+      hideAgent();
+      const model = chat.view.model;
+      chat.current = newRuntime();
+      chat.view.model = model;
+      chat.resumed = Promise.resolve();
+      emitSnapshot();
+    } else if (hub.agents.has(agentId)) publish({ type: "remove", id: agentId });
+    chat.sessions.delete(id);
+    if (hub.overrides.delete(agentId)) {
+      try {
+        saveOverrides(hub.overrides, hub.overridesFile);
+      } catch (e) {
+        console.warn(`[hq] gagal menyimpan ${hub.overridesFile}:`, (e as Error).message);
+      }
     }
+    rememberModel(id, null);
+    return ok({ deleted: id });
+  } finally {
+    if (ctx) ctx.deleting = false;
   }
-  rememberModel(id, null);
-  return ok({ deleted: id });
 }
 
 /** Hermes /api/model/options -> picker providers (authenticated, with models). */
@@ -1033,11 +1091,11 @@ export async function listModels(refresh = false): Promise<Reply> {
 }
 
 /** The model of the open session (or of the next one, before it exists); null = Hermes' default. */
-export function chooseModel(model: unknown): Reply {
+export function chooseModel(model: unknown, ctx: ChatRuntime = chat.current): Reply {
   const m = model === null ? null : parseModel(model);
   if (model !== null && !m) return fail(400, MODEL_ERR);
-  rememberModel(chat.view.sessionId, m);
-  setState({ model: m });
+  rememberModel(ctx.view.sessionId, m);
+  setState({ model: m }, ctx);
   return ok({ model: m });
 }
 
@@ -1052,13 +1110,21 @@ const ACTIONS = "send, approve, stop, new, sessions, open, rename, delete, model
 export async function chatAction(body: unknown): Promise<Reply> {
   const b = isObj(body) ? body : {};
   try {
+    // A delayed click or another viewer changing the panel must not redirect a message, stop, or approval.
+    let ctx = chat.current;
+    if (["send", "approve", "stop", "model"].includes(str(b.action)) && b.sessionId !== undefined) {
+      const id = cleanId(b.sessionId);
+      const target = id ? chat.sessions.get(id) : b.sessionId === null && !chat.view.sessionId ? chat.current : undefined;
+      if (!target) return fail(409, "Sesi berubah. Buka lagi sesi yang ingin dipakai.");
+      ctx = target;
+    }
     switch (b.action) {
       case "send":
-        return await sendMessage(b.text);
+        return await sendMessage(b.text, ctx);
       case "approve":
-        return await answerApproval(b.choice, b.id);
+        return await answerApproval(b.choice, b.id, ctx);
       case "stop":
-        return await stopRun();
+        return await stopRun(ctx);
       case "new":
         return await newConversation(b.agent, b.model);
       case "sessions":
@@ -1072,7 +1138,7 @@ export async function chatAction(body: unknown): Promise<Reply> {
       case "models":
         return await listModels(b.refresh === true);
       case "model":
-        return chooseModel(b.model);
+        return chooseModel(b.model, ctx);
       default:
         return fail(400, `action harus ${ACTIONS}`);
     }
@@ -1083,8 +1149,19 @@ export async function chatAction(body: unknown): Promise<Reply> {
 
 /** Test helper: drop the conversation and every subscriber (and re-read the model file). */
 export function resetChat(): void {
-  const epoch = chat.epoch + 1;
-  chat.abort?.abort();
-  if (chat.stopTimer) clearTimeout(chat.stopTimer);
-  Object.assign(chat, newHub(), { epoch });
+  for (const ctx of new Set([chat.current, ...chat.sessions.values()])) {
+    ctx.epoch++;
+    ctx.abort?.abort();
+    ctx.abort = null;
+    if (ctx.stopTimer) clearTimeout(ctx.stopTimer);
+  }
+  const next = newHub();
+  chat.current = next.current;
+  chat.sessions = next.sessions;
+  chat.subs = next.subs;
+  chat.seq = next.seq;
+  chat.resumed = next.resumed;
+  chat.prefs = next.prefs;
+  chat.prefsFile = next.prefsFile;
+  chat.models = next.models;
 }
