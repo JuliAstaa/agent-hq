@@ -8,6 +8,7 @@
 import { createStore, type StoreApi } from "zustand/vanilla";
 import { CRON_ACTION_LABEL, type CronCmd, type CronState } from "./cron";
 import { normalizeEvent, SEV, STATUS, type AgentPatch, type AttackNode, type Severity, type Status } from "./events";
+import { checkServerAlarm, newServerAlarm, SERVER_LOG_ID, type ServerStats } from "./server";
 import { inferDept, type Dept } from "./teams";
 import { avatarColor } from "./palette";
 import { truncate } from "./format";
@@ -85,7 +86,9 @@ export type Signal =
   | { type: "floor"; floor: FloorMode; moveCam: boolean }
   | { type: "focus"; id: string }
   /** The schedule changed: redraw the schedule board now. */
-  | { type: "cron" };
+  | { type: "cron" }
+  /** A server monitor sample arrived (or was cleared): redraw the server room now. */
+  | { type: "server" };
 
 export interface HQState {
   /** Insertion order = roster order. */
@@ -102,6 +105,8 @@ export interface HQState {
   cron: CronState | null;
   /** Recent schedule-panel commands, newest last. */
   cronCmds: CronCmd[];
+  /** Latest server monitor sample; null = none (the server room stays decor). */
+  server: ServerStats | null;
 
   applyEvent: (raw: unknown) => void;
   pushLog: (entry: { id: string; level?: string; message?: string }) => void;
@@ -135,6 +140,7 @@ export function createHQStore(): HQStore {
   let pending: Signal[] = [];
   let logKey = 0;
   let toastSeq = 0;
+  let serverAlarm = newServerAlarm();
 
   const emit = (s: Signal) => pending.push(s);
   const flush = () => {
@@ -287,6 +293,20 @@ export function createHQStore(): HQStore {
         emit({ type: "cron" });
         return;
       }
+      if (e.kind === "server_stats") {
+        const server = { ...e.stats, receivedAt: Date.now() - e.ageMs };
+        const notes = checkServerAlarm(serverAlarm, server);
+        if (notes.length) {
+          const d = draft();
+          for (const n of notes) logInto(d, { id: SERVER_LOG_ID, level: n.level, message: n.log });
+          const toast = notes.find((n) => n.toast)?.toast;
+          if (toast) toastInto(d, toast);
+          commit(d);
+        }
+        set({ server });
+        emit({ type: "server" });
+        return;
+      }
       const d = draft();
       if (e.kind === "cron_command") {
         const c = e.cmd;
@@ -343,6 +363,7 @@ export function createHQStore(): HQStore {
       toast: null,
       cron: null,
       cronCmds: [],
+      server: null,
 
       applyEvent: (raw) => {
         for (const e of normalizeEvent(raw)) {
@@ -365,10 +386,12 @@ export function createHQStore(): HQStore {
         d.vuln = { counts: emptyCounts(), list: [], nodes: [] };
         d.soc = { alerts: [], total: 0 };
         commit(d);
-        const hadCron = get().cron !== null;
-        set({ cron: null, cronCmds: [] }); // a new connection sends its own schedule (if any)
+        const hadCron = get().cron !== null, hadServer = get().server !== null;
+        set({ cron: null, cronCmds: [], server: null }); // a new connection sends its own schedule and samples (if any)
+        serverAlarm = newServerAlarm();
         emit({ type: "reset" });
         if (hadCron) emit({ type: "cron" }); // hide the schedule board
+        if (hadServer) emit({ type: "server" }); // the server room back to decor
         flush();
       },
 

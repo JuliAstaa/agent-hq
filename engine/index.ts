@@ -17,6 +17,8 @@ import { floorOf, locText, newMovement, pickSpot, placeAt, releasePlaces, workTa
 import { drawArcade, drawBoard, drawEmptyDesk, drawPlate, drawScreen, drawTaskBoard, drawTV, drawWhiteboard, newWhiteboardEgg } from "./displays/office";
 import { drawRedWall, drawReportBoard, drawSOC, drawStation, newSocAnim } from "./displays/security";
 import { drawScheduleBoard } from "./displays/schedule";
+import { drawServerScreen, litRows } from "./displays/server";
+import { diskPct, LEVEL_COLOR, levelOf, memPct, OFFLINE_COLOR, serverStale } from "@/lib/server";
 import { CRON_BOARD_EVENT } from "@/lib/cron";
 import { createFx } from "./fx";
 import { createSkyEvents, type SkyEventKind } from "./skyEvents";
@@ -28,7 +30,7 @@ import { createKit, createMaterials, V } from "./scene/kit";
 import { buildSky, makeSkyTexture } from "./scene/sky";
 import { buildDesk, type Desk } from "./world/props/desk";
 import { buildIslandAndFloor1Shell, buildFloor1Props } from "./world/floor1";
-import { buildFloor2Props, buildFloor2Shell } from "./world/floor2";
+import { buildFloor2Props, buildFloor2Shell, LIQUID_BASE, LIQUID_FULL } from "./world/floor2";
 import { buildFloor3 } from "./world/floor3";
 import type { Build } from "./world/structure";
 
@@ -54,6 +56,8 @@ export interface Engine {
     hideTaskBoard: (hidden: boolean) => void;
     /** Hide the schedule board even when a schedule source reports (it is hidden without one). */
     hideScheduleBoard: (hidden: boolean) => void;
+    /** Keep the server room decor (as in the prototype) even while the bridge sends server samples. */
+    hideServerMonitor: (hidden: boolean) => void;
     /** Whiteboard easter egg: write it now if someone is at the board, else at the next whiteboard session. */
     whiteboardEgg: () => void;
     /** Open a chat balloon on agent `id` (random line for its context when `text` is omitted). */
@@ -149,6 +153,17 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
     else bellOn = false;
   };
   refreshSchedule();
+  // Server monitor (prd.md §7.8): racks, tank and wall screen show the bridge's samples; decor without them.
+  const SR = p2.server;
+  let serverHidden = false; // tests only, see Engine.debug
+  const serverOn = () => (serverHidden ? null : S().server);
+  const refreshServer = () => {
+    const sv = serverOn();
+    SR.screen.group.visible = !!sv;
+    if (sv) drawServerScreen(fontsReady ? fonts : null, SR.screen.face, sv, Date.now());
+  };
+  refreshServer();
+  let liquidKey = "";
   const slots = createDeskSlots();
   // All 12 home desks exist from the start (deviation 7): an agent takes the desk of its slot and leaves it
   // empty again on removal. The prototype built a desk per agent, so an office without agents had no desks.
@@ -456,6 +471,9 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
       case "cron":
         refreshSchedule();
         break;
+      case "server":
+        refreshServer();
+        break;
     }
   };
   const offSignal = S().onSignal(onSignal);
@@ -562,6 +580,7 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
     for (const d of desks) if (!taken.has(d)) drawEmptyDesk(fonts, d);
     drawTaskBoard(fonts, p2.taskBoard.face);
     refreshSchedule();
+    refreshServer();
   };
   loadFonts(fonts).then(() => {
     if (disposed) return;
@@ -728,6 +747,7 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
         if (a) updateBubble(rt, a, s.selectedId);
       }
       if (SB.group.visible && g2.visible) refreshSchedule(); // countdowns, like the mission board every 1 s
+      if (SR.screen.group.visible && g2.visible) refreshServer(); // "TERPUTUS" once samples stop
     }
     // schedule bell: short rings while a job runs, then settles
     SB.bell.rotation.z = bellOn && t % 2.4 < 0.9 ? Math.sin(t * 24) * 0.42 : SB.bell.rotation.z * 0.85;
@@ -753,11 +773,40 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
         card.g.scale.setScalar(Math.max(0.01, 1 + 2.4 * Math.pow(card.pop - 1, 3) + 1.4 * Math.pow(card.pop - 1, 2)));
       }
     }
-    for (const bl of p2.blinkers) bl.m.material.color.set(Math.sin(t * bl.rate + bl.ph) > 0.2 ? bl.color : "#2a2350");
+    // server room: live racks and tank while the bridge sends samples (left rack CPU, right rack RAM, tank disk)
+    const sv = serverOn();
+    let liquidH = 2.0, liquidColor = "#ff6fd8"; // decor liquid
+    if (sv) {
+      const stale = serverStale(sv, Date.now());
+      const vals = [sv.cpu, memPct(sv)];
+      for (const bl of p2.blinkers) {
+        const p = vals[bl.rack];
+        let c = "#2a2350";
+        if (p != null && bl.row < litRows(p)) {
+          const speed = bl.rack === 0 ? 0.5 + 2.5 * p : 0.5; // the CPU rack blinks faster the busier it is
+          c = stale ? OFFLINE_COLOR : Math.sin(t * bl.rate * speed + bl.ph) > -0.6 ? LEVEL_COLOR[levelOf(p)] : "#2a2350";
+        }
+        bl.m.material.color.set(c);
+      }
+      const dp = diskPct(sv);
+      if (dp != null) {
+        liquidH = LIQUID_FULL * Math.max(0.03, dp);
+        liquidColor = stale ? OFFLINE_COLOR : dp >= 0.9 ? LEVEL_COLOR.hot : "#ff6fd8";
+      }
+    } else for (const bl of p2.blinkers) bl.m.material.color.set(Math.sin(t * bl.rate + bl.ph) > 0.2 ? bl.color : "#2a2350");
+    const lk = `${liquidH.toFixed(3)}|${liquidColor}`;
+    if (lk !== liquidKey) {
+      liquidKey = lk;
+      SR.liquid.scale.y = liquidH / 2.0;
+      SR.liquid.position.y = LIQUID_BASE + liquidH / 2;
+      SR.liquid.material.color.set(liquidColor);
+    }
+    const bubbleTop = sv ? LIQUID_BASE + liquidH - 0.08 : 2.55; // bubbles stay inside the liquid
     for (const bb of p2.tankBubbles) {
+      bb.visible = bubbleTop > 0.85;
       bb.position.y += bb.userData.sp * dt;
       bb.position.x = bb.userData.x + Math.sin(t * 3 + bb.userData.ph) * 0.05;
-      if (bb.position.y > 2.55) bb.position.y = 0.75;
+      if (bb.position.y > bubbleTop) bb.position.y = 0.75;
     }
     for (const p of tentacles) {
       p.rotation.z = Math.sin(t * 1.3 + p.userData.ph) * 0.18;
@@ -902,6 +951,10 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
       hideScheduleBoard: (hidden) => {
         scheduleHidden = hidden;
         refreshSchedule();
+      },
+      hideServerMonitor: (hidden) => {
+        serverHidden = hidden;
+        refreshServer();
       },
       whiteboardEgg: () => {
         if (p2.wb.wasOn) p2.wb.egg = newWhiteboardEgg(0);

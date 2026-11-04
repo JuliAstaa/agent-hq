@@ -1,5 +1,6 @@
 // POST /api/event: one Agent HQ event or an array of events (prd.md §7).
 // {"type":"rename"} events pin an agent's name/team/role (prd.md §7.4); a single rename answers with its result.
+// {"type":"server_stats"} is dropped: only the bridge itself measures the server (prd.md §7.8).
 import { authorized, CORS_HEADERS, preflight, readBody } from "@/lib/bridge/auth";
 import { publish, renameAgent, type BridgeEvent } from "@/lib/bridge/hub";
 
@@ -17,8 +18,9 @@ export async function POST(req: Request) {
     const renames: { status: number; body: Record<string, unknown> }[] = [];
     for (const ev of list) {
       if (!ev || typeof ev !== "object") continue;
-      if (String((ev as BridgeEvent).type || "").toLowerCase() === "rename") renames.push(renameAgent(ev as BridgeEvent));
-      else publish(ev as BridgeEvent);
+      const type = String((ev as BridgeEvent).type || "").toLowerCase();
+      if (type === "rename") renames.push(renameAgent(ev as BridgeEvent));
+      else if (type !== "server_stats") publish(ev as BridgeEvent);
     }
     if (!renames.length) return json(202, JSON.stringify({ ok: true, received: list.length }));
     if (!Array.isArray(parsed)) return json(renames[0].status, JSON.stringify(renames[0].body));

@@ -139,6 +139,7 @@ test.describe("visual parity with references/agent-hq.html", () => {
     await emptyBuilding(next, "next");
     await next.evaluate(() => (window as any).agentHQ.engine.debug.hideEmptyDesks(true));
     await next.evaluate(() => (window as any).agentHQ.engine.debug.hideTaskBoard(true)); // deviation 14
+    await next.evaluate(() => (window as any).agentHQ.engine.debug.hideServerMonitor(true)); // deviation 20: live samples
     await next.addStyleTag({ content: "[data-hq-ui]{display:none!important}" }); // compare the scene only
     const ratios: Record<string, number> = {};
     for (const [view, name] of VIEWS) {

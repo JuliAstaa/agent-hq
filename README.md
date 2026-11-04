@@ -148,6 +148,21 @@ agen itu muncul di Papan Tugas di dinding kiri Lt.2. Agen lari ke papan, mengamb
 meja atau ke ruangan timnya. Kalau tugasnya selesai sebelum kartu diambil, kartunya batal dan agen kembali
 santai. Papan punya tiga tempat. Kalau penuh, atau agen sudah sibuk sejak awal, agen langsung ke meja.
 
+**Ruang server** (Lt.2, kanan belakang) memantau mesin tempat Agent HQ jalan, misalnya VPS-mu. Server Agent HQ
+mengukurnya sendiri tiap 5 detik selama halaman dibuka, tanpa program tambahan:
+
+- **Rak kiri = CPU, rak kanan = RAM.** Baris LED menyala dari bawah sesuai persen. Warnanya hijau di bawah 50%,
+  kuning sampai 75%, oranye sampai 90%, lalu merah. Makin sibuk CPU, makin cepat LED-nya berkedip.
+- **Tabung = disk.** Tinggi cairan sesuai pemakaian disk `/`, merah mulai 90%.
+- **Layar di atas rak:** CPU (jumlah core dan load average), RAM, disk, uptime, dan memori proses Agent HQ.
+- **Peringatan** di Log Aktivitas (nama `Server`) dan toast: CPU 90% atau lebih selama 1 menit, RAM atau disk
+  90% atau lebih. Baris "normal lagi" muncul setelah turun di bawah 85%.
+- Data berhenti datang lebih dari 20 detik: LED abu-abu dan layar menulis TERPUTUS.
+
+Yang dikirim hanya angka; nama host, IP, dan daftar proses tidak pernah keluar dari server. Di mode demo ruangan
+ini hanya hiasan. Matikan dengan `HQ_SERVER_STATS=0`; disk lain dengan `HQ_DISK_PATH=/data`. Di Windows load
+average tidak ada, jadi tidak ditampilkan. Tidak tersedia di `examples/server.js`.
+
 **Token** di kartu agen adalah total kumulatif semua jenis token sesi itu (input, output, dan cache), dibaca dari
 transcript Claude Code, jadi angkanya bisa besar karena cache read ikut dihitung.
 

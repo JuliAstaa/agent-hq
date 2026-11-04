@@ -6,6 +6,7 @@ import { F2, INK } from "../constants";
 import { boxAt, canvasTex, cyl, mesh, noLine, pick, rbox, shade, thin, V, type CanvasTex } from "../scene/kit";
 import type { WhiteboardEgg } from "../displays/office";
 import { BOARD_SLOTS_Z } from "../nav/places";
+import { SERVER_SCREEN_H, SERVER_SCREEN_W } from "../displays/server";
 import { alienPlant } from "./props/alienPlant";
 import { floorPlane, makeWall, partition, plankTexture, rail, roomLabel, type Build } from "./structure";
 
@@ -55,7 +56,25 @@ export interface Blinker {
   rate: number;
   ph: number;
   color: string;
+  /** Server room rack (0 = left, CPU; 1 = right, RAM) and LED row from the bottom (0..5), for the server monitor. */
+  rack: number;
+  row: number;
 }
+
+/** Server monitor (prd.md §7.8): the racks' LEDs are `blinkers`; these are the extra parts. Not in the prototype. */
+export interface ServerRoom {
+  /** Tank liquid: its height shows disk usage. */
+  liquid: THREE.Mesh<THREE.BufferGeometry, THREE.MeshToonMaterial>;
+  /** Wall screen above the racks, hidden until the bridge sends a sample. */
+  screen: { group: THREE.Group; face: CanvasTex };
+}
+
+/** Back wall of the server room, above both racks. [x, y above F2, z] of the screen's center. */
+export const SERVER_SCREEN_AT: [number, number, number] = [6.6, 4.05, -7.6];
+export const SERVER_SCREEN_SIZE: [number, number] = [2.5, 1.4];
+/** Liquid height at 100% disk (decor: 2.0). Bottom at 0.62 above the floor, like the decor liquid. */
+export const LIQUID_FULL = 2.4;
+export const LIQUID_BASE = 0.62;
 
 export interface Floor2Props {
   blinkers: Blinker[];
@@ -65,6 +84,7 @@ export interface Floor2Props {
   wb: CanvasTex & { strokes: number; cx: number; cy: number; wasOn?: boolean; forceEgg?: boolean; egg?: WhiteboardEgg | null; keepOut?: [number, number, number, number] | null };
   taskBoard: TaskBoard;
   scheduleBoard: ScheduleBoard;
+  server: ServerRoom;
 }
 
 /** Schedule board (Hermes cron, docs/hermes.md "Jadwal"): hidden until a schedule source reports. Not in the prototype. */
@@ -93,10 +113,13 @@ export function buildFloor2Props(b: Build, g2: THREE.Group, tentacles: THREE.Gro
   const { toon, flat } = b.kit;
   const blinkers: Blinker[] = [];
   const tankBubbles: THREE.Mesh[] = [];
+  let liquid: ServerRoom["liquid"];
+  const screenFace = canvasTex(SERVER_SCREEN_W, SERVER_SCREEN_H);
+  const screenGroup = new THREE.Group();
 
   // server room
   {
-    for (const x of [5.9, 7.3]) {
+    for (const [rack, x] of [5.9, 7.3].entries()) {
       const g = new THREE.Group(); g.position.set(x, F2, -6.9); g2.add(g);
       boxAt(g, 1.2, 3.2, 1.2, 0, 0, 0, M.dark, 0.1);
       for (let r = 0; r < 6; r++) {
@@ -104,7 +127,7 @@ export function buildFloor2Props(b: Build, g2: THREE.Group, tentacles: THREE.Gro
         for (let k = 0; k < 3; k++) {
           const led = mesh(new THREE.SphereGeometry(0.045, 8, 6), noLine(flat("#a6e22e")), false, false) as Blinker["m"];
           led.position.set(-0.3 + k * 0.18, 0.5 + r * 0.46, 0.66); g.add(led);
-          blinkers.push({ m: led, rate: 2 + Math.random() * 6, ph: Math.random() * 10, color: ["#a6e22e", "#59c3ff", "#ff6fd8"][k] });
+          blinkers.push({ m: led, rate: 2 + Math.random() * 6, ph: Math.random() * 10, color: ["#a6e22e", "#59c3ff", "#ff6fd8"][k], rack, row: r });
         }
       }
     }
@@ -112,7 +135,7 @@ export function buildFloor2Props(b: Build, g2: THREE.Group, tentacles: THREE.Gro
     cyl(g, 0.85, 1.0, 0.6, 0, 0, 0, M.dark, 24);
     const glass = mesh(new THREE.CylinderGeometry(0.7, 0.7, 2.6, 24, 1, true), thin(toon("#ffd1f3", { transparent: true, opacity: 0.32, side: THREE.DoubleSide }), 0.8), false, false);
     glass.position.y = 1.9; g.add(glass);
-    const liquid = mesh(new THREE.CylinderGeometry(0.62, 0.62, 2.0, 24), noLine(toon("#ff6fd8", { transparent: true, opacity: 0.75 })), false, false);
+    liquid = mesh(new THREE.CylinderGeometry(0.62, 0.62, 2.0, 24), noLine(toon("#ff6fd8", { transparent: true, opacity: 0.75 })), false, false) as ServerRoom["liquid"];
     liquid.position.y = 1.62; g.add(liquid);
     cyl(g, 0.82, 0.82, 0.32, 0, 3.15, 0, M.dark, 24);
     for (let i = 0; i < 14; i++) {
@@ -122,6 +145,12 @@ export function buildFloor2Props(b: Build, g2: THREE.Group, tentacles: THREE.Gro
       tankBubbles.push(bb);
     }
     roomLabel(b, g2, "SERVER", 7.1, F2 + 0.2, -2.2, 2);
+    // server monitor screen (not in the prototype): dark wall screen above the racks
+    const [sx, sy, sz] = SERVER_SCREEN_AT, [sw, sh] = SERVER_SCREEN_SIZE;
+    const sg = screenGroup; sg.position.set(sx, F2 + sy, sz); sg.visible = false; g2.add(sg);
+    sg.add(mesh(rbox(sw, sh, 0.14, 0.08), M.dark));
+    const sf = mesh(new THREE.PlaneGeometry(sw - 0.2, sh - 0.2), noLine(flat("#ffffff", { map: screenFace.tex })), false, false);
+    sf.position.z = 0.075; sg.add(sf);
   }
   // hall jendela
   alienPlant(b, tentacles, g2, 12.4, F2, -2.4, 0.7);
@@ -241,5 +270,6 @@ export function buildFloor2Props(b: Build, g2: THREE.Group, tentacles: THREE.Gro
   return {
     blinkers, tankBubbles, board, clockHands: clockHands!, wb: wb!, taskBoard: { group: tbGroup, face, cards },
     scheduleBoard: { group: sGroup, face: sFace, bell },
+    server: { liquid: liquid!, screen: { group: screenGroup, face: screenFace } },
   };
 }

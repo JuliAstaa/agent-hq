@@ -82,6 +82,7 @@ function viewer(t: Target) {
   return { frames, stop: async () => { ctrl.abort(); await done; } };
 }
 
+/** Frames without comments and `ts`. Server monitor samples (prd.md §7.8) exist only in the app, so they are dropped. */
 function normalizeFrames(frames: string[]) {
   return frames
     .filter((f) => !f.startsWith(":"))
@@ -90,7 +91,8 @@ function normalizeFrames(frames: string[]) {
       const ev = JSON.parse(f.slice(6));
       delete ev.ts;
       return ev;
-    });
+    })
+    .filter((ev) => !(typeof ev === "object" && ev.type === "server_stats"));
 }
 
 async function send(t: Target, line: Line) {

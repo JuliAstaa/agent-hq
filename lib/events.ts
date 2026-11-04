@@ -3,6 +3,7 @@
 // references/agent-hq.html; the store applies the normalized result.
 
 import { normalizeCronCommand, normalizeSchedule, type CronCmd, type CronState } from "./cron";
+import { normalizeServerStats, type ServerStats } from "./server";
 import { normalizeTeam, type Dept } from "./teams";
 
 export type Status = "working" | "thinking" | "waiting" | "idle" | "error" | "offline";
@@ -102,7 +103,9 @@ export type HQEvent =
   /** Scheduled jobs snapshot (Hermes cron). Never an agent. */
   | { kind: "schedule"; cron: Omit<CronState, "receivedAt">; ageMs: number }
   /** Progress of a control command from the schedule panel. */
-  | { kind: "cron_command"; cmd: CronCmd };
+  | { kind: "cron_command"; cmd: CronCmd }
+  /** Server monitor sample (prd.md §7.8). Never an agent. */
+  | { kind: "server_stats"; stats: Omit<ServerStats, "receivedAt">; ageMs: number };
 
 export function eventType(ev: RawEvent): string {
   return String(ev.type || ev.event || (ev.message && !ev.status ? "log" : "agent_update")).toLowerCase();
@@ -171,6 +174,7 @@ export function normalizeEvent(input: unknown, now = Date.now()): HQEvent[] {
     const cmd = normalizeCronCommand(ev);
     return cmd ? [{ kind: "cron_command", cmd }] : [];
   }
+  if (type === "server_stats") return [{ kind: "server_stats", ...normalizeServerStats(ev) }];
   const rawId = rawAgentId(ev);
   const id = String(rawId ?? "agent");
   const agentId = rawId == null ? null : id;

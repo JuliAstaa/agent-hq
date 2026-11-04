@@ -31,6 +31,19 @@ export interface CronHub {
 
 const newCronHub = (): CronHub => ({ schedule: null, scheduleAt: 0, cmds: new Map(), waiters: new Set() });
 
+/** Server monitor (./server-stats.ts, prd.md §7.8): latest sample and the sampling loop. */
+export interface ServerHub {
+  last: BridgeEvent | null;
+  /** Date.now() when `last` was published. */
+  lastAt: number;
+  /** Pending sample while the loop runs; null = stopped. */
+  timer: ReturnType<typeof setTimeout> | null;
+  /** CPU times of the previous sample (busy share is the difference). */
+  prev: { idle: number; total: number } | null;
+}
+
+const newServerHub = (): ServerHub => ({ last: null, lastAt: 0, timer: null, prev: null });
+
 interface Hub {
   /** id -> last known agent state (snapshot for new viewers). */
   agents: Map<string, BridgeEvent>;
@@ -46,6 +59,7 @@ interface Hub {
   /** id -> identity as last sent by the agent itself (fallback when an override is cleared). */
   sourceIdentity: Map<string, Identity>;
   cron: CronHub;
+  server: ServerHub;
 }
 
 const g = globalThis as unknown as { __hq?: Hub };
@@ -59,6 +73,7 @@ export const hub: Hub = (g.__hq ??= {
   overridesFile: namesFile(),
   sourceIdentity: new Map(),
   cron: newCronHub(),
+  server: newServerHub(),
 });
 // A hub kept on globalThis by an older bundle (next dev reload) may predate the rename fields.
 if (!hub.overrides) {
@@ -67,6 +82,7 @@ if (!hub.overrides) {
 }
 hub.sourceIdentity ??= new Map();
 hub.cron ??= newCronHub();
+hub.server ??= newServerHub();
 
 const AGENT_KEYS = ["name", "role", "status", "state", "task", "current_task", "progress", "tokens", "cost", "team"];
 
@@ -81,6 +97,12 @@ export function remember(ev: BridgeEvent): void {
     return;
   }
   if (type === "cron_command") return;
+  // Server monitor samples are not agents either: keep the latest for new viewers.
+  if (type === "server_stats") {
+    hub.server.last = ev;
+    hub.server.lastAt = Date.now();
+    return;
+  }
   const id = idOf(ev);
   hub.lastSeen.set(id, Date.now());
   if (type === "remove") {
@@ -266,4 +288,6 @@ export function resetHub(): void {
   hub.sourceIdentity.clear();
   for (const wake of hub.cron.waiters) wake();
   hub.cron = newCronHub();
+  if (hub.server.timer) clearTimeout(hub.server.timer);
+  hub.server = newServerHub();
 }
