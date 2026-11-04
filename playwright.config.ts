@@ -24,6 +24,7 @@ export default defineConfig({
     {
       command: `node node_modules/next/dist/bin/next start -H 127.0.0.1 -p ${PORT}`,
       url: `http://127.0.0.1:${PORT}/api/health`,
+      env: { HQ_STATE_FILE: "0" },
       reuseExistingServer: !process.env.CI,
       timeout: 60_000,
     },
@@ -31,6 +32,7 @@ export default defineConfig({
       // Dev server: React StrictMode double-mount, used by the dispose/leak test.
       command: `node node_modules/next/dist/bin/next dev -H 127.0.0.1 -p ${PORT + 1}`,
       url: `http://127.0.0.1:${PORT + 1}/api/health`,
+      env: { HQ_STATE_FILE: "0" },
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
     }]),

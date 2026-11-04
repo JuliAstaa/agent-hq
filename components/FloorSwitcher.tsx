@@ -6,6 +6,7 @@ import { Button, CARD, cn } from "./ui";
 
 const FLOORS: [FloorMode, string][] = [
   ["all", "Semua"],
+  ["4", "Lt.4 Meeting"],
   ["3", "Lt.3 Security"],
   ["2", "Lt.2 Kantor"],
   ["1", "Lt.1 Santai"],
@@ -14,7 +15,7 @@ const FLOORS: [FloorMode, string][] = [
 export default function FloorSwitcher() {
   const floorMode = useStore(hqStore, (s) => s.floorMode);
   return (
-    <div className={cn(CARD, "pointer-events-auto shrink-0 flex gap-[6px] p-[6px] max-[420px]:gap-[5px] max-[420px]:p-[5px]")}>
+    <div className={cn(CARD, "pointer-events-auto shrink-0 flex gap-[6px] p-[6px] max-[420px]:box-border max-[420px]:max-w-full max-[420px]:flex-wrap max-[420px]:gap-[5px] max-[420px]:p-[5px]")}>
       {FLOORS.map(([f, label]) => (
         <Button
           key={f}

@@ -1,30 +1,40 @@
 // Per-frame agent animation (port of animateAgent in references/agent-hq.html, prd.md §10.4).
 
 import * as THREE from "three";
-import { F2, F3 } from "../constants";
+import { F2, F3, F4 } from "../constants";
 import { V } from "../scene/kit";
 import type { Desk } from "../world/props/desk";
 import type { Station } from "../world/floor3";
 import type { Avatar } from "./avatar";
 import { QUIRK_DUR, type FunState } from "./fun";
 import { floorOf, updateNav, type Mover, type NavCtx } from "./movement";
+import type { SeatPlace } from "../nav/places";
 import { POSE } from "./poses";
 import { STATUS } from "@/lib/events";
 import type { Agent, FloorMode } from "@/lib/store";
 
 export interface AgentRuntime extends Mover {
   av: Avatar;
-  desk: Desk;
+  /** Home desk on floor 2; null for a subagent seated on the meeting floor without one (prd.md §7.9). */
+  desk: Desk | null;
   /** Random actions and chat balloons (fun.ts). */
   fun?: FunState;
+  /** At a meeting table: talking until `speakUntil` (sim time), else looking at `lookAt` (the speaker). */
+  meet?: { speakUntil: number; lookAt: THREE.Vector3 | null };
 }
 
 export interface AnimCtx {
   camera: THREE.Camera;
   selectedId: string | null;
   floorMode: FloorMode;
+  /** Floor 4 hidden (engine.debug.hideMeetingFloor): Semua shows three floors, as in the prototype. */
+  meetingHidden: boolean;
   nav: NavCtx;
   stations: Station[];
+  /** Meeting seat chairs by SeatPlace.index (floor 4). */
+  seatChairs: THREE.Group[];
+  /** The store's meeting seat for an agent, as a place. */
+  seatOf: (a: Agent) => SeatPlace | null;
   coffeeNozzle: THREE.Vector3;
   spawnSmoke: (pos: THREE.Vector3, color?: string, size?: number, rise?: number) => void;
   drawPlate: (rt: AgentRuntime, a: Agent) => void;
@@ -45,7 +55,7 @@ export function animateAgent(ctx: AnimCtx, rt: AgentRuntime, a: Agent, t: number
       delete v.spawn;
     }
   }
-  updateNav(ctx.nav, rt, a, dt);
+  updateNav(ctx.nav, rt, { status: a.status, dept: a.dept, seat: ctx.seatOf(a) }, dt);
   const col = STATUS[st].color;
   const mode = mv.mode, act = mode === "act" ? mv.activity : null;
   if (mode === "act") mv.actT += dt;
@@ -105,6 +115,17 @@ export function animateAgent(ctx: AnimCtx, rt: AgentRuntime, a: Agent, t: number
       lidOpen = 0.05; frown = true; lookX = Math.sin(t * 30) * 0.3;
     } else {
       by = -0.08; rx = 0.25; setArms(0.1, -0.25, 0.1, 0.25); lidOpen = Math.PI; frown = true; mouthK = 0.25;
+    }
+    // Meeting table (prd.md §7.9): the speaker gestures and talks, the others look at it.
+    const mt = rt.meet;
+    if (mt && mv.dest.kind === "seat" && (st === "working" || st === "thinking" || st === "idle")) {
+      if (t < mt.speakUntil) {
+        setArms(-0.9 + Math.sin(t * 6) * 0.25, -0.3, -1.7 + Math.sin(t * 7.3) * 0.45, 0.5 + Math.sin(t * 5) * 0.2);
+        mouthK = 0.5 + Math.abs(Math.sin(t * 13)) * 1.0; lidOpen = 0.55; rx = 0.1; lookX = 0; lookY = 0.05;
+      } else if (mt.lookAt) {
+        camLocal.copy(mt.lookAt); v.root.worldToLocal(camLocal); camLocal.sub(tmpV.set(0, v.cy + 0.2, 0)).normalize();
+        lookX = Math.atan2(camLocal.x, camLocal.z) * 0.8; lookY = Math.asin(Math.max(-1, Math.min(1, camLocal.y))) * 0.6;
+      }
     }
     if (st === "waiting" || st === "error" || a.id === ctx.selectedId) {
       camLocal.copy(ctx.camera.position); v.root.worldToLocal(camLocal); camLocal.sub(tmpV.set(0, v.cy + 0.2, 0)).normalize();
@@ -273,30 +294,38 @@ export function animateAgent(ctx: AnimCtx, rt: AgentRuntime, a: Agent, t: number
   v.bulbMat.color.set(st === "offline" ? "#4a4560" : col).multiplyScalar(on);
   // desk
   const d = rt.desk;
-  d.strip.material.color.set(col);
-  d.ring.material.color.set(st === "offline" ? "#4a4560" : col);
-  d.glow.material.color.set(col);
-  d.glow.material.opacity = st === "offline" ? 0 : 0.25 + 0.15 * Math.sin(t * 3);
-  d.chair.position.y = st === "offline" ? -0.12 : Math.sin(t * 2 + v.lookPh) * 0.03;
+  const bob = st === "offline" ? -0.12 : Math.sin(t * 2 + v.lookPh) * 0.03;
+  if (d) {
+    d.strip.material.color.set(col);
+    d.ring.material.color.set(st === "offline" ? "#4a4560" : col);
+    d.glow.material.color.set(col);
+    d.glow.material.opacity = st === "offline" ? 0 : 0.25 + 0.15 * Math.sin(t * 3);
+    d.chair.position.y = bob;
+  }
   if (mode === "desk") {
     if (mv.dest.kind === "station") {
       const sc = ctx.stations[mv.dest.index].chair;
-      sc.position.y = st === "offline" ? -0.12 : Math.sin(t * 2 + v.lookPh) * 0.03;
+      sc.position.y = bob;
       v.root.position.y = F3 + sc.position.y;
-    } else v.root.position.y = F2 + d.chair.position.y;
+    } else if (mv.dest.kind === "seat") {
+      const sc = ctx.seatChairs[mv.dest.index];
+      sc.position.y = F4 + bob;
+      v.root.position.y = sc.position.y;
+    } else if (d) v.root.position.y = F2 + d.chair.position.y;
   }
-  if (d.plateName !== a.name) ctx.drawPlate(rt, a);
+  if (d && d.plateName !== a.name) ctx.drawPlate(rt, a);
   if (st === "error" && mode === "desk") {
     v.smokeT -= dt;
     if (v.smokeT <= 0) { v.smokeT = 0.35; ctx.spawnSmoke(v.root.position.clone().add(tmpV.set(0, v.top + 0.15, 0))); }
   }
-  // visibility per floor
+  // visibility per floor: floors above the view are hidden; on Lt.3 and Lt.4 other floors' bubbles too
   const fm = ctx.floorMode;
   const fl = floorOf(rt);
-  const vis = !((fm === "1" || fm === "2") && fl > Number(fm));
+  const vis = !(fm !== "all" && fl > Number(fm)) && !(ctx.meetingHidden && fl === 4);
   v.root.visible = vis;
-  v.label.visible = vis && !(fm === "3" && fl < 3);
-  const badge = (fm === "all" || fm === "3") && fl < 3;
+  v.label.visible = vis && !((fm === "3" || fm === "4") && fl < Number(fm));
+  const top = ctx.meetingHidden ? 3 : 4;
+  const badge = fm === "all" && fl < top;
   v.el.classList.toggle("f1", badge);
   if (badge && v.badgeFloor !== fl) {
     v.badgeFloor = fl;

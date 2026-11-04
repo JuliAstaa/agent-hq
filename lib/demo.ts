@@ -22,6 +22,11 @@ export const DEMO = [
 const ERRORS = ["Timeout saat panggil API eksternal", "Test gagal: 3/42", "Rate limit 429 dari provider", "Permission denied: /var/www", "Container exit code 137 (OOM)"];
 const FINDINGS: [string, string][] = [["high", "SQL injection di /login"], ["medium", "IDOR di /api/booking/{id}"], ["critical", "RCE via upload avatar"], ["low", "Header keamanan tidak lengkap"], ["medium", "Directory listing /backup"], ["info", "Versi Nginx terekspos"], ["high", "Panel admin tanpa rate limit"], ["medium", "SSH izinkan password login"]];
 const ALERTS: [string, string][] = [["Bruteforce SSH 412x / 2 mnt", "103.94.12.7"], ["Credential stuffing /wp-login.php", "45.13.220.9"], ["Bruteforce panel admin", "185.220.101.4"], ["Lonjakan 401 di /api/auth", "36.72.15.88"]];
+/** Meeting floor (prd.md §7.9): Glimbo's demo subagents, and the group Plonk and Vexa share for one task. */
+const SUB_NAMES = ["Penjelajah", "Penguji", "Peninjau"];
+const SUB_TASKS = ["Cari pemanggil fungsi auth", "Jalankan test modul transaksi", "Review diff handler", "Baca dokumentasi Gofiber", "Cek query yang lambat"];
+const DELEGATIONS = ["Delegasi: audit modul auth", "Delegasi: siapkan rilis worker", "Delegasi: cari sumber race condition"];
+export const DEMO_GROUP = "Rilis v2.3";
 const WAITS = ["Minta persetujuan sebelum push ke main", "Perlu API key staging", "Konfirmasi hapus 230 file lama?", "Pilih: soft delete atau arsip?"];
 
 export interface Demo {
@@ -34,6 +39,37 @@ export function createDemo(store: HQStore): Demo {
   let timer: ReturnType<typeof setTimeout> | null = null;
   const S = () => store.getState();
   const apply = (ev: Record<string, unknown>) => S().applyEvent(ev);
+  // One-shot timers of the demo subagents (cleared by stop()).
+  const later = new Set<ReturnType<typeof setTimeout>>();
+  const after = (ms: number, fn: () => void) => {
+    const h = setTimeout(() => {
+      later.delete(h);
+      fn();
+    }, ms);
+    later.add(h);
+  };
+  let subSeq = 0;
+  /** Glimbo hands parts of its task to 2 or 3 subagents: each works 20-45 s, is done, and leaves 8 s later. */
+  const delegate = () => {
+    if (!S().agents.has("glimbo") || [...S().agents.values()].some((a) => a.parent === "glimbo")) return;
+    apply({ id: "glimbo", status: "working", task: pick(DELEGATIONS) });
+    const n = Math.random() < 0.5 ? 2 : 3;
+    for (let k = 0; k < n; k++) {
+      const id = `glimbo-sub-${++subSeq}`;
+      after(500 + k * 900, () => {
+        apply({ id, name: SUB_NAMES[k], role: "Subagen · demo", parent: "glimbo", status: "working", task: pick(SUB_TASKS) });
+        after(20000 + Math.random() * 25000, () => {
+          apply({ type: "task_done", id, status: "idle", tokens_delta: 300 + Math.floor(Math.random() * 900) });
+          after(8000, () => apply({ type: "remove", id }));
+        });
+      });
+    }
+  };
+  /** Plonk and Vexa work on the release together (one task each, then the group is cleared). */
+  const groupUp = () => {
+    apply({ id: "plonk", group: DEMO_GROUP, status: "working", task: "Regression test rilis v2.3", progress: 0.05 });
+    apply({ id: "vexa", group: DEMO_GROUP, status: "working", task: "Draft changelog v2.3", progress: 0.05 });
+  };
 
   const tick = () => {
     const d = pick(DEMO);
@@ -45,7 +81,10 @@ export function createDemo(store: HQStore): Demo {
     const r = Math.random();
     if (a.status === "working") {
       const p = Math.min(1, (a.progress ?? 0) + 0.15 + Math.random() * 0.2);
-      if (p >= 1) apply({ type: "task_done", id: d.id, status: "idle", task: a.task, tokens_delta: 400 });
+      if (p >= 1) {
+        apply({ type: "task_done", id: d.id, status: "idle", task: a.task, tokens_delta: 400 });
+        if (a.group) for (const id of ["plonk", "vexa"]) apply({ id, group: null });
+      }
       else if (r < 0.07) apply({ id: d.id, status: "error", task: a.task });
       else if (r < 0.14) apply({ id: d.id, status: "waiting", task: pick(WAITS) });
       else if (r < 0.28) apply({ id: d.id, status: "thinking", progress: p });
@@ -70,7 +109,12 @@ export function createDemo(store: HQStore): Demo {
     } else if (a.status === "offline") {
       if (r < 0.5) apply({ id: d.id, status: "idle", task: "Restart, menunggu tugas" });
     } else if (r < 0.2) {
-      apply({ id: d.id, status: "working", task: pick(d.tasks), progress: 0.05 });
+      const vexa = S().agents.get("vexa");
+      if (d.id === "plonk" && vexa?.status === "idle" && Math.random() < 0.5) groupUp();
+      else {
+        apply({ id: d.id, status: "working", task: pick(d.tasks), progress: 0.05 });
+        if (d.id === "glimbo" && Math.random() < 0.5) delegate();
+      }
     }
     timer = setTimeout(tick, 900 + Math.random() * 1600);
   };
@@ -78,6 +122,8 @@ export function createDemo(store: HQStore): Demo {
   const stop = () => {
     if (timer) clearTimeout(timer);
     timer = null;
+    for (const h of later) clearTimeout(h);
+    later.clear();
   };
 
   const start = () => {
@@ -93,6 +139,7 @@ export function createDemo(store: HQStore): Demo {
     });
     S().pushLog({ id: "krunch", message: "Mode demo aktif. Klik agen untuk zoom, pilih lantai di atas." });
     timer = setTimeout(tick, 2500);
+    after(6000, delegate); // show the meeting floor early in the demo
     S().setConn("demo");
   };
 

@@ -43,6 +43,8 @@ test("2D UI wiring", async ({ page }) => {
   // Floor switcher drives the store (and the engine).
   await page.getByRole("button", { name: "Lt.3 Security" }).click();
   expect(await page.evaluate(() => (window as any).agentHQ.store.getState().floorMode)).toBe("3");
+  await page.getByRole("button", { name: "Lt.4 Meeting" }).click(); // meeting floor (prd.md §7.9)
+  expect(await page.evaluate(() => (window as any).agentHQ.store.getState().floorMode)).toBe("4");
   await page.getByRole("button", { name: "⌂" }).click();
   expect(await page.evaluate(() => (window as any).agentHQ.store.getState().floorMode)).toBe("all");
 
@@ -135,4 +137,20 @@ test("server room click opens the Server panel", async ({ page }) => {
   expect(await canvas.evaluate((c) => (c as HTMLCanvasElement).style.cursor)).toBe("");
 
   expect(errors).toEqual([]);
+});
+
+// Meeting floor (prd.md §7.9): five floor buttons still fit on a 360 px wide phone, without sideways scrolling.
+test("floor switcher fits at 360 px", async ({ page }) => {
+  await page.setViewportSize({ width: 360, height: 740 });
+  await blockExternal(page);
+  await page.goto("/");
+  const buttons = page.locator("button[data-f]");
+  await expect(buttons).toHaveCount(5);
+  await expect(buttons.first()).toBeVisible();
+  for (const b of await buttons.all()) {
+    const box = (await b.boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(360);
+  }
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(360);
 });

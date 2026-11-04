@@ -41,6 +41,19 @@ tersambung, kantornya kosong: 9 meja dengan layar STANDBY. Ingin melihat kantor 
 Alternatif tanpa Next.js: `node examples/server.js` menjalankan bridge mandiri di port yang sama dengan fitur
 yang sama. Jangan jalankan bersamaan dengan app, karena portnya sama.
 
+**Agent tetap ada setelah deploy atau restart (Next.js).** Bridge otomatis menyimpan daftar agen, tugas,
+status terakhir, token, dan 80 event log/temuan/alert terakhir ke `~/.local/state/agent-hq/state.json`
+(`$XDG_STATE_HOME/agent-hq/state.json` jika diatur). File ini berada di luar folder kode dan `.next`, sehingga
+`./start.sh`, build ulang, dan restart pm2 tidak mengosongkan kantor. Pemirsa yang tersambung kembali menerima
+snapshot itu tanpa menunggu aktivitas agen berikutnya. Status adalah keadaan terakhir yang dilaporkan;
+menampilkan kembali agen tidak menjalankan ulang proses AI-nya.
+
+Lokasi lain bisa diatur lewat `HQ_STATE_FILE=/data/agent-hq/state.json` di `.env.local`. Jalankan hanya satu
+proses bridge untuk satu file dan pastikan user pm2 boleh menulis foldernya. `HQ_STATE_FILE=0` mematikan
+penyimpanan. Penghapusan eksplisit dan tenggat sesi selesai (subagen 45 detik, sesi ditutup 5 menit) tetap
+berlaku, termasuk ketika tenggatnya terlewati saat server mati. Data yang sudah hilang sebelum fitur ini
+dipasang baru muncul lagi setelah agen mengirim event. Belum tersedia di `examples/server.js`.
+
 ## 2. Menyambungkan Claude Code
 
 Claude Code mengirim aktivitasnya lewat **hooks** ke `http://127.0.0.1:8787/api/hook`. Contoh setting-nya ada
@@ -74,6 +87,18 @@ claude                                  # tanpa nama: tampil sebagai "<folder>#<
 `HQ_TEAM` bisa `red`, `report`, `blue`, atau dikosongkan. Kalau dikosongkan, tim ditebak dari isi prompt dan
 perintah (lihat [bagian 4](#4-membaca-tampilan)).
 
+**Kerja bareng di Lt.4 Meeting.** Sesi yang mendelegasikan tugas ke subagen otomatis rapat bersama subagennya di
+lantai 4, tanpa setting apa pun. Sesi yang terpisah (misalnya dua repo untuk satu fitur) bisa dikumpulkan dengan
+grup yang sama:
+
+```bash
+HQ_NAME=Glimbo HQ_GROUP="Rilis v2.3" claude    # repo backend
+HQ_NAME=Vexa   HQ_GROUP="Rilis v2.3" claude    # repo dokumentasi
+```
+
+Supaya `HQ_GROUP` terkirim, setting hook harus memuat header `X-HQ-Group` (sudah ada di
+`examples/claude-hooks.settings.json`; setting lama perlu digabung ulang).
+
 **Yang terlihat di kantor:**
 
 | Yang dilakukan Claude Code | Yang kamu lihat |
@@ -82,7 +107,7 @@ perintah (lihat [bagian 4](#4-membaca-tampilan)).
 | Claude memakai tool (Bash, Edit, Read, ...) | Karakter kerja; bubble menampilkan aksinya, misalnya `$ npm test` atau `Edit auth.go` |
 | Claude minta izin | Karakter melambai, status oranye "Butuh kamu" |
 | Claude selesai | Confetti, lalu karakter jalan ke area santai |
-| Subagen dimulai | Karakter baru muncul, lalu pergi sekitar 45 detik setelah selesai |
+| Subagen dimulai | Karakter sesi naik ke ruang meeting kosong di Lt.4; subagen langsung muncul di kursi mejanya, lalu pergi sekitar 45 detik setelah selesai |
 | Sesi ditutup | Karakter offline, hilang setelah 5 menit |
 
 Kalau Agent HQ mati, Claude Code tetap jalan normal: hook-nya cuma menunggu maksimal 3 detik dan kegagalannya
@@ -135,13 +160,23 @@ curl -s -X POST http://127.0.0.1:8787/event -H 'content-type: application/json' 
 
 - **Lt.1 Santai:** lounge (TV, sofa, beanbag), pantry (mesin kopi, kulkas), game room (arcade, pingpong),
   ruang rebahan. Agen yang idle main HP, nonton TV, ngopi, atau tidur siang di sini.
-- **Lt.2 Kantor:** 9 meja kerja (agen ke-10 dan seterusnya hanya tampil di Daftar Agen), Papan Tugas, ruang rapat (whiteboard, main kartu), pojok baca, ruang server,
+- **Lt.2 Kantor:** 9 meja kerja (agen ke-10 dan seterusnya hanya tampil di Daftar Agen), Papan Tugas, ruang kreatif (whiteboard, main kartu), pojok baca, ruang server,
   jendela.
   Papan misi di dinding merangkum agen aktif, tugas selesai, token, dan error.
 - **Lt.3 Security** (naik lift dari Lt.2):
   - **Red Team Lab:** peta target. Node yang punya temuan jadi merah.
   - **Ruang Laporan VA:** papan jumlah temuan per severity.
   - **SOC Blue Team:** grafik login gagal per menit. Saat ada alert, sirene berputar dan ruangan berkedip merah.
+- **Lt.4 Meeting** (lift terus naik dari Lt.3): tiga ruang meeting (A, B, C), masing-masing meja dengan 5 kursi
+  dan layar tim. Di tampilan Semua lantai ini ada di paling atas, jadi layar dinding belakang Lt.3 hanya terlihat
+  penuh di tampilan Lt.3 (alert tetap muncul di log dan toast).
+
+**Ruang meeting:** satu tim = satu sesi + subagennya, atau agen dengan grup yang sama (`HQ_GROUP`, field `group`).
+Selama tim punya subagen aktif, atau minimal dua anggota grup aktif, tim itu dapat ruang kosong pertama. Ketua
+duduk di ujung meja menghadap kamera, anggota lain di sisi meja. Rapat menang atas ruangan Lt.3, dan ketua yang
+santai tetap duduk menunggu subagennya. Subagen yang dapat kursi tidak memakai meja Lt.2. Layar ruangan
+menampilkan nama tim, tugas ketua, anggota, dan lama rapat. Ruangan penuh atau anggota lebih dari lima? Sisanya
+kerja di meja seperti biasa. Log mencatat `Rapat mulai` dan `Rapat selesai` dengan nama `Meeting`.
 
 **Papan Tugas:** setiap kali agen yang sedang santai atau offline menerima tugas baru (prompt), kartu berwarna
 agen itu muncul di Papan Tugas di dinding kiri Lt.2. Agen lari ke papan, mengambil kartunya, lalu membawanya ke
@@ -187,7 +222,7 @@ Daftar kata kuncinya ada di `lib/teams.ts`.
 | Zoom | scroll mouse atau cubit trackpad |
 | Fokus ke agen | klik badan, bubble nama, atau kartu agen; kamera lalu mengikuti agen itu (termasuk naik turun lantai) |
 | Keluar dari fokus | klik lagi agen yang sedang difokus (kamera kembali ke posisi sebelumnya) |
-| Lihat satu lantai | tombol Semua / Lt.3 Security / Lt.2 Kantor / Lt.1 Santai |
+| Lihat satu lantai | tombol Semua / Lt.4 Meeting / Lt.3 Security / Lt.2 Kantor / Lt.1 Santai |
 | Reset kamera | tombol ⌂ |
 
 - **Daftar Agen** (kanan): satu kartu per agen. Klik kartu untuk fokus dan melihat progres serta 12 event
@@ -228,6 +263,10 @@ curl -s -X POST $E -H "$H" -d '{"type":"log","id":"bot-1","level":"error","messa
 curl -s -X POST $E -H "$H" -d '{"type":"task_done","id":"bot-1","task":"Refactor auth"}'
 # hapus agen
 curl -s -X POST $E -H "$H" -d '{"type":"remove","id":"bot-1"}'
+
+# Lt.4 Meeting: subagen menyebut induknya (parent), agen terpisah memakai grup yang sama (group)
+curl -s -X POST $E -H "$H" -d '{"type":"agent_update","id":"bot-2","parent":"bot-1","status":"working","task":"Cek test"}'
+curl -s -X POST $E -H "$H" -d '{"type":"agent_update","id":"bot-3","group":"Rilis v2.3","status":"working"}'
 
 # Lt.3 Security
 curl -s -X POST $E -H "$H" -d '{"type":"finding","id":"rexx","severity":"high","title":"SQL injection di /login"}'

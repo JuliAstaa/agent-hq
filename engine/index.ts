@@ -6,10 +6,10 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { CSS2DRenderer } from "three/addons/renderers/CSS2DRenderer.js";
 import { OutlineEffect } from "three/addons/effects/OutlineEffect.js";
 import { STATUS } from "@/lib/events";
-import type { Agent, FloorMode, HQStore, Signal } from "@/lib/store";
+import type { Agent, FloorMode, HQState, HQStore, Signal } from "@/lib/store";
 import { DEPTS } from "@/lib/teams";
 import { truncate } from "@/lib/format";
-import { ACT_LABEL, F2, F3, INK, VIEWS } from "./constants";
+import { ACT_LABEL, F2, F3, F4, INK, VIEW_ALL_3, VIEWS } from "./constants";
 import { animateAgent, type AgentRuntime, type AnimCtx } from "./agents/animate";
 import { buildAvatar } from "./agents/avatar";
 import { allowedQuirks, CHAT_REPLIES, chatLine, newFun, say, startQuirk, tickFun, type ChatSlots, type FunInfo, type Quirk } from "./agents/fun";
@@ -24,7 +24,7 @@ import { createFx } from "./fx";
 import { createSkyEvents, type SkyEventKind } from "./skyEvents";
 import { planMeteors, planPortal, type NdcRect, type PlaceCtx, type SkyZone } from "./skyPlacement";
 import { SFX_EVENT } from "@/lib/audio";
-import { createBoardSlots, createDeskSlots, createSpots, type Place } from "./nav/places";
+import { createBoardSlots, createDeskSlots, createSeats, createSpots, type Place, type SeatPlace } from "./nav/places";
 import { loadFonts, resolveFonts } from "./scene/fonts";
 import { createKit, createMaterials, V } from "./scene/kit";
 import { buildSky, makeSkyTexture } from "./scene/sky";
@@ -32,6 +32,10 @@ import { buildDesk, type Desk } from "./world/props/desk";
 import { buildIslandAndFloor1Shell, buildFloor1Props } from "./world/floor1";
 import { buildFloor2Props, buildFloor2Shell, LIQUID_BASE, LIQUID_FULL } from "./world/floor2";
 import { buildFloor3 } from "./world/floor3";
+import { buildFloor4, flyCard, MEETING_IDLE, stepCards } from "./world/floor4";
+import { drawMeetingScreen, type MeetingScreenInfo } from "./displays/meeting";
+import { MEETING_ROOMS, SEATS_PER_ROOM } from "@/lib/meeting";
+import { avatarColor } from "@/lib/palette";
 import type { Build } from "./world/structure";
 
 export interface Engine {
@@ -58,6 +62,8 @@ export interface Engine {
     hideScheduleBoard: (hidden: boolean) => void;
     /** Keep the server room decor (as in the prototype) even while the bridge sends server samples. */
     hideServerMonitor: (hidden: boolean) => void;
+    /** Hide floor 4 (visual parity: the prototype has three floors; Semua then uses the prototype camera). */
+    hideMeetingFloor: (hidden: boolean) => void;
     /** Whiteboard easter egg: write it now if someone is at the board, else at the next whiteboard session. */
     whiteboardEgg: () => void;
     /** Open a chat balloon on agent `id` (random line for its context when `text` is omitted). */
@@ -124,6 +130,7 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
   const g1 = new THREE.Group(); world.add(g1); // floor 1
   const g2 = new THREE.Group(); world.add(g2); // floor 2 (hideable)
   const g3 = new THREE.Group(); world.add(g3); // floor 3 security
+  const g4 = new THREE.Group(); world.add(g4); // floor 4 meeting (prd.md §7.9)
   const b: Build = { kit, M, roomLabels: [], looseTextures: [] };
   buildIslandAndFloor1Shell(b, world, g1);
   buildFloor2Shell(b, g1, g2);
@@ -132,12 +139,16 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
   const props = buildFloor1Props(b, g1, tentacles, fonts);
   const p2 = buildFloor2Props(b, g2, tentacles);
   const SEC = buildFloor3(b, g2, g3, tentacles, fonts);
+  const seats = createSeats();
+  const F4P = buildFloor4(b, g4, tentacles, fonts, seats);
+  const seatProps = F4P.rooms.flatMap((r) => r.seats); // index = SeatPlace.index
+  let meetingHidden = false; // tests only, see Engine.debug
   // The siren light stays in every pass (only its intensity changes per pass) so the light count, and
   // with it the compiled shader programs, never flips between passes.
   scene.attach(SEC.siren.light);
   // Objects drawn in the floor-1 pass besides g1: sky (scene root) and the island slab and rocks (world root).
   const skyObjects = new Set(scene.children.filter((o) => o !== world && !(o as THREE.Light).isLight));
-  const islandObjects = new Set(world.children.filter((o) => o !== g1 && o !== g2 && o !== g3));
+  const islandObjects = new Set(world.children.filter((o) => o !== g1 && o !== g2 && o !== g3 && o !== g4));
   const stations = SEC.stations;
   const spots = createSpots();
   const boards = createBoardSlots(); // task board standing spots (deviation 14)
@@ -194,7 +205,7 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
       obstacles.push(s);
       if (!o.userData.smallRock) occluders.push(s);
     }
-    const top = g3.visible ? F3 + 4.7 : g2.visible ? F2 + 5.3 : 5.4;
+    const top = g4.visible ? F4 + 4.7 : g3.visible ? F3 + 4.7 : g2.visible ? F2 + 5.3 : 5.4;
     const dy = world.position.y;
     const building: THREE.Vector3[] = [];
     for (const x of [-14.2, 14.2]) for (const z of [-9.2, 9.2]) for (const y of [-0.8, top]) building.push(V(x, y + dy, z));
@@ -247,26 +258,68 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
     });
   };
 
-  function addRuntime(id: string) {
-    if (agents.has(id)) return;
-    const a = S().agents.get(id);
-    if (!a || a.slot == null) return;
-    const slot = slots[a.slot];
-    const desk = desks[a.slot];
+  /** The store's meeting seat (Agent.meeting) as a place. */
+  const seatOf = (m: { room: number; seat: number } | null | undefined): SeatPlace | null =>
+    m ? (seats[m.room * SEATS_PER_ROOM + m.seat] ?? null) : null;
+  const claimDesk = (id: string, slot: number) => {
+    const desk = desks[slot];
     desk.group.visible = true;
-    const av = buildAvatar(kit, M, id, () => toggleFocus(id));
-    const home = slot.place;
-    av.root.position.copy(home.final);
-    av.root.rotation.y = home.face; // spawned seated: already facing the monitor (desks face PI, deviation 8)
-    const rt: AgentRuntime = { id, root: av.root, av, desk, home, mv: newMovement(home), squash: 0, fun: newFun(simTime) };
-    world.add(av.root);
-    av.root.scale.setScalar(0.01);
-    av.spawn = 0;
     desk.group.traverse((o) => {
       o.userData.agentId = id;
     });
+    return desk;
+  };
+
+  function addRuntime(id: string) {
+    if (agents.has(id)) return;
+    const a = S().agents.get(id);
+    const seat = a ? seatOf(a.meeting) : null;
+    if (!a || (a.slot == null && !seat)) return;
+    const desk = a.slot != null ? claimDesk(id, a.slot) : null;
+    const av = buildAvatar(kit, M, id, () => toggleFocus(id));
+    // A subagent without a desk pops in at its meeting seat (prd.md §7.9); its seat is its home.
+    const home = a.slot != null ? slots[a.slot].place : seat!;
+    av.root.position.copy(home.final);
+    av.root.rotation.y = home.face; // spawned seated: already facing the monitor (desks face PI, deviation 8)
+    const rt: AgentRuntime = { id, root: av.root, av, desk, home, mv: newMovement(home), squash: 0, fun: newFun(simTime) };
+    if (home.kind === "seat") home.occ = id;
+    world.add(av.root);
+    av.root.scale.setScalar(0.01);
+    av.spawn = 0;
     agents.set(id, rt);
     dirty.add(id);
+  }
+
+  /* Runtimes follow the store (prd.md §7.9): an agent shows while it has a desk or a meeting seat, a desk-less
+     subagent that gets a desk later takes it, and its home follows its seat. A new member at a table where the
+     leader already sits gets a card thrown over. */
+  const seatKeys = new Map<string, number>();
+  let meetingDirty = true;
+  function reconcile(s: HQState) {
+    for (const a of s.agents.values()) {
+      let rt = agents.get(a.id);
+      const seat = seatOf(a.meeting);
+      if (!rt) {
+        if (a.slot != null || seat) addRuntime(a.id);
+        rt = agents.get(a.id);
+      } else if (a.slot == null && !seat) {
+        removeRuntime(a.id);
+        rt = undefined;
+      } else if (!rt.desk && a.slot != null) {
+        rt.desk = claimDesk(a.id, a.slot);
+        rt.home = slots[a.slot].place;
+      } else if (!rt.desk && seat && rt.home !== seat) rt.home = seat;
+      const prev = seatKeys.get(a.id);
+      if (seat && prev !== seat.index) {
+        seatKeys.set(a.id, seat.index);
+        const room = s.meetings[seat.roomIndex];
+        const leader = room?.leaderId && room.leaderId !== a.id ? agents.get(room.leaderId) : undefined;
+        if (rt && leader && leader.mv.mode === "desk" && leader.mv.dest.kind === "seat" && leader.mv.dest.roomIndex === seat.roomIndex) {
+          flyCard(F4P.cards, leader.mv.dest.final, seat.final, leader.av.color);
+        }
+      } else if (!seat) seatKeys.delete(a.id);
+    }
+    meetingDirty = true;
   }
 
   function removeRuntime(id: string) {
@@ -278,7 +331,8 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
     rt.av.chatLabel.element.remove();
     if (rt.fun?.chat) chatSlots.open = Math.max(0, chatSlots.open - 1);
     disposeSubtree(rt.root);
-    resetDesk(rt.desk);
+    if (rt.desk) resetDesk(rt.desk);
+    seatKeys.delete(id);
     agents.delete(id);
   }
 
@@ -291,8 +345,8 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
     let txt = "";
     if (mv.mode === "act") txt = (mv.activity && ACT_LABEL[mv.activity]) || "";
     else if (mv.mode === "fetch" || (mv.mode === "walk" && mv.dest.kind === "board")) txt = "ambil tugas";
-    else if (mv.mode === "walk" && mv.carrying) txt = mv.dest.kind === "station" ? `bawa tugas ke ${DEPTS[mv.dest.dept].label}!` : "bawa tugas ke meja!";
-    else if (mv.mode === "walk" && mv.urgent) txt = mv.dest.kind === "station" ? `ke ${DEPTS[mv.dest.dept].label}!` : "buru-buru balik!";
+    else if (mv.mode === "walk" && mv.carrying) txt = mv.dest.kind === "station" ? `bawa tugas ke ${DEPTS[mv.dest.dept].label}!` : mv.dest.kind === "seat" ? `bawa tugas ke ${mv.dest.room}!` : "bawa tugas ke meja!";
+    else if (mv.mode === "walk" && mv.urgent) txt = mv.dest.kind === "station" ? `ke ${DEPTS[mv.dest.dept].label}!` : mv.dest.kind === "seat" ? `ke ${mv.dest.room}!` : "buru-buru balik!";
     else if (mv.mode === "walk") txt = "jalan-jalan";
     else if (a.task && (a.id === selectedId || a.status === "waiting" || a.status === "error")) txt = truncate(a.task, 30);
     (el.querySelector(".tt") as HTMLElement).textContent = txt ? "· " + txt : "";
@@ -302,10 +356,16 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
 
   /* ---------------- random actions + chat balloons (agents/fun.ts) ---------------- */
   const chatSlots: ChatSlots = { open: 0 };
+  /** Meeting rooms where someone waits or errors (no balloons there); refreshed every frame in the floor-4 block. */
+  const roomHush = new Set<number>();
   const funInfo = (rt: AgentRuntime, a: Agent): FunInfo => {
     const mv = rt.mv;
     const pose = mv.mode === "desk" ? "desk" : mv.mode === "act" && mv.dest.kind === "spot" ? mv.dest.pose : mv.mode;
-    return { status: a.status, mode: mv.mode, pose, activity: mv.activity, dept: a.dept, visible: rt.av.label.visible, carrying: mv.carrying };
+    const atSeat = mv.mode === "desk" && mv.dest.kind === "seat";
+    return {
+      status: a.status, mode: mv.mode, pose, activity: mv.activity, dept: a.dept, visible: rt.av.label.visible, carrying: mv.carrying,
+      meeting: atSeat, hush: atSeat && roomHush.has((mv.dest as SeatPlace).roomIndex),
+    };
   };
   function stepFun(rt: AgentRuntime, a: Agent, now: number, dt: number) {
     const f = rt.fun;
@@ -344,10 +404,20 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
   };
   function applyFloor(f: FloorMode, moveCam: boolean) {
     g2.visible = f !== "1";
-    g3.visible = f === "all" || f === "3";
-    const lf = f === "all" ? 3 : Number(f);
+    g3.visible = f === "all" || f === "3" || f === "4";
+    g4.visible = (f === "all" || f === "4") && !meetingHidden;
+    SEC.liftTop.visible = !g4.visible; // with floor 4 on show the tube goes on up
+    const lf = f === "all" ? (meetingHidden ? 3 : 4) : Number(f);
     for (const r of b.roomLabels) r.o.visible = r.floor === lf;
-    if (moveCam) flyTo(V(...VIEWS[f].pos), V(...VIEWS[f].target));
+    // The taller building needs a wider shadow box; three floors keep the prototype's.
+    const sb = g4.visible ? 27 : 22;
+    if (sun.shadow.camera.top !== sb) {
+      Object.assign(sun.shadow.camera, { left: -sb, right: sb, top: sb, bottom: -sb });
+      sun.shadow.camera.updateProjectionMatrix();
+    }
+    if (g4.visible) meetingDirty = true;
+    const view = f === "all" && meetingHidden ? VIEW_ALL_3 : VIEWS[f];
+    if (moveCam) flyTo(V(...view.pos), V(...view.target));
   }
   /* Focus mode (deviation 12): clicking an agent (body or bubble) flies the camera to it; clicking the focused agent
      again, or clearing the selection anywhere else, flies back to the camera pose and floor from before the focus. */
@@ -356,7 +426,8 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
   /* Follow cam (deviation 15): while an agent is in focus, the camera rides along with it (orbit and zoom still
      work around it), and the floor view switches when it takes the stairs or the lift. */
   let follow: { id: string; last: THREE.Vector3; floor: number } | null = null;
-  const floorViewFor = (fl: number, fm: FloorMode): FloorMode => (fl === 3 ? (fm === "all" ? "all" : "3") : (String(fl) as FloorMode));
+  // The top floor keeps Semua (floor 4 is on top there); any other floor switches to its own view (prd.md §7.9).
+  const floorViewFor = (fl: number, fm: FloorMode): FloorMode => (fl === 4 ? (fm === "all" ? "all" : "4") : (String(fl) as FloorMode));
   function updateFollow() {
     if (!follow) return;
     const rt = agents.get(follow.id);
@@ -427,7 +498,9 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
       case "place": {
         const rt = agents.get(s.id), a = S().agents.get(s.id);
         if (!rt || !a) break;
-        if (a.status === "idle") {
+        const seat = seatOf(a.meeting);
+        if (seat) placeAt(nav, rt, seat); // snapshot: meeting members straight to their seats (prd.md §7.9)
+        else if (a.status === "idle") {
           const sp = pickSpot(nav, rt);
           if (sp) placeAt(nav, rt, sp);
         } else {
@@ -491,7 +564,7 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
     const roots: THREE.Object3D[] = [];
     for (const rt of agents.values()) {
       if (rt.root.visible) roots.push(rt.root);
-      if (g2.visible && !g3.visible) roots.push(rt.desk.group);
+      if (g2.visible && !g3.visible && rt.desk) roots.push(rt.desk.group);
     }
     const hit = ray.intersectObjects(roots, true).find((h) => (h.object as THREE.Mesh).isMesh);
     return (hit?.object.userData.agentId as string) || null;
@@ -583,12 +656,14 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
     SEC.sign.draw();
     props.neon.draw();
     props.sign.draw();
-    for (const rt of agents.values()) rt.desk.plateName = undefined; // redrawn by animateAgent
+    for (const rt of agents.values()) if (rt.desk) rt.desk.plateName = undefined; // redrawn by animateAgent
     const taken = new Set([...agents.values()].map((rt) => rt.desk));
     for (const d of desks) if (!taken.has(d)) drawEmptyDesk(fonts, d);
     drawTaskBoard(fonts, p2.taskBoard.face);
     refreshSchedule();
     refreshServer();
+    F4P.sign.draw();
+    refreshMeetings();
   };
   loadFonts(fonts).then(() => {
     if (disposed) return;
@@ -596,18 +671,63 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
     drawStatic();
   });
 
+  /* ---------------- floor 4: room screens and talking turns (prd.md §7.9) ---------------- */
+  function meetingInfo(ri: number, s: HQState): MeetingScreenInfo | null {
+    const r = s.meetings[ri];
+    if (!r) return null;
+    const members = [...s.agents.values()].filter((a) => a.meeting?.room === ri).sort((p, q) => p.meeting!.seat - q.meeting!.seat);
+    const leader = r.leaderId ? s.agents.get(r.leaderId) : undefined;
+    return {
+      team: r.name, color: r.dept ? DEPTS[r.dept].color : "#ff6fd8", goal: (leader ?? members[0])?.task ?? "", since: r.since,
+      members: members.map((a) => ({ name: a.name, color: avatarColor(a.id), status: a.status, task: a.task })),
+    };
+  }
+  function refreshMeetings() {
+    meetingDirty = false;
+    const s = S(), now = Date.now();
+    F4P.rooms.forEach((room, ri) => drawMeetingScreen(fontsReady ? fonts : null, room.screen, MEETING_ROOMS[ri], meetingInfo(ri, s), now));
+  }
+  refreshMeetings();
+  /** Per room: every 4-7 s one calm member (working or thinking) talks for 2-3 s; the others look at it. */
+  const talk = MEETING_ROOMS.map(() => ({ speaker: null as string | null, until: 0, next: 0 }));
+  function stepTalk(ri: number, here: AgentRuntime[], s: HQState, t: number) {
+    const tk = talk[ri];
+    const calm = here.filter((rt) => {
+      const st = s.agents.get(rt.id)?.status;
+      return st === "working" || st === "thinking";
+    });
+    if (tk.speaker && (t >= tk.until || !calm.some((rt) => rt.id === tk.speaker))) tk.speaker = null;
+    if (!tk.speaker && t >= tk.next) {
+      if (here.length >= 2 && calm.length) {
+        tk.speaker = calm[Math.floor(Math.random() * calm.length)].id;
+        tk.until = t + 2 + Math.random();
+        tk.next = tk.until + 4 + Math.random() * 3;
+      } else tk.next = t + 1;
+    }
+    const spk = tk.speaker ? agents.get(tk.speaker) : undefined;
+    for (const rt of here) {
+      const mt = (rt.meet ??= { speakUntil: 0, lookAt: null });
+      mt.speakUntil = rt === spk ? tk.until : 0;
+      mt.lookAt = spk && spk !== rt ? (mt.lookAt ?? new THREE.Vector3()).copy(spk.root.position).setY(spk.root.position.y + spk.av.cy + 0.2) : null;
+    }
+  }
+
   /* ---------------- loop ---------------- */
   const clock = new THREE.Clock();
   let screenAcc = 0, slowAcc = 0, wbAcc = 0, secAcc = 0, locAcc = LOC_INTERVAL;
   let raf = 0;
   let lastSel: string | null = null;
+  let lastAgents: HQState["agents"] | null = null;
   const lastData = new Map<string, Agent>();
   const anim: AnimCtx = {
     camera,
     selectedId: null,
     floorMode: S().floorMode,
+    meetingHidden: false,
     nav,
     stations,
+    seatChairs: seatProps.map((sp) => sp.chair),
+    seatOf: (a) => seatOf(a.meeting),
     coffeeNozzle: props.coffee.nozzle,
     spawnSmoke: fx.smoke,
     drawPlate: (rt, a) => {
@@ -623,6 +743,11 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
     const s = S();
     anim.selectedId = s.selectedId;
     anim.floorMode = s.floorMode;
+    anim.meetingHidden = meetingHidden;
+    if (s.agents !== lastAgents) {
+      lastAgents = s.agents;
+      reconcile(s);
+    }
     updateFollow();
     if (fly) {
       fly.k = Math.min(1, fly.k + dt / 0.9);
@@ -719,6 +844,35 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
         stations.forEach((st, i) => drawStation(fonts, st, occ.get(i), s, soc, simTime, t));
       }
     }
+    // ---- floor 4 (prd.md §7.9): seat colors, room strips, talking turns, flying cards ----
+    const seated = new Map<number, Agent>();
+    const byRoom: AgentRuntime[][] = MEETING_ROOMS.map(() => []);
+    for (const rt of agents.values()) {
+      const a = s.agents.get(rt.id), d = rt.mv.dest;
+      if (a && rt.mv.mode === "desk" && d.kind === "seat") {
+        seated.set(d.index, a);
+        byRoom[d.roomIndex].push(rt);
+      } else rt.meet = undefined;
+    }
+    roomHush.clear();
+    F4P.rooms.forEach((room, ri) => {
+      const info = s.meetings[ri];
+      room.strip.material.color.set(info ? (info.dept ? DEPTS[info.dept].color : "#ff6fd8") : MEETING_IDLE);
+      for (const sp of room.seats) {
+        const a = seated.get(sp.place.index);
+        const c = a ? STATUS[a.status].color : MEETING_IDLE;
+        sp.ring.material.color.set(a?.status === "offline" ? "#4a4560" : c);
+        sp.glow.material.color.set(c);
+        sp.glow.material.opacity = a && a.status !== "offline" ? 0.25 + 0.15 * Math.sin(t * 3) : 0;
+        sp.screen.material.color.set(!a || a.status === "offline" ? "#150e2c" : c).multiplyScalar(0.75);
+        if (!a) sp.chair.position.y = F4;
+      }
+      const here = byRoom[ri];
+      if (here.some((rt) => ["waiting", "error"].includes(s.agents.get(rt.id)?.status ?? ""))) roomHush.add(ri);
+      stepTalk(ri, here, s, t);
+    });
+    stepCards(F4P.cards, dt);
+    if (meetingDirty && g4.visible) refreshMeetings();
     const H = SEC.holo;
     H.model.rotation.y += dt * (redOn ? 0.9 : 0.25);
     H.scan.visible = redOn;
@@ -755,6 +909,7 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
         if (a) updateBubble(rt, a, s.selectedId);
       }
       if (SB.group.visible && g2.visible) refreshSchedule(); // countdowns, like the mission board every 1 s
+      if (g4.visible) refreshMeetings(); // tasks and "rapat N mnt"
       if (SR.screen.group.visible && g2.visible) refreshServer(); // "TERPUTUS" once samples stop
     }
     // schedule bell: short rings while a job runs, then settles
@@ -763,7 +918,7 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
     if (locAcc >= LOC_INTERVAL) {
       locAcc = 0;
       const locs = new Map<string, { where: string; what: string }>();
-      for (const rt of agents.values()) locs.set(rt.id, locText(rt));
+      for (const rt of agents.values()) locs.set(rt.id, locText(rt, s.agents.get(rt.id)?.meeting?.team));
       if (locs.size) S().setLocs(locs);
     }
     // task board cards: pinned while their agent is on the way, gone once picked up (deviation 14)
@@ -844,14 +999,15 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
      slabs onto the floors below. So the floors are drawn bottom to top into the same depth buffer, and
      each pass re-renders the sun's shadow map with only that floor's objects: every floor gets the same
      sun, but only its own shadows (dollhouse lighting). */
-  const SPLIT2 = F2 - 0.3, SPLIT3 = F3 - 0.3;
-  const floorBand = (y: number) => (y < SPLIT2 ? 1 : y < SPLIT3 ? 2 : 3);
+  const SPLIT2 = F2 - 0.3, SPLIT3 = F3 - 0.3, SPLIT4 = F4 - 0.3;
+  const floorBand = (y: number) => (y < SPLIT2 ? 1 : y < SPLIT3 ? 2 : y < SPLIT4 ? 3 : 4);
   const passVis: [THREE.Object3D, boolean][] = [];
   const agentBand = new Map<THREE.Object3D, number>();
   function renderFloors() {
     const floors = [1];
     if (g2.visible) floors.push(2);
     if (g3.visible) floors.push(3);
+    if (g4.visible) floors.push(4);
     const last = floors[floors.length - 1];
     agentBand.clear();
     for (const rt of agents.values()) agentBand.set(rt.root, floorBand(rt.root.position.y));
@@ -859,7 +1015,7 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
     for (const o of scene.children) if (o !== world && !(o as THREE.Light).isLight) passVis.push([o, o.visible]);
     for (const o of world.children) passVis.push([o, o.visible]);
     const bandOf = (o: THREE.Object3D) =>
-      o === g1 ? 1 : o === g2 ? 2 : o === g3 ? 3
+      o === g1 ? 1 : o === g2 ? 2 : o === g3 ? 3 : o === g4 ? 4
         : agentBand.get(o) ?? (skyObjects.has(o) || islandObjects.has(o) ? 1 : last); // fx particles: last pass
     const background = scene.background;
     const siren = SEC.siren.light.intensity;
@@ -888,6 +1044,8 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
     if (bm) return boards[Number(bm[1])] ?? null;
     const m = /^station:(\d+)$/.exec(placeId);
     if (m) return stations[Number(m[1])]?.place ?? null;
+    const sm = /^seat:(\d+)$/.exec(placeId);
+    if (sm) return seats[Number(sm[1])] ?? null;
     return spots.find((sp) => sp.id === placeId) ?? null;
   };
 
@@ -942,7 +1100,7 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
       placeAt(nav, rt, pl);
       return true;
     },
-    placeIds: () => ["desk", ...spots.map((sp) => sp.id), ...stations.map((_, i) => `station:${i}`), ...boards.map((_, i) => `board:${i}`)],
+    placeIds: () => ["desk", ...spots.map((sp) => sp.id), ...stations.map((_, i) => `station:${i}`), ...boards.map((_, i) => `board:${i}`), ...seats.map((_, i) => `seat:${i}`)],
     skyEvent: (kind, zone) => sky.trigger(kind, zone),
     camera,
     controls,
@@ -963,6 +1121,11 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
       hideServerMonitor: (hidden) => {
         serverHidden = hidden;
         refreshServer();
+      },
+      hideMeetingFloor: (hidden) => {
+        meetingHidden = hidden;
+        SEC.liftLabel2.element.textContent = hidden ? "LIFT KE LT.3" : "LIFT KE LT.3 & 4";
+        applyFloor(S().floorMode, false);
       },
       whiteboardEgg: () => {
         if (p2.wb.wasOn) p2.wb.egg = newWhiteboardEgg(0);

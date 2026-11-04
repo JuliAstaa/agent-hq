@@ -76,6 +76,7 @@ def load_config():
         "name": get("HQ_NAME").strip(),
         "role": get("HQ_ROLE").strip(),
         "team": get("HQ_TEAM").strip(),
+        "group": get("HQ_GROUP").strip(),
         "timeout": timeout,
         "state_dir": get("HQ_STATE_DIR") or os.path.join(cache, "agent-hq"),
         "disabled": truthy(get("HQ_DISABLE")),

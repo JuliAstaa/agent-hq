@@ -37,6 +37,10 @@ export interface FunInfo {
   visible: boolean;
   /** Holding a task card (deviation 14): hands are busy, no actions. */
   carrying?: boolean;
+  /** Seated at a meeting table (prd.md §7.9): work lines instead of small talk. */
+  meeting?: boolean;
+  /** Someone at the same meeting table waits or errors: no balloons there. */
+  hush?: boolean;
 }
 
 export function allowedQuirks(info: Pick<FunInfo, "status" | "mode" | "pose" | "carrying">): Quirk[] {
@@ -98,7 +102,11 @@ export const CHAT_THINKING = ["hmm...", "kalau begini gimana ya", "coba pikir ul
 
 export const CHAT_REPLIES = ["wkwk", "setuju!", "boleh juga", "aku ikut!", "seriusan?", "traktir dong", "sama, aku juga", "gas!"];
 
-export function chatLine(info: Pick<FunInfo, "status" | "mode" | "activity" | "dept">): string {
+/** At a meeting table (prd.md §7.9). */
+export const CHAT_MEETING = ["aku cek bagian ini ya", "tes-nya hijau!", "bentar, aku baca dulu", "siap, lanjut", "aku ambil yang ini", "oke, digabung ya"];
+
+export function chatLine(info: Pick<FunInfo, "status" | "mode" | "activity" | "dept" | "meeting">): string {
+  if (info.meeting) return pick(CHAT_MEETING);
   if (info.status === "thinking") return pick(CHAT_THINKING);
   if (info.status === "working") return pick(info.dept && Math.random() < 0.6 ? CHAT_BY_DEPT[info.dept] : CHAT_WORKING);
   const own = info.mode === "act" && info.activity ? CHAT_BY_ACTIVITY[info.activity] : undefined;
@@ -181,12 +189,12 @@ export function tickFun(f: FunState, info: FunInfo, now: number, dt: number, slo
     f.nextQuirk = now + rand(20, 60);
   }
   // balloon
-  if (f.chat && (now >= f.chat.until || !calm || !info.visible)) {
+  if (f.chat && (now >= f.chat.until || !calm || !info.visible || info.hush)) {
     f.chat = null;
     slots.open = Math.max(0, slots.open - 1);
     out.closed = true;
   }
-  const canTalk = calm && info.visible && info.mode !== "walk" && info.mode !== "fetch";
+  const canTalk = calm && info.visible && !info.hush && info.mode !== "walk" && info.mode !== "fetch";
   if (!f.chat && f.reply && now >= f.reply.at) {
     if (canTalk && slots.open < MAX_CHATS) {
       say(f, f.reply.text, now, slots, 3);

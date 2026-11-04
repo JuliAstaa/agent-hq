@@ -9,6 +9,7 @@ import { STATION_LAYOUT, stationPlace, type StationPlace } from "../nav/places";
 import { DEPTS, type Dept } from "@/lib/teams";
 import { alienPlant } from "./props/alienPlant";
 import { makeWall, partition, roomLabel, type Build } from "./structure";
+import type { CSS2DObject } from "three/addons/renderers/CSS2DRenderer.js";
 
 type BasicMesh = THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;
 type ToonMesh = THREE.Mesh<THREE.BufferGeometry, THREE.MeshToonMaterial>;
@@ -35,7 +36,16 @@ export interface Sec {
   siren: { dome: ToonMesh; beams: THREE.Group; light: THREE.PointLight };
   pad: BasicMesh;
   stations: Station[];
+  /** Lid on top of the lift tube: hidden while floor 4 is shown (the tube goes on up). */
+  liftTop: THREE.Mesh;
+  /** "LIFT KE LT.3 & 4" on floor 2 ("LIFT KE LT.3" without the meeting floor). */
+  liftLabel2: CSS2DObject;
 }
+
+/** Lift tube axis (floors 2 to 4). */
+export const LIFT_X = 6.8, LIFT_Z = 4.8;
+/** Open side of the glass tube, facing the floor-3 exit (X3) and the floor-4 exit (X4). */
+export const LIFT_GAP = Math.atan2(5.4 - LIFT_X, 4.0 - LIFT_Z);
 
 export function buildFloor3(b: Build, g2: THREE.Group, g3: THREE.Group, tentacles: THREE.Group[], fonts: Fonts): Sec {
   const { M } = b;
@@ -148,22 +158,22 @@ export function buildFloor3(b: Build, g2: THREE.Group, g3: THREE.Group, tentacle
   SEC.siren = { dome, beams, light: alarm };
 
   // --- lift Lt.2 <-> Lt.3 ---
-  const LX = 6.8, LZ = 4.8;
+  const LX = LIFT_X, LZ = LIFT_Z;
   const glassM = thin(toon("#bfe9ff", { transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false }), 0.7);
-  const gapC = Math.atan2(5.4 - LX, 4.0 - LZ);
+  const gapC = LIFT_GAP;
   const tubeGeo = (h: number) => new THREE.CylinderGeometry(0.95, 0.95, h, 32, 1, true, gapC + 0.7, Math.PI * 2 - 1.4);
   const t2 = mesh(tubeGeo(F3 - F2), glassM, false, false); t2.position.set(LX, F2 + (F3 - F2) / 2, LZ); g2.add(t2);
   const t3 = mesh(tubeGeo(2.8), glassM, false, false); t3.position.set(LX, F3 + 1.4, LZ); g3.add(t3);
   cyl(g2, 1.12, 1.12, 0.1, LX, F2, LZ, M.dark, 32);
   const pad = mesh(new THREE.CircleGeometry(0.9, 32), noLine(flat("#ff6fd8")), false, false) as BasicMesh;
   pad.rotation.x = -Math.PI / 2; pad.position.set(LX, F2 + 0.11, LZ); g2.add(pad);
-  cyl(g3, 1.12, 1.12, 0.14, LX, F3 + 2.8, LZ, M.dark, 32);
+  SEC.liftTop = cyl(g3, 1.12, 1.12, 0.14, LX, F3 + 2.8, LZ, M.dark, 32);
   for (const [g, y] of [[g2, F2 + 0.15], [g2, F3 - 0.5], [g3, F3 + 0.05], [g3, F3 + 2.7]] as const) {
     const r = mesh(new THREE.TorusGeometry(0.97, 0.05, 8, 40), noLine(flat("#ff6fd8")), false, false);
     r.rotation.x = Math.PI / 2; r.position.set(LX, y, LZ); g.add(r);
   }
   SEC.pad = pad;
-  roomLabel(b, g2, "LIFT KE LT.3", LX, F2 + 0.2, LZ + 1.6, 2);
+  SEC.liftLabel2 = roomLabel(b, g2, "LIFT KE LT.3 & 4", LX, F2 + 0.2, LZ + 1.6, 2);
   roomLabel(b, g3, "LIFT", LX, F3 + 0.2, LZ + 1.6, 3);
   alienPlant(b, tentacles, g3, -12.0, F3, 7.3, 0.8);
   alienPlant(b, tentacles, g3, 12.2, F3, 7.3, 0.8);

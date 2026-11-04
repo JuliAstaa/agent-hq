@@ -44,7 +44,7 @@ function remember(ev) {
     return;
   }
   const next = { ...(agents.get(id) || { id }) };
-  for (const k of ['name', 'role', 'status', 'state', 'task', 'current_task', 'progress', 'tokens', 'cost', 'team']) {
+  for (const k of ['name', 'role', 'status', 'state', 'task', 'current_task', 'progress', 'tokens', 'cost', 'team', 'parent', 'group']) {
     if (ev[k] !== undefined) next[k] = ev[k];
   }
   if (ev.tokens_delta !== undefined) next.tokens = (Number(next.tokens) || 0) + Number(ev.tokens_delta);
@@ -54,7 +54,11 @@ function remember(ev) {
 
 function send(res, obj) { res.write(`data: ${JSON.stringify(obj)}\n\n`); }
 function broadcast(obj) { for (const res of clients) send(res, obj); }
-function publish(ev) { ev.ts = ev.ts || new Date().toISOString(); applyIdentity(ev); remember(ev); broadcast(ev); }
+function publish(ev) {
+  ev.ts = ev.ts || new Date().toISOString();
+  if (typeof ev.group === 'string') ev.group = trunc(redact(ev.group), 40); // grup bebas dari sumber mana pun
+  applyIdentity(ev); remember(ev); broadcast(ev);
+}
 
 /* ---------------- rename: override name/role/team per agent id ---------------- */
 const FIELDS = ['name', 'role', 'team'];
@@ -232,11 +236,15 @@ function hookToEvents(h, hdr) {
   const isSub = !!h.agent_id;
   const id = isSub ? `cc-${sid.slice(0, 6)}-${String(h.agent_id).slice(0, 8)}` : `cc-${sid.slice(0, 8)}`;
   const team = (hdr['x-hq-team'] || '').trim();
+  // Lantai Meeting: subagen menyebut sesi utamanya sebagai parent; X-HQ-Group mengumpulkan sesi yang terpisah.
+  const group = trunc(redact(hdr['x-hq-group'] || ''), 40);
   const who = {
     id,
     name: isSub ? trunc(h.agent_type || 'subagen', 18) : (hdr['x-hq-name'] || `${proj}#${sid.slice(0, 4)}`),
     role: isSub ? `Subagen · ${proj}` : (hdr['x-hq-role'] || `Claude Code · ${proj}`),
     ...(team ? { team } : {}),
+    ...(isSub ? { parent: `cc-${sid.slice(0, 8)}` } : {}),
+    ...(group ? { group } : {}),
     source: 'claude-code',
   };
   const up = (extra) => ({ type: 'agent_update', ...who, ...extra });

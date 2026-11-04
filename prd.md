@@ -7,14 +7,14 @@ A 3D virtual office for watching AI agents work in real time.
 | Owner | I Made Juli Astawa |
 | Status | Prototype works, moving to a Next.js codebase |
 | Target stack | Next.js (App Router, TypeScript, Node.js runtime), Three.js, Tailwind CSS |
-| Last updated | 2026-11-02 |
+| Last updated | 2026-11-04 |
 | Primary agents to monitor | Claude Code sessions and their subagents |
 
 ---
 
 ## 1. Summary
 
-Agent HQ turns agent telemetry into a living cartoon office. Each agent is a small character with its own desk. Work status changes what the character does: it types when working, scratches its chin when thinking, waves when it needs a human, smokes when it errors, and walks off to the lounge when idle. A security wing on floor 3 holds a Red Team lab, a vulnerability-assessment (VA) report room, and a Blue Team SOC. Agents whose work matches those teams move there automatically.
+Agent HQ turns agent telemetry into a living cartoon office. Each agent is a small character with its own desk. Work status changes what the character does: it types when working, scratches its chin when thinking, waves when it needs a human, smokes when it errors, and walks off to the lounge when idle. A security wing on floor 3 holds a Red Team lab, a vulnerability-assessment (VA) report room, and a Blue Team SOC. Agents whose work matches those teams move there automatically. A meeting floor on top (floor 4) seats a session with its subagents, or agents that share a group, around one table (§7.9).
 
 The goal is to make it obvious, at a glance, **who is doing what, who is stuck, and who needs me**, without reading terminal logs.
 
@@ -59,6 +59,7 @@ Primary user: a developer and DevOps engineer running multiple Claude Code agent
 | S6 | Blue Team agent reports a brute-force alert | SOC video wall banner flashes, siren spins, room light pulses red, alert logged and toasted |
 | S7 | Red Team agent reports a finding | VA board counts update, the affected node on the attack map turns red |
 | S8 | User clicks a character | Camera flies to it, switches to its floor, roster card expands with progress and recent events |
+| S9 | A session delegates to two subagents | The session's character walks to a free meeting room on floor 4 (lift), the subagents pop in at its table, the room screen lists the team; when the last subagent is done the character goes back to work |
 
 ## 5. Current state (prototype)
 
@@ -113,6 +114,7 @@ All events are JSON objects. `id` identifies the agent. Unknown fields are ignor
 - `progress`: 0..1 or 0..100.
 - `tokens` absolute, or `tokens_delta` incremental.
 - `team` (optional): `red | report | blue | office`. Overrides keyword inference.
+- `parent`, `group` (optional): who delegated this agent, and a shared work group. Put agents in a meeting room (§7.9).
 
 ### 7.2 Other agent events
 ```json
@@ -198,6 +200,43 @@ Not in the prototype (there the server room is decor). The server room on floor 
 - Clicking the server room (a rack, the tank or the wall screen) opens the **Server** panel on the right. Only in the Lt.2 view (in Semua floor 3 is in front of it, as for the schedule board) and only while there is a sample (decor is not clickable); the pointer turns into a hand over it. The panel shows the state (as on the screen) and the age of the last sample; a card each for CPU (cores, load 1/5/15 minutes), RAM and disk (used / total, free) with the percent, a bar in the level color, and a line chart of the last 30 minutes (from `history` plus the live samples, with the 90% warning line); then uptime, Agent HQ memory and platform; and the last 5 `Server` log lines. Without a fresh sample a banner says the data is cut off and since when, and the colors turn grey. It closes with Tutup or Esc, and it takes the spot of the Hermes and terminal panels: opening one closes the other.
 - Warnings, computed in the office (each viewer): CPU at 90% or more for 60 s, RAM at 90% or more, disk at 90% or more give a `warn` log line under the name `Server` and a toast; once the value is below 85% again, an `info` line says it is back to normal.
 
+### 7.9 Meeting floor (team collaboration)
+Not in the prototype. Today a session that delegates gets its subagents at separate desks, so the teamwork does not show. Floor 4 seats a team around one table. Decisions by the user (2026-11-04): while a team has an active subagent, its meeting wins over the floor-3 stations; teams form from subagents and from an explicit `group`; the floor-2 room the prototype calls "Ruang Rapat" is renamed "Ruang Kreatif" so the two are not confused.
+
+**Fields.** Two optional agent fields on `agent_update` and `task_done`, kept in the bridge's agent state so the snapshot carries them:
+```json
+{ "type": "agent_update", "id": "cc-ab12cd-9f8e7d6c", "parent": "cc-ab12cd34", "status": "working" }
+{ "type": "agent_update", "id": "coder-1", "group": "Rilis v2.3", "status": "working" }
+```
+- `parent`: id of the agent that delegated this one. The bridge sets it on every event translated from a subagent hook (`agent_id` present) to the main session's id, `cc-<first 8 of session_id>`. Claude Code and Hermes subagents (both go through `/api/hook`) get it without any settings change. Other sources may send it. `null` or `""` clears it; an agent's own id is ignored.
+- `group`: free label for agents that work on the same thing. Trimmed, redacted, max 40 chars; compared case-insensitively, shown as first seen. Header `X-HQ-Group` from env `HQ_GROUP` (Claude Code hook settings; Hermes `agent-hq.env`). `null` or `""` clears it.
+- Both are new in the bridge output, so the parity test with `references/server.js` ignores these two keys. Events without them are unchanged.
+
+**Team.** Key: the agent's own `group` if set; else, for a subagent, its parent's `group` if set, else the parent id; else, for an agent that another agent names as `parent`, its own id. The leader is the parent (in a group without one: the first member to sit). Team name on screens and in logs: the group as given, else `Tim <leader name>` (`Tim <parent id>` while the leader is unknown).
+
+**Meeting rule.** A team holds a meeting while it has at least one active subagent, or at least two active members (active = working, thinking, waiting, error). While it lasts these members sit in the team's room:
+- every subagent of the team that is not offline, also once it is done, until it is removed;
+- the leader in any status but offline (an idle leader waits for its subagents);
+- every other active member.
+
+Idle members without an active subagent do their idle activities as usual. Offline agents go to their desk as today. Where a member of a meeting works: meeting seat, then team station, then home desk (§10.1). The task-board pickup (deviation 14) still comes first: the agent carries the card to its seat and lays it on the table.
+
+**Rooms and seats.** Three rooms, Meeting A, B and C, with five seats each: the head seat at the back of the table, facing the camera (the leader), and two on each side, facing the table. A team gets the first free room (A, B, C) when its meeting starts. It keeps the room until the meeting is over and its last member has left. No free room: the team works as today (desks and stations), with one log line, and moves in as soon as a room is free. More than five members: the extra ones work as today.
+
+**Subagents without a desk.** A subagent that gets a seat when it first appears takes no desk. It pops in at its seat without walking (many subagents live only seconds), keeps the seat until it is removed, and does not count against the 9 desks. A subagent that gets no seat takes a desk as today (or is listed only when the desks are full). An agent with a desk walks back to its desk or station when its meeting is over. On connect, the snapshot places members of a meeting directly at their seats.
+
+**In the room.** Each seat has a laptop on the table. Seated members use the desk pose and the desk status overlays (typing, chin scratch, wave, smoke, sleep). Every 4 to 7 s one calm member (working or thinking) talks for 2 to 3 s: it turns to the table and gestures, and the others look at it. Chat balloons in a meeting use work lines (`aku cek bagian ini ya`, `tes-nya hijau!`, `bentar, aku baca dulu`, `siap, lanjut`, `aku ambil yang ini`, `oke, digabung ya`), and stay off while someone in the room waits or errors. When a subagent joins, a small card flies from the leader's seat to its seat (0.6 s). The room's accent strip takes the team color: the leader's dept color (§10.2) when it has one, else pink `#ff6fd8`.
+
+**Room screen.** On the back wall above the head seat. It shows the room name, then either `KOSONG` or the team name, the leader's task, up to five members (avatar color dot, name, status color, short task) and how long the meeting has run (`rapat 3 mnt`). Redrawn every 1 s while floor 4 is visible, and right away when the members change.
+
+**Log and roster.** Log lines under the name `Meeting`: `Rapat mulai: <team> di Meeting A`, `Rapat selesai: <team> (<n> mnt)`, `Ruang meeting penuh, <team> kerja di meja`. Movement lines as for any room (`Buru-buru ke Meeting A (Lt.4)`). Roster location chip: `Meeting A · Lt.4` with the activity `rapat <team>`; while walking `jalan ke Meeting A`.
+
+**Floors and views.** Floors stack at y = 0, 5.6, 11.2, 16.8. The floor switcher gets `Lt.4 Meeting` (order: Semua, Lt.4 Meeting, Lt.3 Security, Lt.2 Kantor, Lt.1 Santai) and must fit at 360 px wide. The Lt.4 view uses the Lt.3 camera raised by 5.6; Semua is re-framed to fit four floors. As with every floor, the floor above covers the one below in Semua. Floor 4 is on top, and floor 3 is seen through the open front and right walls, so the floor-3 back-wall displays (attack-surface wall, VA board, SOC wall, siren) are fully visible only in the Lt.3 view. Alerts still log and toast. Following an agent: floor 4 keeps Semua, every other floor switches to its own view. Bubbles: `Lt.N` badge in Semua for agents below floor 4; in the Lt.4 view bubbles of other floors are hidden (as in the Lt.3 view today); in the Lt.3 view agents on floor 4 are hidden. Floor 4 gets its own render pass (deviation 6), and the sky events use the new roof height.
+
+**Demo.** Glimbo sometimes delegates to 2 or 3 demo subagents (`parent: "glimbo"`) when it starts a new task; each works 20 to 45 s, sends `task_done` and is removed 8 s later. Plonk and Vexa sometimes share the group `Rilis v2.3` for one task.
+
+**Later (not in M8):** `group` in `rename` (§7.4) and in the Hermes "Sesi baru" form; clicking a room screen; nesting subagents under their parent in the roster (M2).
+
 ## 8. Claude Code integration
 
 ### 8.1 Mechanism
@@ -212,6 +251,8 @@ Install by merging `claude-hooks.settings.json` into `~/.claude/settings.json` (
 | Name | header `X-HQ-Name` from env `HQ_NAME`, else `<repo folder>#<4 of session_id>`; subagents use `agent_type` |
 | Role | header `X-HQ-Role` from env `HQ_ROLE`, else `Claude Code · <repo folder>` |
 | Team | header `X-HQ-Team` from env `HQ_TEAM` (optional) |
+| Group | header `X-HQ-Group` from env `HQ_GROUP` (optional, §7.9) |
+| Parent | subagents only: the main session's id `cc-<first 8 of session_id>` (§7.9) |
 
 Usage: `HQ_NAME=Rexx HQ_TEAM=red claude` in the repo you want to test. Headers use `allowedEnvVars`, so unset variables become empty strings and the server falls back.
 
@@ -253,7 +294,7 @@ Red Team activity must stay within properties the user owns or has written autho
 
 ## 9. World specification
 
-Cartoon cutaway building on a floating rock in an alien sky. Front and right walls are open. Floors stack at y = 0, 5.6, 11.2.
+Cartoon cutaway building on a floating rock in an alien sky. Front and right walls are open. Floors stack at y = 0, 5.6, 11.2, 16.8.
 
 ### Floor 1: Santai (idle activities)
 | Room | Spots (activity) |
@@ -268,11 +309,11 @@ Cartoon cutaway building on a floating rock in an alien sky. Front and right wal
 | Room | Content |
 |---|---|
 | Office | 9 home desks in a 3 x 3 grid (one per agent, max 9; more agents are listed in the roster only), monitor shows status, name plate, hover chair with status ring |
-| Ruang rapat | Whiteboard (corat-coret, strokes accumulate), card table with 2 stools (main kartu) |
+| Ruang kreatif | Whiteboard (corat-coret, strokes accumulate), card table with 2 stools (main kartu). Called "Ruang rapat" in the prototype; renamed for the meeting floor (§7.9): label `RUANG KREATIF`, roster `Ruang Kreatif` |
 | Pojok baca | Bookshelf, 2 armchairs (baca buku) |
 | Server room | Server monitor (§7.8): left rack CPU, right rack RAM, tank disk, wall screen with the numbers; a click opens the Server panel. Without data: racks with blinking LEDs, bubbling tank (decor, as in the prototype) |
 | Hall jendela | 2 window spots (bengong lihat planet) |
-| Lift | Glass tube to floor 3 |
+| Lift | Glass tube to floors 3 and 4, label `LIFT KE LT.3 & 4` |
 
 ### Floor 3: Security Ops
 | Room | Stations | Displays |
@@ -281,7 +322,16 @@ Cartoon cutaway building on a floating rock in an alien sky. Front and right wal
 | Ruang Laporan VA | 3 | Severity board (counts and latest 5 findings), printer that prints while someone writes |
 | SOC Blue Team | 4 | Video wall (failed logins per minute with threshold 25, alert list, flashing banner), siren with rotating beams and red room light |
 
-Stations face the back wall so the camera sees agents and their monitors over their shoulders.
+Stations face the back wall so the camera sees agents and their monitors over their shoulders. The lift continues through floor 3 to floor 4.
+
+### Floor 4: Meeting (§7.9)
+| Room | Content |
+|---|---|
+| Meeting A, B, C | Side by side along the back wall, low glass partitions between them, open to the corridor. Table with five seats and laptops (head seat at the back facing the camera, two per side), room screen on the back wall, accent strip in the team color, rug per room |
+| Corridor | In front of the rooms, from the lift. Sign `MEETING` on the left wall, alien plants |
+| Lift | Top stop of the glass tube |
+
+Labels: `MEETING A`, `MEETING B`, `MEETING C`, `LIFT`.
 
 ## 10. Agent behavior
 
@@ -289,10 +339,11 @@ Stations face the back wall so the camera sees agents and their monitors over th
 ```
 status idle (for >= 3 s)        -> random free idle spot; every 30-60 s maybe switch spot
 status working/thinking/
-  waiting/error                 -> team station if team known and a station is free, else home desk
+  waiting/error                 -> meeting seat if the agent's team is in a meeting (§7.9),
+                                   else team station if team known and a station is free, else home desk
 status offline                  -> home desk, eyes closed
 ```
-Leaving for work is urgent (runs), leaving for a break is a stroll.
+Leaving for work is urgent (runs), leaving for a break is a stroll. Exception: an idle leader whose team still has an active subagent stays at its meeting seat.
 
 ### 10.2 Team inference
 1. Explicit `team` field or `X-HQ-Team` header wins (`office` forces the home desk).
@@ -305,7 +356,7 @@ Keyword sets (case-insensitive):
 - report: laporan, report (word), vulnerability assessment, va, cvss, temuan, executive summary, remediasi, remediation, poc
 
 ### 10.3 Navigation
-- Waypoint graph per floor plus vertical links (stairs F1 to F2, lift F2 to F3). Dijkstra shortest path.
+- Waypoint graph per floor plus vertical links (stairs F1 to F2, lift F2 to F3 to F4). Dijkstra shortest path.
 - Every place (desk, station, spot) is a chain `hub -> via points -> final position` with a facing angle. Paths never cut through walls or furniture.
 - Redirect mid-walk: retrace to the last reached waypoint, then re-route.
 - Spot and station reservation: one agent per place.
@@ -316,8 +367,8 @@ Poses: desk, walk, stand, sit (sofa, armchair), stool, recline (beanbag), lie (f
 
 ## 11. UI specification
 
-- **Top bar:** logo, floor switcher (Semua, Lt.3 Security, Lt.2 Kantor, Lt.1 Santai), status chips with counts, connection pill (Mode demo, Live, Terputus), home camera button, Sambungkan button.
-- **Floor switcher:** hides floors above the chosen one (Sims style) and flies the camera. Bubbles of agents on other floors get an `Lt.N` badge in overview modes and are hidden on Lt.3.
+- **Top bar:** logo, floor switcher (Semua, Lt.4 Meeting, Lt.3 Security, Lt.2 Kantor, Lt.1 Santai), status chips with counts, connection pill (Mode demo, Live, Terputus), home camera button, Sambungkan button.
+- **Floor switcher:** hides floors above the chosen one (Sims style) and flies the camera. Bubbles of agents on other floors get an `Lt.N` badge in overview modes and are hidden on Lt.3 and Lt.4 (§7.9).
 - **Roster (right):** one card per agent: color dot, name, role, status pill, task, location chip (room and floor) plus activity, tokens and last update. Click expands progress bar and last 12 events, and focuses the camera.
 - **Log (bottom left):** timestamped lines. Filters: "Jalan" toggles movement lines, "Error saja" shows only errors and alerts. Max 220 lines.
 - **Bubbles:** status icon, name, and context (activity when idle, destination when walking, task when waiting, error, or selected).
@@ -442,6 +493,15 @@ Decisions:
 - [x] Warnings in the log and as a toast (CPU 90% for 60 s, RAM 90%, disk 90%), back-to-normal line below 85%.
 - [x] Server panel (`components/ServerPanel.tsx`): a click on the server room in the Lt.2 view opens it; values, 30 minute charts, server warnings.
 - [x] Tests: sampler, parsing and routes (`tests/unit/server-stats.test.ts`), levels, formatting, warnings and store (`tests/unit/server.test.ts`), samples over `next start` and `HQ_SERVER_STATS=0` (`tests/integration/server-stats.test.ts`), parity ignores `server_stats`, the visual test hides the monitor, the UI test clicks the server room and checks the panel (`tests/e2e/ui.spec.ts`).
+
+### M8. Meeting floor (§7.9)
+- [x] Protocol: `parent` and `group` normalized (`lib/events.ts`); the hook translation sets `parent` for subagents and reads `X-HQ-Group`; the hub keeps both in its agent state and snapshot. `X-HQ-Group` / `HQ_GROUP` added to `examples/claude-hooks.settings.json`, the Hermes hook and its installer.
+- [x] Team key, meeting rule, room and seat assignment as pure functions (`lib/meeting.ts`), applied by the store (`meeting` per agent, like `slot`); subagents seated without a desk.
+- [x] Floor 4 (`engine/world/floor4.ts`), lift through floor 3, nav nodes and seat places, movement order (meeting seat, station, desk), room screens (`engine/displays/meeting.ts`), talking turns, meeting chat lines, delegation card.
+- [x] Floor switcher, camera presets, follow cam, bubble badges, fourth render pass, sky placement for the taller building, `engine.debug.hideMeetingFloor()`.
+- [x] Floor 2 "Ruang Rapat" renamed "Ruang Kreatif" (label and roster).
+- [x] Demo: Glimbo delegates, Plonk and Vexa share `Rilis v2.3`.
+- [x] Tests (`tests/unit/meeting.test.ts`, `tests/unit/meeting-nav.test.ts`, parity and Hermes integration, `tests/e2e/visual.spec.ts` "meeting floor", `tests/e2e/ui.spec.ts`): normalization and hooks (`parent`, `group`, snapshot); store (team key, meeting start and end, room order, head seat, idle leader stays, idle group member leaves, rooms full, more than five members, desk-less subagent, seat freed on remove, meeting before station); nav (every desk, station and spot to every seat and back through the lift, no wall crossing); parity ignores `parent` and `group`; visual: the four prototype views with floor 4 hidden, a new Lt.4 baseline, a meeting placed via `window.agentHQ` for manual review; the floor switcher fits at 360 px; dispose frees floor 4.
 
 ### M5. Polish
 - [ ] Follow-cam toggle for the selected agent.

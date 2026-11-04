@@ -3,7 +3,8 @@
 // Reservations (occ) are per engine instance: create fresh objects with createSpots()/createDeskPlaces().
 
 import * as THREE from "three";
-import { F2, F3, type Activity } from "../constants";
+import { F2, F3, F4, type Activity } from "../constants";
+import { MEETING_ROOMS, SEATS_PER_ROOM } from "@/lib/meeting";
 import type { Dept } from "@/lib/teams";
 import { DEPTS } from "@/lib/teams";
 
@@ -40,7 +41,16 @@ export interface BoardPlace extends PlaceBase {
   /** Slot index 0..2, matching the card pinned in front of it. */
   index: number;
 }
-export type Place = SpotPlace | DeskPlace | StationPlace | BoardPlace;
+/** Meeting floor seat (prd.md §7.9). Assigned by the store (Agent.meeting), not picked by the engine. */
+export interface SeatPlace extends PlaceBase {
+  kind: "seat";
+  /** Room 0..2 (Meeting A, B, C) and seat 0..4 (0 = head seat). */
+  roomIndex: number;
+  seat: number;
+  /** roomIndex * SEATS_PER_ROOM + seat. */
+  index: number;
+}
+export type Place = SpotPlace | DeskPlace | StationPlace | BoardPlace | SeatPlace;
 
 const PI = Math.PI;
 type XZ = [number, number];
@@ -69,9 +79,10 @@ export function createSpots(): SpotPlace[] {
   // Lt.2
   spot("winA", "Jendela", 2, "Top2", [[10.4, -5.6]], [10.4, -6.95], PI, ["gaze"], "stand");
   spot("winB", "Jendela", 2, "Top2", [[12.1, -5.6]], [12.1, -6.95], PI, ["gaze"], "stand");
-  spot("board", "Ruang Rapat", 2, "Kf2", [[-10.0, 5.0]], [-11.6, 6.3], -PI / 2, ["whiteboard"], "stand");
-  spot("cardL", "Ruang Rapat", 2, "Kf2", [[-10.0, 5.0]], [-9.4, 6.4], PI / 2, ["cards"], "stool");
-  spot("cardR", "Ruang Rapat", 2, "Kf2", [[-6.4, 5.0]], [-7.0, 6.4], -PI / 2, ["cards"], "stool");
+  // "Ruang Rapat" in the prototype, renamed for the meeting floor (deviation 24).
+  spot("board", "Ruang Kreatif", 2, "Kf2", [[-10.0, 5.0]], [-11.6, 6.3], -PI / 2, ["whiteboard"], "stand");
+  spot("cardL", "Ruang Kreatif", 2, "Kf2", [[-10.0, 5.0]], [-9.4, 6.4], PI / 2, ["cards"], "stool");
+  spot("cardR", "Ruang Kreatif", 2, "Kf2", [[-6.4, 5.0]], [-7.0, 6.4], -PI / 2, ["cards"], "stool");
   spot("readA", "Pojok Baca", 2, "Kf1", [[-4.4, 7.5], [-2.2, 7.5]], [-2.2, 6.85], 0, ["read"], "sit");
   spot("readB", "Pojok Baca", 2, "Kf1", [[-4.4, 7.5], [0.6, 7.5]], [0.6, 6.85], 0, ["read"], "sit");
   return out;
@@ -146,4 +157,47 @@ export function createBoardSlots(): BoardPlace[] {
     kind: "board", index, room: "Papan Tugas", floor: 2, hub: officeNode(DESK_ROWS[1].aisle, BOARD_X),
     via: [], final: new THREE.Vector3(BOARD_X, F2, z), face: -PI / 2, occ: null,
   }));
+}
+
+/* ---------------- floor 4: meeting rooms (prd.md §7.9) ---------------- */
+
+/** Room centers along x (Meeting A, B, C). Rooms run from the back wall (z -7.6) to the corridor (z 1.0). */
+export const ROOM_XS = [-8.4, 0, 8.6];
+/** Room walls between the rooms (glass partitions), x. */
+export const ROOM_WALLS = [-4.2, 4.2];
+/** Table center z, half sizes. Seats sit 0.4 from its edge, like a desk chair. */
+export const TABLE_Z = -3.6;
+export const TABLE_HALF_X = 0.9;
+export const TABLE_HALF_Z = 1.6;
+/** Corridor walkway in front of the rooms (graph nodes M0..M2) and the lanes beside / behind each table. */
+export const CORRIDOR_Z = 2.6;
+const LANE_X = 2.3, ENTRY_Z = -0.8, BACK_Z = -6.7;
+/** Seat 0 at the back facing the camera, then left front/back and right front/back facing the table. */
+export const SEAT_LAYOUT: { dx: number; z: number; face: number }[] = [
+  { dx: 0, z: TABLE_Z - TABLE_HALF_Z - 0.4, face: 0 },
+  { dx: -(TABLE_HALF_X + 0.4), z: TABLE_Z + 0.8, face: PI / 2 },
+  { dx: -(TABLE_HALF_X + 0.4), z: TABLE_Z - 0.8, face: PI / 2 },
+  { dx: TABLE_HALF_X + 0.4, z: TABLE_Z + 0.8, face: -PI / 2 },
+  { dx: TABLE_HALF_X + 0.4, z: TABLE_Z - 0.8, face: -PI / 2 },
+];
+export const roomNode = (room: number) => `M${room}`;
+
+/** All 15 seats, index = room * 5 + seat. Paths keep to the lanes beside the table, never across it. */
+export function createSeats(): SeatPlace[] {
+  const out: SeatPlace[] = [];
+  ROOM_XS.forEach((cx, roomIndex) => {
+    SEAT_LAYOUT.slice(0, SEATS_PER_ROOM).forEach((s, seat) => {
+      const side = seat === 0 ? -1 : Math.sign(s.dx);
+      const lane = cx + side * LANE_X;
+      const via = seat === 0
+        ? [[lane, ENTRY_Z], [lane, BACK_Z], [cx, BACK_Z]]
+        : [[lane, ENTRY_Z], [lane, s.z]];
+      out.push({
+        kind: "seat", roomIndex, seat, index: roomIndex * SEATS_PER_ROOM + seat, room: MEETING_ROOMS[roomIndex], floor: 4,
+        hub: roomNode(roomIndex), via: via.map(([x, z]) => new THREE.Vector3(x, F4, z)),
+        final: new THREE.Vector3(cx + s.dx, F4, s.z), face: s.face, occ: null,
+      });
+    });
+  });
+  return out;
 }

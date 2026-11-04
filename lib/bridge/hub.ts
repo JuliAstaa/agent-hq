@@ -1,9 +1,11 @@
-// In-memory event hub (port of the state half of references/server.js).
+// Event hub (port of the state half of references/server.js), with restart snapshots on disk.
 // Lives on globalThis so it survives `next dev` reloads and is shared by every route bundle.
 // Plus agent renames (not in the prototype): identity overrides by id, see ./overrides.ts.
 
 import { normalizeServerStats, serverPoint, trimHistory, type ServerPoint } from "../server";
+import { redact, trunc } from "./redact";
 import { IDENTITY_FIELDS, loadOverrides, mergeOverride, namesFile, saveOverrides, type Identity, type Override } from "./overrides";
+import { loadSnapshot, saveSnapshot, stateFile, type Removal } from "./persistence";
 
 export type BridgeEvent = Record<string, unknown>;
 export type Send = (ev: BridgeEvent) => void;
@@ -55,6 +57,10 @@ interface Hub {
   /** id -> timestamp of the last event (auto-remove of silent subagents). */
   lastSeen: Map<string, number>;
   removeTimers: Map<string, ReturnType<typeof setTimeout>>;
+  /** Removal deadlines survive restarts without giving completed sessions a new grace period. */
+  removals: Map<string, Removal>;
+  persistenceFile: string | null;
+  persistenceWarned: boolean;
   subs: Set<Send>;
   /** id -> pinned name/role/team (rename), persisted in `overridesFile`. */
   overrides: Map<string, Override>;
@@ -66,18 +72,26 @@ interface Hub {
 }
 
 const g = globalThis as unknown as { __hq?: Hub };
-export const hub: Hub = (g.__hq ??= {
-  agents: new Map(),
-  recent: [],
-  lastSeen: new Map(),
-  removeTimers: new Map(),
-  subs: new Set(),
-  overrides: loadOverrides(),
-  overridesFile: namesFile(),
-  sourceIdentity: new Map(),
-  cron: newCronHub(),
-  server: newServerHub(),
-});
+function createHub(): Hub {
+  const file = stateFile();
+  const saved = loadSnapshot(file);
+  return {
+    agents: new Map(saved?.agents.map((a) => [String(a.id), a])),
+    recent: saved?.recent ?? [],
+    lastSeen: new Map(saved?.lastSeen),
+    removeTimers: new Map(),
+    removals: new Map(saved?.removals),
+    persistenceFile: file,
+    persistenceWarned: false,
+    subs: new Set(),
+    overrides: loadOverrides(),
+    overridesFile: namesFile(),
+    sourceIdentity: new Map(saved?.sourceIdentity),
+    cron: newCronHub(),
+    server: newServerHub(),
+  };
+}
+export const hub: Hub = (g.__hq ??= createHub());
 // A hub kept on globalThis by an older bundle (next dev reload) may predate the rename fields.
 if (!hub.overrides) {
   hub.overridesFile = namesFile();
@@ -87,8 +101,31 @@ hub.sourceIdentity ??= new Map();
 hub.cron ??= newCronHub();
 hub.server ??= newServerHub();
 hub.server.history ??= [];
+hub.removals ??= new Map();
+if (hub.persistenceFile === undefined) hub.persistenceFile = stateFile();
 
-const AGENT_KEYS = ["name", "role", "status", "state", "task", "current_task", "progress", "tokens", "cost", "team"];
+/** Synchronous, atomic checkpoint: even a forced process restart keeps the last accepted agent event. */
+function persistHub(): void {
+  if (!hub.persistenceFile) return;
+  try {
+    saveSnapshot(hub.persistenceFile, {
+      version: 1,
+      agents: [...hub.agents.values()],
+      recent: hub.recent,
+      lastSeen: [...hub.lastSeen],
+      sourceIdentity: [...hub.sourceIdentity],
+      removals: [...hub.removals],
+    });
+    hub.persistenceWarned = false;
+  } catch {
+    // Storage failures must not break hooks or live updates. Retry on the next event.
+    if (!hub.persistenceWarned) console.warn("[hq] snapshot agen gagal disimpan; periksa izin dan ruang disk HQ_STATE_FILE");
+    hub.persistenceWarned = true;
+  }
+}
+
+// parent and group (prd.md §7.9) are not in references/server.js; the parity test ignores them.
+const AGENT_KEYS = ["name", "role", "status", "state", "task", "current_task", "progress", "tokens", "cost", "team", "parent", "group"];
 
 export const idOf = (ev: BridgeEvent): string => String(ev.id ?? ev.agent_id ?? ev.agentId ?? ev.agent ?? ev.name ?? "agent");
 
@@ -115,6 +152,10 @@ export function remember(ev: BridgeEvent): void {
   if (type === "remove") {
     hub.agents.delete(id);
     hub.lastSeen.delete(id);
+    hub.sourceIdentity.delete(id);
+    clearTimeout(hub.removeTimers.get(id));
+    hub.removeTimers.delete(id);
+    hub.removals.delete(id);
     return;
   }
   if (["log", "finding", "alert", "metric"].includes(type)) {
@@ -165,8 +206,12 @@ function applyIdentity(ev: BridgeEvent): void {
 
 export function publish(ev: BridgeEvent): void {
   ev.ts = ev.ts || new Date().toISOString();
+  // Meeting group (prd.md §7.9): a free label from any source, so it is redacted and cut like a name.
+  if (typeof ev.group === "string") ev.group = trunc(redact(ev.group), 40);
   applyIdentity(ev);
   remember(ev);
+  // Live server metrics and schedule commands are unrelated to agent restart state.
+  if (!["server_stats", "schedule", "cron_command"].includes(String(ev.type || "").toLowerCase())) persistHub();
   broadcast(ev);
 }
 
@@ -276,10 +321,19 @@ export function reloadOverrides(file = namesFile()): void {
 export function scheduleRemove(id: string, ms: number): void {
   clearTimeout(hub.removeTimers.get(id));
   const mark = Date.now();
+  const removal = { mark, at: mark + ms };
+  hub.removals.set(id, removal);
+  armRemoval(id, removal);
+  persistHub();
+}
+
+function armRemoval(id: string, { mark, at }: Removal): void {
   const timer = setTimeout(() => {
     hub.removeTimers.delete(id);
+    hub.removals.delete(id);
     if ((hub.lastSeen.get(id) || 0) <= mark + 50) publish({ type: "remove", id });
-  }, ms);
+    else persistHub();
+  }, Math.max(0, at - Date.now()));
   timer.unref?.();
   hub.removeTimers.set(id, timer);
 }
@@ -291,6 +345,7 @@ export function resetHub(): void {
   hub.recent.length = 0;
   hub.lastSeen.clear();
   hub.removeTimers.clear();
+  hub.removals.clear();
   hub.subs.clear();
   hub.sourceIdentity.clear();
   for (const wake of hub.cron.waiters) wake();
@@ -298,3 +353,20 @@ export function resetHub(): void {
   if (hub.server.timer) clearTimeout(hub.server.timer);
   hub.server = newServerHub();
 }
+
+// Restore timers once per process, never once per route bundle/HMR. Expired agents must not enter snapshots.
+let expired = false;
+for (const [id, removal] of hub.removals) {
+  if (hub.removeTimers.has(id)) continue;
+  if ((hub.lastSeen.get(id) || 0) > removal.mark + 50) {
+    hub.removals.delete(id);
+    expired = true;
+  } else if (removal.at <= Date.now()) {
+    hub.agents.delete(id);
+    hub.lastSeen.delete(id);
+    hub.sourceIdentity.delete(id);
+    hub.removals.delete(id);
+    expired = true;
+  } else armRemoval(id, removal);
+}
+if (expired) persistHub();

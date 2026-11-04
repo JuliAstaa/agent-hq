@@ -4,6 +4,7 @@
 
 import { normalizeCronCommand, normalizeSchedule, type CronCmd, type CronState } from "./cron";
 import { normalizeServerStats, type ServerHistoryPoint, type ServerStats } from "./server";
+import { normalizeGroup, normalizeParent } from "./meeting";
 import { normalizeTeam, type Dept } from "./teams";
 
 export type Status = "working" | "thinking" | "waiting" | "idle" | "error" | "offline";
@@ -75,6 +76,10 @@ export interface AgentPatch {
   task?: string;
   /** Present when team/room/dept is given. null = office (forces the home desk). */
   team?: Dept | null;
+  /** Present when given: id of the delegating agent (prd.md §7.9); null clears it. */
+  parent?: string | null;
+  /** Present when given: shared work group (prd.md §7.9); null clears it. */
+  group?: string | null;
   tokens?: number;
   tokensDelta?: number;
   cost?: number;
@@ -142,6 +147,8 @@ function agentPatch(ev: RawEvent, type: string, id: string, now: number): AgentP
   if (ev.role) p.role = String(ev.role);
   if (task !== undefined) p.task = String(task);
   if (team !== undefined) p.team = normalizeTeam(team);
+  if (ev.parent !== undefined) p.parent = normalizeParent(ev.parent, id);
+  if (ev.group !== undefined) p.group = normalizeGroup(ev.group);
   if (ev.tokens !== undefined) p.tokens = Number(ev.tokens) || 0;
   if (ev.tokens_delta !== undefined) p.tokensDelta = Number(ev.tokens_delta) || 0;
   if (ev.cost !== undefined) p.cost = Number(ev.cost);

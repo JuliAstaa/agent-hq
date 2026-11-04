@@ -5,6 +5,7 @@ import { useStore } from "zustand";
 import { STATUS } from "@/lib/events";
 import { ago, fmtNum, fmtTime } from "@/lib/format";
 import { avatarColor, deskLessColor } from "@/lib/palette";
+import { MEETING_ROOMS } from "@/lib/meeting";
 import { renameAgent, type RenamePatch } from "@/lib/rename";
 import { hqStore, type Agent } from "@/lib/store";
 import { DEPTS, type Dept } from "@/lib/teams";
@@ -100,7 +101,7 @@ function AgentCard({ a, selected, now }: { a: Agent; selected: boolean; now: num
   }, [selected]);
 
   const st = STATUS[a.status];
-  const loc = a.loc ?? (a.slot == null ? { where: "Tanpa meja", what: "" } : { where: "Meja kerja · Lt.2", what: "" });
+  const loc = a.loc ?? (a.meeting ? { where: `${MEETING_ROOMS[a.meeting.room]} · Lt.4`, what: `rapat ${a.meeting.team}` } : a.slot == null ? { where: "Tanpa meja", what: "" } : { where: "Meja kerja · Lt.2", what: "" });
   const pct = a.progress == null ? null : Math.round(a.progress * 100);
   const events = a.events.slice(-12).reverse();
   return (
@@ -119,7 +120,7 @@ function AgentCard({ a, selected, now }: { a: Agent; selected: boolean; now: num
       <div className="flex items-center gap-2">
         <span
           className="relative flex-none w-[26px] h-[26px] rounded-full border-[2.5px] border-ink after:content-[''] after:absolute after:w-2 after:h-2 after:rounded-full after:bg-white after:border-2 after:border-ink after:top-[5px] after:left-[6px]"
-          style={{ background: a.slot != null ? avatarColor(a.id) : deskLessColor(a.id) }}
+          style={{ background: a.slot != null || a.meeting ? avatarColor(a.id) : deskLessColor(a.id) }}
         />
         <span className="font-bold text-[15px]">{a.name}</span>
         <span className="text-[12px] opacity-65 flex-1 whitespace-nowrap overflow-hidden text-ellipsis">{a.role}</span>

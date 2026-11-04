@@ -128,7 +128,8 @@ suite("Hermes shell hook (hq_hook.py)", { timeout: 30_000 }, () => {
     run({ hook_event_name: "on_session_start" });
     const SUB = subId("sa-1");
     expect(run({ hook_event_name: "subagent_start", session_id: null, extra: { parent_session_id: SID, child_session_id: "child-77", child_subagent_id: "sa-1", child_role: "leaf", child_goal: "cari bug di keranjang" } })).toEqual([
-      { type: "agent_update", id: SUB, name: "cari bug di keran…", role: "Subagen · shop-api", source: "claude-code", status: "working", task: "Subagen cari bug di keranjang mulai" },
+      // parent: the main character (meeting floor, prd.md §7.9)
+      { type: "agent_update", id: SUB, name: "cari bug di keran…", role: "Subagen · shop-api", parent: ID, source: "claude-code", status: "working", task: "Subagen cari bug di keranjang mulai" },
     ]);
     expect(run({ hook_event_name: "pre_tool_call", session_id: "child-77", tool_name: "search_files", tool_input: { pattern: "TODO", target: "content" } })).toEqual([
       expect.objectContaining({ id: SUB, status: "working", task: 'Cari "TODO"' }),

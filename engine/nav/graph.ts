@@ -1,9 +1,9 @@
-// Waypoint graph per floor plus vertical links (stairs F1->F2, lift F2->F3) and Dijkstra (prd.md §10.3).
+// Waypoint graph per floor plus vertical links (stairs F1->F2, lift F2->F3->F4) and Dijkstra (prd.md §10.3).
 // Pure module data: node vectors are never mutated.
 
 import * as THREE from "three";
-import { F2, F3 } from "../constants";
-import { BOARD_X, DESK_GAPS, DESK_ROWS, DESK_XS, officeNode } from "./places";
+import { F2, F3, F4 } from "../constants";
+import { BOARD_X, CORRIDOR_Z, DESK_GAPS, DESK_ROWS, DESK_XS, officeNode, ROOM_XS, roomNode } from "./places";
 
 export const N: Record<string, THREE.Vector3> = {};
 export const ADJ: Record<string, string[]> = {};
@@ -24,12 +24,16 @@ node("K1", 3.6, F2, -6.6); node("K2", 3.6, F2, -3.0); node("K3", 3.6, F2, 0.6); 
 node("Kf1", -4.4, F2, 4.0); node("Kf2", -9.0, F2, 4.0);
 node("Lift2a", 5.4, F2, 4.0); node("Lift2", 6.8, F2, 4.8); node("Lift3", 6.8, F3, 4.8); node("X3", 5.4, F3, 4.0);
 node("RPH", 0, F3, 2.2); node("RH", -4.9, F3, 2.2); node("BH", 8.3, F3, 2.4);
+// Floor 4 meeting rooms (prd.md §7.9): the lift continues up; a corridor runs past the three room entrances.
+node("Lift4", 6.8, F4, 4.8); node("X4", 5.4, F4, 4.0);
+ROOM_XS.forEach((x, i) => node(roomNode(i), x, F4, CORRIDOR_Z));
 (
   [
     ["H1", "LH"], ["H1", "PH"], ["H1", "GH"], ["H1", "NH"], ["H1", "L1a"], ["LH", "PH"], ["LH", "NH"], ["PH", "GH"],
     ["L1a", "Land1"], ["Land1", "SB"], ["SB", "ST"], ["ST", "Top2"], ["Top2", "HL"], ["HL", "K3"],
     ["K1", "K2"], ["K2", "K3"], ["K3", "K4"],
     ["K4", "Lift2a"], ["HL", "Lift2a"], ["Lift2a", "Lift2"], ["Lift2", "Lift3"], ["Lift3", "X3"], ["X3", "BH"], ["X3", "RPH"], ["RPH", "RH"],
+    ["Lift3", "Lift4"], ["Lift4", "X4"], ["X4", "M1"], ["X4", "M2"], ["M0", "M1"], ["M1", "M2"],
   ] as const
 ).forEach(([a, b]) => link(a, b));
 

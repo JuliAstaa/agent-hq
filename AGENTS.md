@@ -76,8 +76,11 @@ tests/          unit/, integration/, e2e/, fixtures/*.jsonl
 - Floors are rendered in separate passes by `renderFloors()` (approved deviation 6 in `plan-m1.md`): each pass
   re-renders the sun's shadow map with only that floor's objects, so nothing shadows another floor through a slab.
   Do not merge back into a single `effect.render`. New world-root objects must be assigned to a pass in `bandOf`.
+  There are four passes since the meeting floor (floor 4, group `g4`, prd.md §7.9); `engine.debug.hideMeetingFloor`
+  restores the prototype's three floors and Semua camera for the visual parity test.
 - Keep the prototype's redraw rates: desk screens, TV, arcade every 120 ms; floor 3 displays every 150 ms
   and only while floor 3 is visible; whiteboard every 90 ms; mission board and roster "ago" text every 1 s.
+  Meeting room screens (floor 4): every 1 s while floor 4 is visible, and right away when the members change.
 - Do not chase identical `Math.random()` call order with the prototype. Randomness (books, stars, plants,
   demo) may differ; layout, geometry, colors, and behavior may not.
 
@@ -86,6 +89,8 @@ tests/          unit/, integration/, e2e/, fixtures/*.jsonl
 - React writes `floorMode` and `selectedId`. The engine reads them.
 - The engine writes derived per-agent data (location, activity, floor) at most every 250 ms, only on change.
 - One-shot effects (confetti, squash, snapshot placement, removal) go through the engine event bus, not store state.
+- The store assigns desks (`slot`) and meeting seats (`meeting`, from `lib/meeting.ts`, recomputed after every
+  agent event). The engine never picks a meeting seat; it shows an agent while it has a desk or a seat.
 
 ### Bridge (`lib/bridge/`, `app/api/`)
 - Same payloads in, same SSE out as `references/server.js`. Parity is checked by replaying fixtures to both.

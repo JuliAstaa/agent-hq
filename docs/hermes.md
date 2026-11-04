@@ -530,6 +530,7 @@ dari shell hanya sampai ke sesi CLI, tidak ke gateway dan tidak ke server MCP. J
 | `HQ_NAME` | `<folder>#xxxx` | nama karakter (huruf Latin; nama lain lewat ✎) |
 | `HQ_ROLE` | `Hermes · <folder>` | peran di kartu agen |
 | `HQ_TEAM` | kosong | `red`, `report`, `blue`: agen pindah ke ruangannya di Lt.3 |
+| `HQ_GROUP` | kosong | grup kerja: sesi dengan grup yang sama rapat bersama di Lt.4 Meeting (subagen ikut otomatis, tanpa variabel ini) |
 | `HQ_TIMEOUT` | `1.5` | batas tunggu kirim ke Agent HQ, dalam detik |
 | `HQ_ANNOUNCE` | mati | khusus MCP tanpa hook: karakter muncul begitu Hermes menyala |
 | `HQ_DISABLE` | mati | `1` mematikan hook, MCP, dan reporter jadwal tanpa mengubah `config.yaml` |

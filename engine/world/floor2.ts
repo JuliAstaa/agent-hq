@@ -184,7 +184,7 @@ export function buildFloor2Props(b: Build, g2: THREE.Group, tentacles: THREE.Gro
     };
     clockHands = { h: mk(0.42, 0.08, INK), m: mk(0.6, 0.05, INK), s: mk(0.65, 0.025, "#ff4f5e") };
   }
-  // ruang rapat: whiteboard + card table
+  // ruang kreatif (prototype: ruang rapat): whiteboard + card table
   let wb: Floor2Props["wb"];
   {
     const w = canvasTex(512, 320);
@@ -203,7 +203,7 @@ export function buildFloor2Props(b: Build, g2: THREE.Group, tentacles: THREE.Gro
       const c = mesh(rbox(0.16, 0.012, 0.22, 0.005), noLine(toon("#fff6e3")), false, false);
       c.position.set(-8.3 + (i - 2) * 0.08, F2 + 0.99 + i * 0.004, 6.4 + (i % 2) * 0.05); c.rotation.y = i * 0.3; g2.add(c);
     }
-    roomLabel(b, g2, "RUANG RAPAT", -9.0, F2 + 0.2, 7.8, 2);
+    roomLabel(b, g2, "RUANG KREATIF", -9.0, F2 + 0.2, 7.8, 2); // "RUANG RAPAT" in the prototype (deviation 24)
   }
   // pojok baca
   {

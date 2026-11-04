@@ -13,15 +13,24 @@ import { pick, rand, type CanvasTex } from "../scene/kit";
 import type { Floor2Props } from "../world/floor2";
 import type { Desk } from "../world/props/desk";
 
+/** Where an agent works away from its desk: a floor-3 station or a floor-4 meeting seat (prd.md §7.9). */
+function awayRoom(mv: AgentRuntime["mv"]): { label: string; color: string; room: string } | null {
+  if (mv.dest.kind === "station") return { label: "DI LT.3", color: DEPTS[mv.dest.dept].color, room: mv.dest.room };
+  if (mv.dest.kind === "seat") return { label: "DI LT.4", color: "#ff6fd8", room: mv.dest.room };
+  return null;
+}
+
 export function drawScreen(F: Fonts, rt: AgentRuntime, a: Agent, t: number) {
+  if (!rt.desk) return; // a subagent seated without a desk (prd.md §7.9)
   const { ctx, tex } = rt.desk.scr, W = 256, H = 160;
   const st = a.status, col = STATUS[st].color, mv = rt.mv, away = mv.mode !== "desk";
+  const there = awayRoom(mv);
   ctx.fillStyle = st === "offline" ? "#0b0816" : "#150e2c";
   ctx.fillRect(0, 0, W, H);
   ctx.textAlign = "left";
-  if (st === "working" && away && mv.dest.kind === "station") {
-    ctx.fillStyle = DEPTS[mv.dest.dept].color; ctx.font = `40px ${F.bungee}`; ctx.textAlign = "center"; ctx.fillText("DI LT.3", W / 2, 80);
-    ctx.font = `600 20px ${F.fredoka}`; ctx.fillStyle = "#fff6e3"; ctx.fillText(mv.dest.room, W / 2, 118);
+  if (st === "working" && away && there) {
+    ctx.fillStyle = there.color; ctx.font = `40px ${F.bungee}`; ctx.textAlign = "center"; ctx.fillText(there.label, W / 2, 80);
+    ctx.font = `600 20px ${F.fredoka}`; ctx.fillStyle = "#fff6e3"; ctx.fillText(there.room, W / 2, 118);
   } else if (st === "working" && !away) {
     const off = (t * 40) % 18;
     for (let i = 0; i < 11; i++) {
@@ -45,9 +54,9 @@ export function drawScreen(F: Fonts, rt: AgentRuntime, a: Agent, t: number) {
     ctx.fillStyle = col; ctx.font = `72px ${F.bungee}`; ctx.textAlign = "center"; ctx.fillText("?", W / 2, 90 + Math.sin(t * 4) * 6);
     ctx.font = `600 20px ${F.fredoka}`; ctx.fillText("butuh input", W / 2, 135);
   } else if (st !== "offline") {
-    if (away && mv.dest.kind === "station") {
-      ctx.fillStyle = DEPTS[mv.dest.dept].color; ctx.font = `44px ${F.bungee}`; ctx.textAlign = "center"; ctx.fillText("DI LT.3", W / 2, 80);
-      ctx.font = `600 20px ${F.fredoka}`; ctx.fillStyle = "#fff6e3"; ctx.fillText(mv.dest.room, W / 2, 118);
+    if (away && there) {
+      ctx.fillStyle = there.color; ctx.font = `44px ${F.bungee}`; ctx.textAlign = "center"; ctx.fillText(there.label, W / 2, 80);
+      ctx.font = `600 20px ${F.fredoka}`; ctx.fillStyle = "#fff6e3"; ctx.fillText(there.room, W / 2, 118);
     } else if (away && (mv.fetching || mv.carrying)) {
       ctx.fillStyle = "#ffd23f"; ctx.font = `34px ${F.bungee}`; ctx.textAlign = "center"; ctx.fillText("TUGAS BARU", W / 2, 82 + Math.sin(t * 4) * 3);
       ctx.font = `600 18px ${F.fredoka}`; ctx.fillStyle = "#fff6e3"; ctx.fillText(mv.carrying ? "lagi dibawa ke meja" : "diambil di papan", W / 2, 120);
@@ -94,6 +103,7 @@ export function drawTaskBoard(F: Fonts | null, face: CanvasTex) {
 }
 
 export function drawPlate(F: Fonts, rt: AgentRuntime, a: Agent) {
+  if (!rt.desk) return;
   const { ctx, tex } = rt.desk.plate;
   ctx.fillStyle = "#fff6e3"; ctx.fillRect(0, 0, 256, 64);
   ctx.fillStyle = "#1b1530"; ctx.font = `30px ${F.bungee}`; ctx.textAlign = "center"; ctx.textBaseline = "middle";

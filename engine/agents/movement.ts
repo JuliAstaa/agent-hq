@@ -6,7 +6,7 @@ import type * as THREE from "three";
 import { ACT_LABEL, IDLE_LEAVE_DELAY, type Activity } from "../constants";
 import { lerpAngle, pick, rand } from "../scene/kit";
 import { atPlace, route, type Ref, type Waypoint } from "../nav/router";
-import type { BoardPlace, DeskPlace, Place, SpotPlace, StationPlace } from "../nav/places";
+import type { BoardPlace, DeskPlace, Place, SeatPlace, SpotPlace, StationPlace } from "../nav/places";
 import { DEPTS, type Dept } from "@/lib/teams";
 import type { Status } from "@/lib/events";
 
@@ -41,7 +41,8 @@ export interface Mover {
   id: string;
   root: THREE.Object3D;
   mv: Movement;
-  home: DeskPlace;
+  /** Home desk; a subagent seated without a desk (prd.md §7.9) has its meeting seat as home. */
+  home: DeskPlace | SeatPlace;
   /** Squash-and-stretch amount (animation). */
   squash: number;
 }
@@ -49,6 +50,8 @@ export interface Mover {
 export interface NavAgent {
   status: Status;
   dept: Dept | null;
+  /** Meeting seat assigned by the store (prd.md §7.9): wins over the team station, and holds an idle leader. */
+  seat?: SeatPlace | null;
 }
 
 export interface NavCtx {
@@ -64,7 +67,7 @@ export interface NavCtx {
   changed: (m: Mover) => void;
 }
 
-export function newMovement(home: DeskPlace): Movement {
+export function newMovement(home: DeskPlace | SeatPlace): Movement {
   return {
     mode: "desk", dest: home, path: [], lastRef: atPlace(home), yaw: home.face, speed: 2.4, idleSince: null, switchAt: 0,
     activity: null, actT: 0, hasMug: false, urgent: false, fetching: false, carrying: false, fetchT: 0, lastStatus: null,
@@ -119,9 +122,11 @@ export function placeAt(ctx: NavCtx, m: Mover, sp: Place) {
   }
 }
 
-/** Team station if the team is known and one is free (or already mine), else the home desk. */
+/** Meeting seat, else team station if the team is known and one is free (or already mine), else the home desk. */
 export function workTarget(ctx: NavCtx, m: Mover, a: NavAgent): Place {
-  if (a.status === "offline" || !a.dept) return m.home;
+  if (a.status === "offline") return m.home;
+  if (a.seat) return a.seat;
+  if (!a.dept) return m.home;
   const mine = ctx.stations.find((s) => s.dept === a.dept && s.occ === m.id);
   if (mine) return mine;
   const free = ctx.stations.find((s) => s.dept === a.dept && !s.occ);
@@ -139,7 +144,7 @@ export function goTo(ctx: NavCtx, m: Mover, dest: Place, urgent = false) {
   const where =
     dest.kind === "board" ? "ambil tugas di papan" :
     dest.kind === "desk" ? (mv.carrying ? "bawa tugas ke meja" : "balik ke meja") :
-    dest.kind === "station" ? `${mv.carrying ? "bawa tugas " : ""}ke ${dest.room} (Lt.3)` :
+    dest.kind === "station" || dest.kind === "seat" ? `${mv.carrying ? "bawa tugas " : ""}ke ${dest.room} (Lt.${dest.floor})` :
     `jalan ke ${dest.room} (Lt.${dest.floor})`;
   ctx.log(m.id, urgent ? `Buru-buru ${where}` : `Jalan santai, ${where.replace("jalan ke ", "ke ")}`);
   ctx.changed(m);
@@ -167,14 +172,14 @@ function freeBoard(ctx: NavCtx, m: Mover): BoardPlace | null {
   return ctx.boards.find((b) => !b.occ || b.occ === m.id) ?? null;
 }
 
-/** Stop a pickup that is no longer needed: the task ended before it started (idle: off to relax) or the agent
- *  went offline (back to its desk, like any offline agent). */
-function cancelFetch(ctx: NavCtx, m: Mover, offline: boolean) {
+/** Stop a pickup that is no longer needed: the task ended before it started (idle: off to relax, or to the
+ *  meeting seat it holds) or the agent went offline (back to its desk, like any offline agent). */
+function cancelFetch(ctx: NavCtx, m: Mover, offline: boolean, seat: SeatPlace | null) {
   const mv = m.mv;
   if (!mv.fetching && !mv.carrying && mv.mode !== "fetch") return;
   mv.fetching = false;
   mv.carrying = false;
-  if (mv.mode === "fetch" || mv.dest.kind === "board") goTo(ctx, m, offline ? m.home : (pickSpot(ctx, m) ?? m.home));
+  if (mv.mode === "fetch" || mv.dest.kind === "board") goTo(ctx, m, offline ? m.home : (seat ?? pickSpot(ctx, m) ?? m.home), !!seat && !offline);
   ctx.changed(m);
 }
 
@@ -186,7 +191,8 @@ export function updateNav(ctx: NavCtx, m: Mover, a: NavAgent, dt: number) {
   const prev = mv.lastStatus;
   mv.lastStatus = a.status;
   const newTask = (prev === "idle" || prev === "offline") && (a.status === "thinking" || a.status === "working");
-  if (newTask && !mv.fetching) {
+  // A subagent without a desk works at its meeting seat only: no trip down to the task board.
+  if (newTask && !mv.fetching && m.home.kind === "desk") {
     const slot = freeBoard(ctx, m);
     if (slot) {
       mv.fetching = true;
@@ -195,8 +201,13 @@ export function updateNav(ctx: NavCtx, m: Mover, a: NavAgent, dt: number) {
       goTo(ctx, m, slot, true);
     }
   }
-  if (a.status === "idle" || a.status === "offline") cancelFetch(ctx, m, a.status === "offline");
-  if (a.status === "idle") {
+  const seat = a.status !== "offline" ? (a.seat ?? null) : null;
+  if (a.status === "idle" || a.status === "offline") cancelFetch(ctx, m, a.status === "offline", seat);
+  if (a.status === "idle" && seat) {
+    // An idle leader waits for its subagents at the table (prd.md §7.9), and a finished subagent keeps its seat.
+    mv.idleSince = null;
+    if (!mv.fetching && mv.dest !== seat) goTo(ctx, m, seat, true);
+  } else if (a.status === "idle") {
     if (mv.idleSince === null) mv.idleSince = now;
     if (mv.mode === "desk" && now - mv.idleSince > IDLE_LEAVE_DELAY) {
       const sp = pickSpot(ctx, m);
@@ -252,20 +263,22 @@ export function releasePlaces(m: Mover) {
 export function floorOf(m: { root: THREE.Object3D } | null): number {
   if (!m) return 2;
   const y = m.root.position.y;
-  return y > 8.4 ? 3 : y > 2.8 ? 2 : 1;
+  return y > 14 ? 4 : y > 8.4 ? 3 : y > 2.8 ? 2 : 1;
 }
 
-export function locText(m: Mover | null): { where: string; what: string } {
+/** Roster location chip. `team`: the meeting's team name (Agent.meeting.team), for "rapat <team>". */
+export function locText(m: Mover | null, team?: string): { where: string; what: string } {
   if (!m) return { where: "Tanpa meja", what: "" };
   const mv = m.mv;
   const fl = `Lt.${floorOf(m)}`;
   if (mv.mode === "desk") {
+    if (mv.dest.kind === "seat") return { where: `${mv.dest.room} · ${fl}`, what: team ? `rapat ${team}` : "rapat" };
     return mv.dest.kind === "station" ? { where: `${mv.dest.room} · ${fl}`, what: DEPTS[mv.dest.dept].label } : { where: `Meja kerja · ${fl}`, what: "" };
   }
   if (mv.mode === "fetch") return { where: `Papan Tugas · ${fl}`, what: "ambil tugas" };
   if (mv.mode === "walk") {
     if (mv.dest.kind === "board") return { where: fl, what: "jalan ke Papan Tugas" };
-    if (mv.carrying) return { where: fl, what: mv.dest.kind === "station" ? `bawa tugas ke ${mv.dest.room}` : "bawa tugas ke meja" };
+    if (mv.carrying) return { where: fl, what: mv.dest.kind === "station" || mv.dest.kind === "seat" ? `bawa tugas ke ${mv.dest.room}` : "bawa tugas ke meja" };
     return { where: fl, what: mv.dest.kind === "desk" ? "jalan balik ke meja" : `jalan ke ${mv.dest.room}` };
   }
   return { where: `${mv.dest.room} · ${fl}`, what: (mv.activity && ACT_LABEL[mv.activity]) || "santai" };

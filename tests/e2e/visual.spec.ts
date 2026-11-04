@@ -140,6 +140,7 @@ test.describe("visual parity with references/agent-hq.html", () => {
     await next.evaluate(() => (window as any).agentHQ.engine.debug.hideEmptyDesks(true));
     await next.evaluate(() => (window as any).agentHQ.engine.debug.hideTaskBoard(true)); // deviation 14
     await next.evaluate(() => (window as any).agentHQ.engine.debug.hideServerMonitor(true)); // deviation 20: live samples
+    await next.evaluate(() => (window as any).agentHQ.engine.debug.hideMeetingFloor(true)); // deviation 23: three floors
     await next.addStyleTag({ content: "[data-hq-ui]{display:none!important}" }); // compare the scene only
     const ratios: Record<string, number> = {};
     for (const [view, name] of VIEWS) {
@@ -183,6 +184,41 @@ test.describe("visual parity with references/agent-hq.html", () => {
       await showView(next, view);
       save(`demo-${name}-prototype.png`, await proto.screenshot());
       save(`demo-${name}-next.png`, await next.screenshot());
+    }
+    expect(errors).toEqual([]);
+  });
+
+  // Meeting floor (prd.md §7.9, deviation 23): a session with two subagents and a two-member group, seated directly
+  // (placeAt), in the Lt.4 and Semua views. Screenshots for manual review; the store and engine must agree.
+  test("meeting floor: Lt.4 and Semua with two meetings (manual review)", async ({ browser }) => {
+    const errors: string[] = [];
+    const next = await browser.newPage();
+    await open(next, "next", errors);
+    await emptyBuilding(next, "next");
+    const seats = await next.evaluate(() => {
+      const hq = (window as any).agentHQ;
+      hq.applyEvent({ id: "glimbo", name: "Glimbo", role: "Coder", status: "working", task: "Delegasi: audit modul auth" });
+      hq.applyEvent({ id: "sub-1", name: "Penjelajah", role: "Subagen · demo", parent: "glimbo", status: "working", task: "Cari pemanggil fungsi auth" });
+      hq.applyEvent({ id: "sub-2", name: "Penguji", role: "Subagen · demo", parent: "glimbo", status: "thinking", task: "Jalankan test modul transaksi" });
+      hq.applyEvent({ id: "plonk", name: "Plonk", role: "QA Tester", status: "working", group: "Rilis v2.3", task: "Regression test rilis v2.3" });
+      hq.applyEvent({ id: "vexa", name: "Vexa", role: "Writer", status: "waiting", group: "Rilis v2.3", task: "Draft changelog v2.3" });
+      const out: Record<string, string> = {};
+      for (const a of hq.store.getState().agents.values()) {
+        out[a.id] = `${a.meeting?.room}:${a.meeting?.seat}`;
+        if (a.meeting) hq.placeAt(a.id, `seat:${a.meeting.room * 5 + a.meeting.seat}`);
+      }
+      return out;
+    });
+    expect(seats).toEqual({ glimbo: "0:0", "sub-1": "0:1", "sub-2": "0:2", plonk: "1:0", vexa: "1:1" });
+    await advance(next, 1.5);
+    const where = await next.evaluate(() => [...(window as any).agentHQ.store.getState().agents.values()].map((a: any) => `${a.id} ${a.loc?.where} ${a.loc?.what}`));
+    expect(where).toEqual([
+      "glimbo Meeting A · Lt.4 rapat Tim Glimbo", "sub-1 Meeting A · Lt.4 rapat Tim Glimbo", "sub-2 Meeting A · Lt.4 rapat Tim Glimbo",
+      "plonk Meeting B · Lt.4 rapat Rilis v2.3", "vexa Meeting B · Lt.4 rapat Rilis v2.3",
+    ]);
+    for (const [view, name] of [["4", "lt4"], ["all", "semua"], ["3", "lt3"]] as const) {
+      await showView(next, view);
+      save(`meeting-${name}.png`, await next.screenshot());
     }
     expect(errors).toEqual([]);
   });

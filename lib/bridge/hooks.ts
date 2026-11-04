@@ -54,11 +54,15 @@ export function hookToEvents(
   const isSub = !!h.agent_id;
   const id = hookAgentId(h);
   const team = (hdr("x-hq-team") || "").trim();
+  // Meeting floor (prd.md §7.9): a subagent names its main session as parent; X-HQ-Group puts sessions together.
+  const group = trunc(redact(hdr("x-hq-group") || ""), 40);
   const who = {
     id,
     name: isSub ? trunc(h.agent_type || "subagen", 18) : hdr("x-hq-name") || `${proj}#${sid.slice(0, 4)}`,
     role: isSub ? `Subagen · ${proj}` : hdr("x-hq-role") || `Claude Code · ${proj}`,
     ...(team ? { team } : {}),
+    ...(isSub ? { parent: `cc-${sid.slice(0, 8)}` } : {}),
+    ...(group ? { group } : {}),
     source: "claude-code",
   };
   const up = (extra: BridgeEvent): BridgeEvent => ({ type: "agent_update", ...who, ...extra });

@@ -318,6 +318,7 @@ def headers_for(path, cfg, body, identity=None):
         "X-HQ-Name": ident.get("name") or cfg["name"],
         "X-HQ-Role": ident.get("role") or cfg["role"] or "Hermes · " + hq.project_name(body.get("cwd")),
         "X-HQ-Team": cfg["team"],
+        "X-HQ-Group": cfg.get("group", ""),
     }
 
 

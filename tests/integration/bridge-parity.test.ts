@@ -82,7 +82,15 @@ function viewer(t: Target) {
   return { frames, stop: async () => { ctrl.abort(); await done; } };
 }
 
-/** Frames without comments and `ts`. Server monitor samples (prd.md §7.8) exist only in the app, so they are dropped. */
+/** Meeting-floor fields (prd.md §7.9) exist only in the app. */
+const APP_ONLY_KEYS = ["parent", "group"];
+const dropAppOnly = (o: Record<string, unknown>) => {
+  for (const k of APP_ONLY_KEYS) delete o[k];
+  return o;
+};
+
+/** Frames without comments and `ts`. Server monitor samples (prd.md §7.8) exist only in the app, so they are dropped,
+ *  and so are the meeting-floor fields `parent` and `group` (also inside a snapshot). */
 function normalizeFrames(frames: string[]) {
   return frames
     .filter((f) => !f.startsWith(":"))
@@ -90,6 +98,8 @@ function normalizeFrames(frames: string[]) {
       if (!f.startsWith("data: ")) return f;
       const ev = JSON.parse(f.slice(6));
       delete ev.ts;
+      dropAppOnly(ev);
+      if (Array.isArray(ev.agents)) ev.agents.forEach(dropAppOnly);
       return ev;
     })
     .filter((ev) => !(typeof ev === "object" && ev.type === "server_stats"));

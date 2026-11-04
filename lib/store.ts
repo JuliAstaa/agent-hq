@@ -10,10 +10,11 @@ import { CRON_ACTION_LABEL, type CronCmd, type CronState } from "./cron";
 import { normalizeEvent, SEV, STATUS, type AgentPatch, type AttackNode, type Severity, type Status } from "./events";
 import { checkServerAlarm, newServerAlarm, SERVER_LOG_ID, serverPoint, trimHistory, type ServerPoint, type ServerStats } from "./server";
 import { inferDept, type Dept } from "./teams";
+import { emptyMeetingState, MEETING_LOG_ID, planMeetings, sameMeeting, sameRooms, type AgentMeeting, type MeetingRoom } from "./meeting";
 import { avatarColor } from "./palette";
 import { truncate } from "./format";
 
-export type FloorMode = "all" | "1" | "2" | "3";
+export type FloorMode = "all" | "1" | "2" | "3" | "4";
 export type ConnMode = "demo" | "live" | "down";
 
 export const DESK_SLOTS = 9; // 3 x 3 desks on floor 2 (deviation 17; the prototype had 12)
@@ -40,8 +41,14 @@ export interface Agent {
   progress: number | null;
   updatedAt: number;
   events: AgentEvent[];
-  /** Desk index 0..11; null = desks full, roster only (no avatar). */
+  /** Desk index 0..8; null = no desk: a subagent seated on the meeting floor, or roster only (no avatar). */
   slot: number | null;
+  /** Delegating agent (prd.md §7.9). */
+  parent: string | null;
+  /** Shared work group (prd.md §7.9). */
+  group: string | null;
+  /** Meeting seat while the agent's team holds a meeting (prd.md §7.9); null = works as usual. */
+  meeting: AgentMeeting | null;
   /** undefined = no explicit team ever; null = explicitly office. */
   deptExplicit?: Dept | null;
   deptSticky: Dept | null;
@@ -109,6 +116,8 @@ export interface HQState {
   server: ServerStats | null;
   /** Server samples of the last 30 minutes, oldest first, for the Server panel charts (bridge history + live). */
   serverHistory: ServerPoint[];
+  /** Meeting rooms A, B, C (prd.md §7.9): the team holding each, or null. */
+  meetings: (MeetingRoom | null)[];
 
   applyEvent: (raw: unknown) => void;
   pushLog: (entry: { id: string; level?: string; message?: string }) => void;
@@ -135,6 +144,9 @@ interface Draft {
   vuln: { counts: Record<Severity, number>; list: Finding[]; nodes: AttackNode[] };
   selectedId: string | null;
   toast: HQState["toast"];
+  meetings: (MeetingRoom | null)[];
+  /** New subagents that wait for the meeting plan before they take a desk. */
+  pendingDesk: Set<string>;
 }
 
 export function createHQStore(): HQStore {
@@ -143,6 +155,7 @@ export function createHQStore(): HQStore {
   let logKey = 0;
   let toastSeq = 0;
   let serverAlarm = newServerAlarm();
+  let meetingFull: string[] = [];
 
   const emit = (s: Signal) => pending.push(s);
   const flush = () => {
@@ -165,10 +178,12 @@ export function createHQStore(): HQStore {
         vuln: { counts: { ...s.vuln.counts }, list: s.vuln.list.slice(), nodes: s.vuln.nodes.slice() },
         selectedId: s.selectedId,
         toast: s.toast,
+        meetings: s.meetings,
+        pendingDesk: new Set(),
       };
     };
     const commit = (d: Draft) =>
-      set({ agents: d.agents, logs: d.logs, stats: d.stats, soc: d.soc, vuln: d.vuln, selectedId: d.selectedId, toast: d.toast });
+      set({ agents: d.agents, logs: d.logs, stats: d.stats, soc: d.soc, vuln: d.vuln, selectedId: d.selectedId, toast: d.toast, meetings: d.meetings });
 
     /** Mutable clone of agent `id` inside the draft (cloned once per draft). */
     const touch = (d: Draft, id: string): Agent | undefined => {
@@ -194,7 +209,7 @@ export function createHQStore(): HQStore {
         t: Date.now(),
         id,
         name: a?.name || id,
-        color: a && a.slot != null ? avatarColor(a.id) : "#fff6e3",
+        color: a && (a.slot != null || a.meeting) ? avatarColor(a.id) : "#fff6e3",
         level,
         message,
       });
@@ -216,28 +231,66 @@ export function createHQStore(): HQStore {
       if (!d.agents.has(id)) return;
       d.agents.delete(id);
       d.touched.delete(id);
+      d.pendingDesk.delete(id);
       if (d.selectedId === id) d.selectedId = null;
       emit({ type: "remove", id });
+    };
+
+    /**
+     * Meeting floor (prd.md §7.9): recompute teams, rooms and seats after every agent change. A new subagent takes a
+     * desk only when it gets no seat. In a snapshot (quiet) members are placed at their seats right away.
+     */
+    const planInto = (d: Draft, quiet: boolean) => {
+      const list = [...d.agents.values()].map((a) => ({
+        id: a.id, name: a.name, status: a.status, parent: a.parent, group: a.group, dept: a.dept,
+        hasDesk: a.slot != null, seat: a.meeting,
+      }));
+      const plan = planMeetings(list, { rooms: d.meetings, full: meetingFull }, Date.now());
+      meetingFull = plan.full;
+      if (!sameRooms(plan.rooms, d.meetings)) d.meetings = plan.rooms;
+      for (const msg of plan.logs) logInto(d, { id: MEETING_LOG_ID, level: "info", message: msg });
+      for (const a0 of d.agents.values()) {
+        const want = plan.seats.get(a0.id) ?? null;
+        const isNew = d.pendingDesk.has(a0.id);
+        // No seat and no desk: a new subagent, or a desk-less one whose team lost its room.
+        const needsDesk = !want && a0.slot == null && (isNew || !!a0.meeting);
+        if (sameMeeting(a0.meeting, want) && !needsDesk) continue;
+        const a = touch(d, a0.id)!;
+        const seated = !!want && !a.meeting;
+        a.meeting = want;
+        if (needsDesk) {
+          a.slot = freeSlot(d);
+          if (a.slot == null && isNew) logInto(d, { id: a.id, level: "warn", message: `Meja penuh (maks ${DESK_SLOTS}), agen hanya tampil di daftar` });
+          else if (isNew && quiet) emit({ type: "place", id: a.id }); // snapshot: idle to a lounge spot, team to a station
+        }
+        if (seated && quiet && !isNew) emit({ type: "place", id: a.id });
+      }
+      d.pendingDesk.clear();
     };
 
     const applyAgent = (d: Draft, p: AgentPatch) => {
       const id = p.id;
       const isNew = !d.agents.has(id);
       if (isNew) {
-        const slot = freeSlot(d);
+        // A subagent waits for the meeting plan (planInto): a seat on the meeting floor, else a desk.
+        const sub = !!p.parent;
+        const slot = sub ? null : freeSlot(d);
         d.agents.set(id, {
           id, name: p.name || id, role: p.role || "Agen", status: "idle", task: "", tokens: 0, cost: null, progress: null,
-          updatedAt: Date.now(), events: [], slot, deptSticky: null, dept: null, loc: null,
+          updatedAt: Date.now(), events: [], slot, parent: null, group: null, meeting: null, deptSticky: null, dept: null, loc: null,
         });
         d.touched.add(id);
+        if (sub) d.pendingDesk.add(id);
         emit({ type: "add", id });
-        if (slot == null) logInto(d, { id, level: "warn", message: `Meja penuh (maks ${DESK_SLOTS}), agen hanya tampil di daftar` });
+        if (slot == null && !sub) logInto(d, { id, level: "warn", message: `Meja penuh (maks ${DESK_SLOTS}), agen hanya tampil di daftar` });
       }
       const a = touch(d, id)!;
       if (p.name && p.type !== "alert" && p.type !== "finding") a.name = p.name;
       if (p.role) a.role = p.role;
       if (p.task !== undefined && p.type !== "log") a.task = p.task;
       if (p.team !== undefined) a.deptExplicit = p.team;
+      if (p.parent !== undefined) a.parent = p.parent;
+      if (p.group !== undefined) a.group = p.group;
       ({ dept: a.dept, sticky: a.deptSticky } = inferDept(a));
       if (p.tokens !== undefined) a.tokens = p.tokens;
       if (p.tokensDelta !== undefined) a.tokens += p.tokensDelta;
@@ -354,6 +407,7 @@ export function createHQStore(): HQStore {
       } else {
         applyAgent(d, e.agent);
       }
+      planInto(d, e.kind === "agent" && e.agent.quiet);
       commit(d);
     };
 
@@ -371,6 +425,7 @@ export function createHQStore(): HQStore {
       cronCmds: [],
       server: null,
       serverHistory: [],
+      meetings: emptyMeetingState().rooms,
 
       applyEvent: (raw) => {
         for (const e of normalizeEvent(raw)) {
@@ -392,6 +447,8 @@ export function createHQStore(): HQStore {
         d.logs = [];
         d.vuln = { counts: emptyCounts(), list: [], nodes: [] };
         d.soc = { alerts: [], total: 0 };
+        d.meetings = emptyMeetingState().rooms; // everyone left: no "Rapat selesai" lines for a reset
+        meetingFull = [];
         commit(d);
         const hadCron = get().cron !== null, hadServer = get().server !== null;
         set({ cron: null, cronCmds: [], server: null, serverHistory: [] }); // a new connection sends its own schedule and samples (if any)
