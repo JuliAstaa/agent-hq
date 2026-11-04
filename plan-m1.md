@@ -122,6 +122,8 @@ Implementasi deviasi 27 selesai: `lib/bridge/discussions.ts` (putaran, reservasi
 
 27. **Diskusi agen melalui monitor meeting Lt.4** (diminta dan alurnya disetujui user 2026-11-04, dengan tambahan **Buat agen baru** langsung dari pengaturan rapat). Pengguna memberi goal melalui layar ruangan, memilih 2–5 peserta dari sesi Hermes lama dan/atau membuat agen baru (Nama, Peran, Model), lalu melihat chat antaragen secara langsung. Pembuatan agen menghasilkan sesi Hermes biasa, otomatis memilihnya sebagai peserta, dan tidak mengganti chat yang sedang dibuka. Diskusi bergiliran dengan batas putaran, tambahan arahan, Hentikan, kesimpulan, dan penyimpanan percakapan; eksekusi rencana tidak dimulai otomatis. Rincian dan verifikasi: [docs/meeting-discussion.md](docs/meeting-discussion.md). Rapat otomatis tetap mengikuti deviasi 23 di ruangan yang tidak dipakai diskusi manual.
 
+28. **Logo tab Agent HQ** (diminta user, 2026-11-04). Favicon bawaan Next.js diganti maskot agen kartun orisinal dengan palet ink, paper, pink, dan working. Sumber vektor `app/icon.svg`, `app/favicon.ico` berisi ukuran 16/32/48/64 px, dan `app/apple-icon.png` 180 px menggunakan logo yang sama. Ikon didaftarkan otomatis melalui konvensi metadata Next.js; scene dan UI kantor tetap sama. Verifikasi: lint, typecheck, build, 430 tes Vitest, serta pemeriksaan ketiga link metadata, respons HTTP, isi file, dan ukuran ikon pada server produksi lokal lolos.
+
 ## Langkah
 
 ### 0. Fondasi
