@@ -56,10 +56,23 @@ dipasang baru muncul lagi setelah agen mengirim event. Belum tersedia di `exampl
 
 ## 2. Menyambungkan Claude Code
 
-Claude Code mengirim aktivitasnya lewat **hooks** ke `http://127.0.0.1:8787/api/hook`. Contoh setting-nya ada
-di `examples/claude-hooks.settings.json`.
+Panduan lengkap per agen (pasang, cek, masalah umum):
 
-**Pasang sekali saja** (semua project di laptopmu ikut terpantau):
+| Agen | Panduan | Cara pasang singkat |
+|---|---|---|
+| Claude Code | `docs/claude.md` | `node examples/claude/install.mjs` |
+| Codex (OpenAI) | `docs/codex.md` | `node examples/codex/install.mjs`, lalu `/hooks` di Codex untuk mempercayai hook |
+| OpenCode | `docs/opencode.md` | salin `examples/opencode/agent-hq.js` ke `~/.config/opencode/plugins/` |
+| Hermes Agent | `docs/hermes.md` | `python3 examples/hermes/install.py` |
+
+Semuanya tampil dengan cara yang sama: status, bubble aksi, Papan Tugas, confetti, subagen di Lt.4 Meeting,
+dan rename.
+
+Claude Code mengirim aktivitasnya lewat **hooks** ke `http://127.0.0.1:8787/api/hook`. Contoh setting-nya ada
+di `examples/claude-hooks.settings.json`. Installer `examples/claude/install.mjs` menggabungkannya ke
+`~/.claude/settings.json` di Windows, macOS, maupun Linux, dan aman dijalankan ulang (`docs/claude.md`).
+
+**Pasang manual dengan `jq`** (macOS/Linux; semua project di laptopmu ikut terpantau):
 
 ```bash
 cp ~/.claude/settings.json ~/.claude/settings.json.bak 2>/dev/null   # cadangan dulu
@@ -347,7 +360,7 @@ app/          halaman dan route bridge (app/api/{event,hook,stream,health,agents
 components/   UI 2D (React + Tailwind)
 engine/       scene 3D (Three.js murni): dunia, agen, navigasi, layar
 lib/          event, tim, store, transport, demo, bridge/ (hub, hooks, sensor, rename)
-examples/     setting hooks Claude Code, bridge mandiri server.js
+examples/     hooks Claude Code (+ installer), adapter Codex, plugin OpenCode, Hermes, bridge mandiri server.js
 references/   prototipe asli, hanya acuan (jangan diubah)
 tests/        unit, integrasi, e2e
 ```
@@ -356,6 +369,7 @@ Dokumen lain:
 
 - `prd.md`: spesifikasi lengkap (protokol event, integrasi Claude Code, dunia, perilaku agen).
 - `plan-m1.md`: rencana port ke Next.js dan daftar perbedaan yang disengaja dari prototipe.
+- `docs/claude.md`, `docs/codex.md`, `docs/opencode.md`: memasang Claude Code, Codex, dan OpenCode.
 - `docs/hermes.md`: menyambungkan Hermes Agent di VPS Ubuntu (hook, MCP, papan jadwal, chat).
 - `docs/terminal.md`: tombol Terminal, terminal server di samping kantor lewat ttyd.
 - `CLAUDE.md`: aturan kerja untuk AI agent yang mengerjakan repo ini.
