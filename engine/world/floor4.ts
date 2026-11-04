@@ -1,6 +1,6 @@
-// Floor 4 "Meeting" (prd.md §7.9): three enclosed glass meeting rooms side by side along the back wall (frosted
-// glass up to 2.2 with a clear band above, a sliding frosted door each; table, five seats with laptops, team screen,
-// accent strip), a corridor from the lift, and the lift tube continuing up from floor 3. Not in the prototype.
+// Floor 4 "Meeting" (prd.md §7.9): three enclosed meeting rooms side by side along the back wall (frosted glass walls
+// 2.6 high in slim frames, a sliding frosted door each; table, five seats with laptops, team screen, accent strip),
+// a corridor from the lift, and the lift tube continuing up from floor 3. Not in the prototype.
 
 import * as THREE from "three";
 import { F3, F4 } from "../constants";
@@ -53,8 +53,8 @@ export const MEETING_SCREEN_W = 640, MEETING_SCREEN_H = 280;
 /** Accent color of an empty room's strip and chairs. */
 export const MEETING_IDLE = "#3a3360";
 const CARD_SECONDS = 0.6;
-/** Glass walls: frosted up to FROST above the floor, clear up to TOP (the back wall's trim). */
-const FROST = 2.2, TOP = 4.4, PANE = 0.06;
+/** Frosted glass walls WALL_H high (the camera sees the seated agents over them), door opening DOOR_H high. */
+const WALL_H = 2.6, DOOR_H = 2.25, PANE = 0.05;
 /** How far the door leaf slides to open (its width plus a little). */
 const DOOR_SLIDE = DOOR_HALF * 2 + 0.05;
 
@@ -107,23 +107,29 @@ export function buildFloor4(b: Build, g4: THREE.Group, tentacles: THREE.Group[],
   rug(-3.9, 3.9, -7.4, 0.8, "#2f7a63");
   rug(4.5, 12.8, -7.4, 0.8, "#9a5a3a");
 
-  // Enclosed glass rooms like an ordinary office: frosted glass up to 2.2 (a pink safety band at eye level), clear
-  // glass above it up to the trim. Seated agents stay visible from the camera over the frosted part.
-  const frost = canvasTex(4, 256);
-  {
-    const c = frost.ctx;
+  // Enclosed rooms like an ordinary office: frosted glass walls 2.6 high in slim frames (no frame grid, no clear glass
+  // above, so the team screens on the back wall stay in view). The film is dense, with three etched lines near the top.
+  // The panes write depth: the outlines of chairs and tables behind them are hidden too, so the glass reads as frosted
+  // instead of showing sharp furniture lines through it. Seated agents stay visible from the camera over the walls.
+  const film = (lines: boolean) => {
+    const t = canvasTex(4, 256);
+    const c = t.ctx;
     const grad = c.createLinearGradient(0, 0, 0, 256);
-    grad.addColorStop(0, "rgba(236,244,255,0.82)");
-    grad.addColorStop(1, "rgba(226,238,252,0.93)");
+    grad.addColorStop(0, "rgba(244,248,255,0.86)");
+    grad.addColorStop(1, "rgba(236,243,252,0.94)");
     c.fillStyle = grad; c.fillRect(0, 0, 4, 256);
-    c.fillStyle = "rgba(255,255,255,0.95)"; c.fillRect(0, 0, 4, 4);
-    c.fillStyle = "rgba(255,111,216,0.9)"; c.fillRect(0, 78, 4, 6); c.fillRect(0, 90, 4, 3);
-  }
-  // No outline on the panes: on a large transparent pane the outline hull shows through as a dark sheet. The trim
-  // frames draw the cartoon edges instead.
-  const frostM = noLine(toon("#ffffff", { map: frost.tex, transparent: true, depthWrite: false }));
-  const clearM = noLine(toon("#bfe9ff", { transparent: true, opacity: 0.16, depthWrite: false }));
-  const posts = new Map<string, [number, number]>();
+    c.fillStyle = "rgba(255,255,255,0.98)"; c.fillRect(0, 0, 4, 3);
+    if (lines) {
+      c.fillStyle = "rgba(196,218,246,0.6)";
+      for (const y of [30, 40, 50]) c.fillRect(0, y, 4, 4);
+    }
+    return t.tex;
+  };
+  // No outline on the panes: on a large transparent pane the outline hull shows as a dark sheet. The frames draw the edges.
+  const glassOpts = { transparent: true, depthWrite: true };
+  const frostM = noLine(toon("#ffffff", { map: film(true), ...glassOpts }));
+  const plainM = noLine(toon("#ffffff", { map: film(false), ...glassOpts }));
+  const frameM = thin(toon("#f3efe6"), 0.55);
   const pane = (axis: "x" | "z", c: number, a0: number, a1: number, y0: number, h: number, mat: THREE.Material) => {
     if (a1 - a0 < 0.01) return;
     const len = a1 - a0, mid = (a0 + a1) / 2;
@@ -131,37 +137,34 @@ export function buildFloor4(b: Build, g4: THREE.Group, tentacles: THREE.Group[],
     m.position.set(axis === "x" ? mid : c, y0 + h / 2, axis === "x" ? c : mid);
     g4.add(m);
   };
-  const rail = (axis: "x" | "z", c: number, a0: number, a1: number, y0: number, h: number) => {
+  const bar = (axis: "x" | "z", c: number, a0: number, a1: number, y0: number, h: number) => {
     const len = a1 - a0, mid = (a0 + a1) / 2;
-    boxAt(g4, axis === "x" ? len : 0.12, h, axis === "x" ? 0.12 : len, axis === "x" ? mid : c, y0, axis === "x" ? c : mid, M.trim, 0.03, false);
+    boxAt(g4, axis === "x" ? len : 0.09, h, axis === "x" ? 0.09 : len, axis === "x" ? mid : c, y0, axis === "x" ? c : mid, frameM, 0.02, false);
   };
-  /** One glass wall from a0 to a1 along `axis` (x: at z = c, z: at x = c); `gap` leaves a door opening below FROST. */
+  const posts = new Map<string, [number, number, number]>();
+  const post = (x: number, z: number, h: number) => {
+    const k = `${x.toFixed(2)},${z.toFixed(2)}`;
+    posts.set(k, [x, z, Math.max(h, posts.get(k)?.[2] ?? 0)]);
+  };
+  /** One frosted wall from a0 to a1 along `axis` (x: at z = c, z: at x = c); `gap` leaves a door opening. */
   const glassWall = (axis: "x" | "z", c: number, a0: number, a1: number, gap?: [number, number]) => {
-    const lower: [number, number][] = gap ? [[a0, gap[0]], [gap[1], a1]] : [[a0, a1]];
-    for (const [s0, s1] of lower) {
-      pane(axis, c, s0, s1, F4 + 0.12, FROST - 0.12, frostM);
-      rail(axis, c, s0, s1, F4, 0.12);
+    const spans: [number, number][] = gap ? [[a0, gap[0]], [gap[1], a1]] : [[a0, a1]];
+    for (const [s0, s1] of spans) {
+      pane(axis, c, s0, s1, F4 + 0.07, WALL_H - 0.1, frostM);
+      bar(axis, c, s0, s1, F4, 0.07); // floor channel (none across the door)
     }
-    pane(axis, c, a0, a1, F4 + FROST, TOP - FROST, clearM);
-    rail(axis, c, a0, a1, F4 + FROST - 0.05, 0.1);
-    rail(axis, c, a0, a1, F4 + TOP - 0.06, 0.12);
-    // posts at the ends, at the door and about every 2.9 between them
-    const at = new Set([a0, a1, ...(gap ?? [])]);
-    const n = Math.max(1, Math.round((a1 - a0) / 2.9));
-    for (let i = 1; i < n; i++) {
-      const a = a0 + ((a1 - a0) * i) / n;
-      if (!gap || a < gap[0] - 0.4 || a > gap[1] + 0.4) at.add(a);
+    if (gap) {
+      pane(axis, c, gap[0], gap[1], F4 + DOOR_H + 0.05, WALL_H - DOOR_H - 0.08, plainM); // above the door
+      bar(axis, c, gap[0], gap[1], F4 + DOOR_H, 0.06); // door head
     }
-    for (const a of at) {
-      const [x, z] = axis === "x" ? [a, c] : [c, a];
-      posts.set(`${x.toFixed(2)},${z.toFixed(2)}`, [x, z]);
-    }
+    bar(axis, c, a0, a1, F4 + WALL_H - 0.04, 0.06); // top cap
+    for (const a of [a0, a1, ...(gap ?? [])]) post(axis === "x" ? a : c, axis === "x" ? c : a, WALL_H);
   };
   const BACK = -7.6;
   const fronts = [-12.6, ...ROOM_WALLS, ROOM_RIGHT_X];
   ROOM_XS.forEach((cx, i) => glassWall("x", ROOM_FRONT_Z, fronts[i], fronts[i + 1], [cx - DOOR_HALF, cx + DOOR_HALF]));
   for (const x of [...ROOM_WALLS, ROOM_RIGHT_X]) glassWall("z", x, BACK, ROOM_FRONT_Z);
-  for (const [x, z] of posts.values()) boxAt(g4, 0.14, TOP, 0.14, x, F4, z, M.trim, 0.03, false);
+  for (const [x, z, h] of posts.values()) boxAt(g4, 0.09, h, 0.09, x, F4, z, frameM, 0.02, false);
 
   // rooms: table, seats, laptops, screen, strip
   const rooms: MeetingRoomProp[] = ROOM_XS.map((cx, ri) => {
@@ -179,10 +182,11 @@ export function buildFloor4(b: Build, g4: THREE.Group, tentacles: THREE.Group[],
     // sliding door: a frosted leaf on the corridor side of the front wall, slides left over the glass to open
     const door = new THREE.Group(); door.position.set(cx, F4, ROOM_FRONT_Z + 0.1); g4.add(door);
     const leaf = new THREE.Group(); door.add(leaf);
-    const lp = mesh(new THREE.BoxGeometry(DOOR_HALF * 2, FROST - 0.1, 0.05), frostM, false, false);
-    lp.position.y = 0.05 + (FROST - 0.1) / 2; leaf.add(lp);
-    for (const sx of [-DOOR_HALF, DOOR_HALF]) boxAt(leaf, 0.07, FROST - 0.1, 0.08, sx, 0.05, 0, M.trim, 0.02, false);
-    boxAt(leaf, 0.05, 0.6, 0.12, DOOR_HALF - 0.22, 0.8, 0, M.steel, 0.02, false);
+    const lh = DOOR_H - 0.06;
+    const lp = mesh(new THREE.BoxGeometry(DOOR_HALF * 2, lh, 0.04), plainM, false, false);
+    lp.position.y = 0.03 + lh / 2; leaf.add(lp);
+    for (const sx of [-DOOR_HALF, DOOR_HALF]) boxAt(leaf, 0.06, lh, 0.07, sx, 0.03, 0, frameM, 0.02, false);
+    boxAt(leaf, 0.05, 0.7, 0.1, DOOR_HALF - 0.2, 0.75, 0.04, M.dark, 0.02, false); // pull handle
     return { screen, strip, seats: roomSeats, center: new THREE.Vector3(cx, F4 + 1.1, TABLE_Z), door: { leaf, open: 0, x: cx } };
   });
 
