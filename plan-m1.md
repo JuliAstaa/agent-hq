@@ -112,6 +112,10 @@ Sumber: `prd.md` §5, §6, §7, §8, §14, §15 (M1), §16; prototipe di `refere
 
 26. **Buka chat dari Daftar Agen** (diminta dan disetujui user, 2026-11-04). Setiap kartu punya tombol **Buka chat**, aktif saat koneksi live dan Chat Hermes tersedia. Tombol membuka sesi Hermes milik ID agen itu, termasuk setelah rename atau restart, tanpa membuat sesi baru, memilih kartu, atau menghentikan sesi lain. Resolusi menggunakan sesi yang masih di memori lalu daftar sesi API server Hermes; nama tampilan tidak dipakai untuk pencocokan. Sesi yang tidak tersedia (termasuk CLI/Telegram/Discord dan agen non-Hermes) menampilkan keterangan tanpa mengganti percakapan. Jika HQ_TOKEN diperlukan, pengguna diarahkan mengisinya lewat panel Hermes. Tidak ada dependency runtime baru. Tes: unit resolusi/isolasi sesi dan browser desktop/mobile di `tests/e2e/hermes.spec.ts`. Verifikasi: lint, typecheck, build, 418 tes Vitest, serta 5 tes browser Hermes/UI lolos.
 
+## Usulan perubahan yang menunggu persetujuan
+
+27. **Diskusi agen melalui monitor meeting Lt.4** (diminta user 2026-11-04, **draf; belum disetujui untuk implementasi**). Pengguna ingin memberi goal melalui layar ruangan dan melihat chat beberapa agen yang berdiskusi. Rincian alur, batas putaran, pengaturan peserta, status, penyimpanan chat, dan verifikasi ada di [docs/meeting-discussion.md](docs/meeting-discussion.md). Sumber peserta serta apakah rapat hanya menghasilkan rencana atau juga mengeksekusi goal masih menunggu jawaban pengguna. Perubahan kode menunggu persetujuan alur ini; rapat otomatis yang sudah ada tetap mengikuti deviasi 23.
+
 ## Langkah
 
 ### 0. Fondasi
