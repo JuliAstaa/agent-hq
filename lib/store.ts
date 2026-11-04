@@ -8,7 +8,7 @@
 import { createStore, type StoreApi } from "zustand/vanilla";
 import { CRON_ACTION_LABEL, type CronCmd, type CronState } from "./cron";
 import { normalizeEvent, SEV, STATUS, type AgentPatch, type AttackNode, type Severity, type Status } from "./events";
-import { checkServerAlarm, newServerAlarm, SERVER_LOG_ID, type ServerStats } from "./server";
+import { checkServerAlarm, newServerAlarm, SERVER_LOG_ID, serverPoint, trimHistory, type ServerPoint, type ServerStats } from "./server";
 import { inferDept, type Dept } from "./teams";
 import { avatarColor } from "./palette";
 import { truncate } from "./format";
@@ -107,6 +107,8 @@ export interface HQState {
   cronCmds: CronCmd[];
   /** Latest server monitor sample; null = none (the server room stays decor). */
   server: ServerStats | null;
+  /** Server samples of the last 30 minutes, oldest first, for the Server panel charts (bridge history + live). */
+  serverHistory: ServerPoint[];
 
   applyEvent: (raw: unknown) => void;
   pushLog: (entry: { id: string; level?: string; message?: string }) => void;
@@ -294,7 +296,11 @@ export function createHQStore(): HQStore {
         return;
       }
       if (e.kind === "server_stats") {
-        const server = { ...e.stats, receivedAt: Date.now() - e.ageMs };
+        const now = Date.now();
+        const server = { ...e.stats, receivedAt: now - e.ageMs };
+        // The first sample of a connection brings the bridge's history: it replaces what this page had.
+        const before = e.history ? e.history.map((h) => ({ at: now - h.ageMs, cpu: h.cpu, mem: h.mem, disk: h.disk })) : get().serverHistory;
+        const serverHistory = trimHistory([...before.filter((p) => p.at < server.receivedAt), serverPoint(server)], server.receivedAt);
         const notes = checkServerAlarm(serverAlarm, server);
         if (notes.length) {
           const d = draft();
@@ -303,7 +309,7 @@ export function createHQStore(): HQStore {
           if (toast) toastInto(d, toast);
           commit(d);
         }
-        set({ server });
+        set({ server, serverHistory });
         emit({ type: "server" });
         return;
       }
@@ -364,6 +370,7 @@ export function createHQStore(): HQStore {
       cron: null,
       cronCmds: [],
       server: null,
+      serverHistory: [],
 
       applyEvent: (raw) => {
         for (const e of normalizeEvent(raw)) {
@@ -387,7 +394,7 @@ export function createHQStore(): HQStore {
         d.soc = { alerts: [], total: 0 };
         commit(d);
         const hadCron = get().cron !== null, hadServer = get().server !== null;
-        set({ cron: null, cronCmds: [], server: null }); // a new connection sends its own schedule and samples (if any)
+        set({ cron: null, cronCmds: [], server: null, serverHistory: [] }); // a new connection sends its own schedule and samples (if any)
         serverAlarm = newServerAlarm();
         emit({ type: "reset" });
         if (hadCron) emit({ type: "cron" }); // hide the schedule board

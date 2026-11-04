@@ -1,6 +1,6 @@
 // Server monitor (prd.md §7.8): the machine Agent HQ runs on, measured by the bridge (lib/bridge/server-stats.ts).
-// Types, normalization, levels, formatting and the warning rules shared by the store and the 3D server room.
-// Pure functions only.
+// Types, normalization, levels, history, chart geometry, formatting and the warning rules shared by the bridge, the
+// store, the 3D server room and the Server panel. Pure functions only.
 
 export interface ServerStats {
   /** process.platform of the bridge, e.g. "linux" or "win32". */
@@ -29,6 +29,28 @@ export const SERVER_INTERVAL_MS = 5000;
 export const SERVER_STALE_MS = 20_000;
 /** Log/agent id used for server warnings (like "SOC" for alerts). */
 export const SERVER_LOG_ID = "Server";
+/** Window event the engine dispatches when the server room is clicked; Office opens the Server panel. */
+export const SERVER_ROOM_EVENT = "agenthq:server-room";
+/** History kept by the bridge and the office for the panel charts. */
+export const SERVER_HISTORY_MS = 30 * 60_000;
+/** Upper bound on kept history points (30 minutes at 5 s = 360). */
+export const SERVER_HISTORY_MAX = 400;
+
+/** One history point: shares 0..1, null = unknown. `at` is ms on the local clock (bridge or office). */
+export interface ServerPoint {
+  at: number;
+  cpu: number | null;
+  mem: number | null;
+  disk: number | null;
+}
+
+/** A history point as the bridge sends it: its age instead of a time (the clocks may differ). */
+export interface ServerHistoryPoint {
+  ageMs: number;
+  cpu: number | null;
+  mem: number | null;
+  disk: number | null;
+}
 
 /* ---------------- normalization ---------------- */
 
@@ -43,8 +65,25 @@ const frac = (v: unknown): number | null => {
   return n <= 1 ? n : n <= 100 ? n / 100 : null; // values above 1 are read as percent
 };
 
-/** Raw {"type":"server_stats"} event -> stats without receivedAt, plus the bridge's age of the sample. */
-export function normalizeServerStats(ev: Record<string, unknown>): { stats: Omit<ServerStats, "receivedAt">; ageMs: number } {
+/** `history` of a sample for a new viewer, oldest first; null when the field is missing (live samples). */
+function normalizeHistory(v: unknown): ServerHistoryPoint[] | null {
+  if (!Array.isArray(v)) return null;
+  const out: ServerHistoryPoint[] = [];
+  for (const p of v.slice(-SERVER_HISTORY_MAX)) {
+    if (!p || typeof p !== "object") continue;
+    const r = p as Record<string, unknown>;
+    const ageMs = num(r.age_ms);
+    if (ageMs != null) out.push({ ageMs, cpu: frac(r.cpu), mem: frac(r.mem), disk: frac(r.disk) });
+  }
+  return out.sort((a, b) => b.ageMs - a.ageMs);
+}
+
+/** Raw {"type":"server_stats"} event -> stats without receivedAt, plus the bridge's age of the sample and its history. */
+export function normalizeServerStats(ev: Record<string, unknown>): {
+  stats: Omit<ServerStats, "receivedAt">;
+  ageMs: number;
+  history: ServerHistoryPoint[] | null;
+} {
   const load = Array.isArray(ev.load) ? ev.load.slice(0, 3).map(num) : [];
   const cores = num(ev.cores);
   const age = Number(ev.age_ms);
@@ -64,6 +103,7 @@ export function normalizeServerStats(ev: Record<string, unknown>): { stats: Omit
       appRss: num(ev.app_rss),
     },
     ageMs: Number.isFinite(age) && age > 0 ? age : 0,
+    history: normalizeHistory(ev.history),
   };
 }
 
@@ -98,6 +138,64 @@ export function serverState(s: ServerStats, now: number): { label: string; color
   if (top >= 0.9) return { label: "KRITIS", color: LEVEL_COLOR.hot };
   if (top >= 0.75) return { label: "SIBUK", color: LEVEL_COLOR.warn };
   return { label: "NORMAL", color: LEVEL_COLOR.ok };
+}
+
+/* ---------------- history ---------------- */
+
+export const serverPoint = (s: ServerStats): ServerPoint => ({ at: s.receivedAt, cpu: s.cpu, mem: memPct(s), disk: diskPct(s) });
+
+/** Points of the last SERVER_HISTORY_MS before `now`, at most SERVER_HISTORY_MAX (the newest). `points` is oldest first. */
+export function trimHistory(points: ServerPoint[], now: number): ServerPoint[] {
+  const cut = now - SERVER_HISTORY_MS;
+  let i = 0;
+  while (i < points.length && points[i].at < cut) i++;
+  i = Math.max(i, points.length - SERVER_HISTORY_MAX);
+  return i ? points.slice(i) : points;
+}
+
+export type ChartKey = "cpu" | "mem" | "disk";
+
+/** Chart coordinates of one metric at time `at` in a w x h box showing [t1 - SERVER_HISTORY_MS, t1], 0% at the bottom. */
+export function chartXY(at: number, v: number, t1: number, w: number, h: number): [number, number] {
+  const x = ((at - (t1 - SERVER_HISTORY_MS)) / SERVER_HISTORY_MS) * w;
+  return [Math.round(x * 10) / 10, Math.round((1 - clamp01(v)) * h * 10) / 10];
+}
+
+/**
+ * Line runs of one metric for the Server panel chart (see chartXY). A run breaks at unknown values and where
+ * samples are missing (more than `gapMs` between two samples, e.g. a restart of the bridge).
+ */
+export function chartLines(points: ServerPoint[], key: ChartKey, t1: number, w: number, h: number, gapMs: number): [number, number][][] {
+  const t0 = t1 - SERVER_HISTORY_MS;
+  const lines: [number, number][][] = [];
+  let cur: [number, number][] = [];
+  let lastAt = -Infinity;
+  const end = () => {
+    if (cur.length) lines.push(cur);
+    cur = [];
+  };
+  for (const p of points) {
+    const v = p[key];
+    if (p.at < t0 || p.at > t1) continue;
+    if (v == null || p.at - lastAt > gapMs) end();
+    lastAt = p.at;
+    if (v == null) continue;
+    cur.push(chartXY(p.at, v, t1, w, h));
+  }
+  end();
+  return lines;
+}
+
+/** Lowest and highest known value of a metric (null without any). */
+export function chartRange(points: ServerPoint[], key: ChartKey): { min: number; max: number } | null {
+  let min = Infinity, max = -Infinity;
+  for (const p of points) {
+    const v = p[key];
+    if (v == null) continue;
+    if (v < min) min = v;
+    if (v > max) max = v;
+  }
+  return min === Infinity ? null : { min, max };
 }
 
 /* ---------------- formatting ---------------- */

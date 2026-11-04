@@ -183,12 +183,16 @@ Not in the prototype (there the server room is decor). The server room on floor 
   "mem_used": 2577006592, "mem_total": 4085719040, "disk_used": 31138512896, "disk_avail": 9126313984,
   "disk_size": 42144039936, "uptime_s": 1036800, "app_rss": 220200960 }
 ```
-- Sampled every 5 s, only while at least one viewer is connected to the stream; the first sample comes 1 s after the first viewer connects (CPU needs two readings). New viewers get the latest sample right after the agent snapshot (and the schedule), with `age_ms`. It is never an agent and never replayed as a log line. `POST /event` ignores a posted `server_stats`: only the bridge produces it.
+- Sampled every 5 s from the start of the server (`instrumentation.ts`), also while nobody watches; the first sample comes 1 s after the start (CPU needs two readings). The bridge keeps the samples of the last 30 minutes in memory (at most 400; a restart starts empty). New viewers get the latest sample right after the agent snapshot (and the schedule), with `age_ms` and `history`: the earlier samples of the last 30 minutes, oldest first, as shares 0..1 (`null` = unknown). Live samples carry no `history`. It is never an agent and never replayed as a log line. `POST /event` ignores a posted `server_stats`: only the bridge produces it.
+```json
+"history": [{ "age_ms": 1795000, "cpu": 0.031, "mem": 0.474, "disk": 0.59 }, { "age_ms": 1790000, "cpu": 0.028, "mem": 0.474, "disk": 0.59 }]
+```
 - `cpu`: busy share of all cores since the previous sample (0..1, from `os.cpus()` times). `load`: `os.loadavg()`, `null` on Windows (always zero there; the office then leaves it out). Memory: `MemTotal` and `MemTotal - MemAvailable` from `/proc/meminfo` on Linux, otherwise `os.totalmem()` and `os.totalmem() - os.freemem()`. Disk: `fs.statfs` of `HQ_DISK_PATH` (default `/`): used `(blocks - bfree) * bsize`, avail `bavail * bsize`, size `blocks * bsize`; percent like `df`: `used / (used + avail)`. `uptime_s`: `os.uptime()`. `app_rss`: resident memory of the Agent HQ server process. A value that cannot be read is `null`.
 - Nothing else leaves the server: no host name, IP address, user, process list, or command line.
 - `HQ_SERVER_STATS=0` (or `off`, `false`) turns sampling off; the room then stays decor.
 - In the office: left rack = CPU, right rack = RAM. LED rows light up from the bottom by percent (at least one row), colored by level: below 50% `#a6e22e`, 50-75% `#ffd23f`, 75-90% `#ff9f1c`, from 90% `#ff4f5e`; the CPU rack blinks faster the busier it is. The tank = disk: liquid height by percent, pink, red from 90%. A wall screen above the racks (redrawn every 1 s while floor 2 is visible) shows CPU with cores and load, RAM and disk with used / total, uptime, and the Agent HQ process memory, plus a state: NORMAL, SIBUK (a value from 75%), KRITIS (a value from 90%). No sample for 20 s: grey LEDs and liquid, and the screen says TERPUTUS with the age of the last sample.
 - Without any sample (demo mode, static export, sampling off) the room looks exactly like the prototype (random blinking LEDs, bubbling tank) and the screen is hidden.
+- Clicking the server room (a rack, the tank or the wall screen) opens the **Server** panel on the right. Only in the Lt.2 view (in Semua floor 3 is in front of it, as for the schedule board) and only while there is a sample (decor is not clickable); the pointer turns into a hand over it. The panel shows the state (as on the screen) and the age of the last sample; a card each for CPU (cores, load 1/5/15 minutes), RAM and disk (used / total, free) with the percent, a bar in the level color, and a line chart of the last 30 minutes (from `history` plus the live samples, with the 90% warning line); then uptime, Agent HQ memory and platform; and the last 5 `Server` log lines. Without a fresh sample a banner says the data is cut off and since when, and the colors turn grey. It closes with Tutup or Esc, and it takes the spot of the Hermes and terminal panels: opening one closes the other.
 - Warnings, computed in the office (each viewer): CPU at 90% or more for 60 s, RAM at 90% or more, disk at 90% or more give a `warn` log line under the name `Server` and a toast; once the value is below 85% again, an `info` line says it is back to normal.
 
 ## 8. Claude Code integration
@@ -263,7 +267,7 @@ Cartoon cutaway building on a floating rock in an alien sky. Front and right wal
 | Office | 9 home desks in a 3 x 3 grid (one per agent, max 9; more agents are listed in the roster only), monitor shows status, name plate, hover chair with status ring |
 | Ruang rapat | Whiteboard (corat-coret, strokes accumulate), card table with 2 stools (main kartu) |
 | Pojok baca | Bookshelf, 2 armchairs (baca buku) |
-| Server room | Server monitor (§7.8): left rack CPU, right rack RAM, tank disk, wall screen with the numbers. Without data: racks with blinking LEDs, bubbling tank (decor, as in the prototype) |
+| Server room | Server monitor (§7.8): left rack CPU, right rack RAM, tank disk, wall screen with the numbers; a click opens the Server panel. Without data: racks with blinking LEDs, bubbling tank (decor, as in the prototype) |
 | Hall jendela | 2 window spots (bengong lihat planet) |
 | Lift | Glass tube to floor 3 |
 
@@ -430,10 +434,11 @@ Decisions:
 - [x] Web terminal (§7.7): Terminal button and panel for a separate ttyd on loopback, `examples/terminal/ttyd.sh` launcher, docs/terminal.md.
 
 ### M7. Server monitor (§7.8)
-- [x] Bridge sampler (`lib/bridge/server-stats.ts`, Node built-ins only): CPU, load, RAM, disk, uptime, app memory every 5 s while someone watches; latest sample for new viewers; `HQ_SERVER_STATS=0` turns it off.
+- [x] Bridge sampler (`lib/bridge/server-stats.ts`, Node built-ins only): CPU, load, RAM, disk, uptime, app memory every 5 s from server start (`instrumentation.ts`); latest sample plus 30 minutes of history for new viewers; `HQ_SERVER_STATS=0` turns it off.
 - [x] Server room on floor 2: racks show CPU and RAM, the tank shows disk, wall screen with the numbers; decor without data.
 - [x] Warnings in the log and as a toast (CPU 90% for 60 s, RAM 90%, disk 90%), back-to-normal line below 85%.
-- [x] Tests: sampler, parsing and routes (`tests/unit/server-stats.test.ts`), levels, formatting, warnings and store (`tests/unit/server.test.ts`), samples over `next start` and `HQ_SERVER_STATS=0` (`tests/integration/server-stats.test.ts`), parity ignores `server_stats`, the visual test hides the monitor.
+- [x] Server panel (`components/ServerPanel.tsx`): a click on the server room in the Lt.2 view opens it; values, 30 minute charts, server warnings.
+- [x] Tests: sampler, parsing and routes (`tests/unit/server-stats.test.ts`), levels, formatting, warnings and store (`tests/unit/server.test.ts`), samples over `next start` and `HQ_SERVER_STATS=0` (`tests/integration/server-stats.test.ts`), parity ignores `server_stats`, the visual test hides the monitor, the UI test clicks the server room and checks the panel (`tests/e2e/ui.spec.ts`).
 
 ### M5. Polish
 - [ ] Follow-cam toggle for the selected agent.

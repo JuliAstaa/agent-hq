@@ -67,6 +67,8 @@ export interface ServerRoom {
   liquid: THREE.Mesh<THREE.BufferGeometry, THREE.MeshToonMaterial>;
   /** Wall screen above the racks, hidden until the bridge sends a sample. */
   screen: { group: THREE.Group; face: CanvasTex };
+  /** Racks, tank and screen: a click on one of them opens the Server panel. */
+  hit: THREE.Object3D[];
 }
 
 /** Back wall of the server room, above both racks. [x, y above F2, z] of the screen's center. */
@@ -116,11 +118,12 @@ export function buildFloor2Props(b: Build, g2: THREE.Group, tentacles: THREE.Gro
   let liquid: ServerRoom["liquid"];
   const screenFace = canvasTex(SERVER_SCREEN_W, SERVER_SCREEN_H);
   const screenGroup = new THREE.Group();
+  const serverHit: THREE.Object3D[] = [screenGroup];
 
   // server room
   {
     for (const [rack, x] of [5.9, 7.3].entries()) {
-      const g = new THREE.Group(); g.position.set(x, F2, -6.9); g2.add(g);
+      const g = new THREE.Group(); g.position.set(x, F2, -6.9); g2.add(g); serverHit.push(g);
       boxAt(g, 1.2, 3.2, 1.2, 0, 0, 0, M.dark, 0.1);
       for (let r = 0; r < 6; r++) {
         boxAt(g, 1.0, 0.3, 0.06, 0, 0.35 + r * 0.46, 0.61, toon("#2a2350"), 0.03);
@@ -131,7 +134,7 @@ export function buildFloor2Props(b: Build, g2: THREE.Group, tentacles: THREE.Gro
         }
       }
     }
-    const g = new THREE.Group(); g.position.set(8.3, F2, -4.6); g2.add(g);
+    const g = new THREE.Group(); g.position.set(8.3, F2, -4.6); g2.add(g); serverHit.push(g);
     cyl(g, 0.85, 1.0, 0.6, 0, 0, 0, M.dark, 24);
     const glass = mesh(new THREE.CylinderGeometry(0.7, 0.7, 2.6, 24, 1, true), thin(toon("#ffd1f3", { transparent: true, opacity: 0.32, side: THREE.DoubleSide }), 0.8), false, false);
     glass.position.y = 1.9; g.add(glass);
@@ -270,6 +273,6 @@ export function buildFloor2Props(b: Build, g2: THREE.Group, tentacles: THREE.Gro
   return {
     blinkers, tankBubbles, board, clockHands: clockHands!, wb: wb!, taskBoard: { group: tbGroup, face, cards },
     scheduleBoard: { group: sGroup, face: sFace, bell },
-    server: { liquid: liquid!, screen: { group: screenGroup, face: screenFace } },
+    server: { liquid: liquid!, screen: { group: screenGroup, face: screenFace }, hit: serverHit },
   };
 }

@@ -1,10 +1,12 @@
-// Server monitor, bridge side (lib/bridge/server-stats.ts, prd.md §7.8): readings, the sampling loop that runs only
-// while someone watches, the latest sample for new viewers, and the stream / event routes.
+// Server monitor, bridge side (lib/bridge/server-stats.ts, prd.md §7.8): readings, the sampling loop that runs from
+// server start (also without viewers), the latest sample and 30 minutes of history for new viewers, and the stream /
+// event routes.
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import os from "node:os";
 import { POST as postEvent } from "@/app/api/event/route";
 import { GET as getStream } from "@/app/api/stream/route";
 import { hub, listAgents, publish, resetHub, type BridgeEvent } from "@/lib/bridge/hub";
+import { SERVER_HISTORY_MAX, SERVER_HISTORY_MS } from "@/lib/server";
 import {
   cpuBusy, cpuTimes, diskPath, ensureServerStats, FIRST_SAMPLE_MS, parseMeminfo, sampleServer, serverStatsEnabled,
   serverStatsForViewer, VIEWER_MAX_AGE_MS,
@@ -86,34 +88,66 @@ describe("hub and loop", () => {
     expect(hub.recent).toHaveLength(0);
     const v = serverStatsForViewer(hub.server.lastAt + 1200);
     expect(v).toMatchObject({ type: "server_stats", cpu: 0.5, age_ms: 1200 });
-    expect(serverStatsForViewer(hub.server.lastAt + VIEWER_MAX_AGE_MS + 1)).toBeNull(); // too old (nobody was watching)
+    expect(serverStatsForViewer(hub.server.lastAt + VIEWER_MAX_AGE_MS + 1)).toBeNull(); // too old (sampling stopped)
   });
 
-  it("does not start without a viewer or when turned off", () => {
-    ensureServerStats();
-    expect(hub.server.timer).toBeNull();
-    hub.subs.add(() => {});
+  it("keeps 30 minutes of history; a new viewer gets the earlier samples with their age", () => {
+    const sample = (cpu: number) => publish({ type: "server_stats", cpu, mem_used: 1, mem_total: 4, disk_used: 1, disk_avail: 3 });
+    sample(0.1);
+    sample(0.2);
+    sample(0.3);
+    const h = hub.server.history;
+    expect(h.map((p) => [p.cpu, p.mem, p.disk])).toEqual([[0.1, 0.25, 0.25], [0.2, 0.25, 0.25], [0.3, 0.25, 0.25]]);
+    const t = hub.server.lastAt;
+    h[0].at = t - 10_000;
+    h[1].at = t - 5000;
+    const v = serverStatsForViewer(t + 1000)!;
+    expect(v).toMatchObject({ cpu: 0.3, age_ms: 1000 });
+    expect(v.history).toEqual([ // without the latest sample itself
+      { age_ms: 11_000, cpu: 0.1, mem: 0.25, disk: 0.25 },
+      { age_ms: 6000, cpu: 0.2, mem: 0.25, disk: 0.25 },
+    ]);
+    // older than 30 minutes is dropped, and never more than SERVER_HISTORY_MAX points
+    h[0].at = Date.now() - SERVER_HISTORY_MS - 1000;
+    sample(0.4);
+    expect(hub.server.history.map((p) => p.cpu)).toEqual([0.2, 0.3, 0.4]);
+    for (let i = 0; i < SERVER_HISTORY_MAX + 5; i++) sample(0.5);
+    expect(hub.server.history).toHaveLength(SERVER_HISTORY_MAX);
+  });
+
+  it("an unknown value stays null in the history", () => {
+    publish({ type: "server_stats", cpu: null });
+    expect(hub.server.history).toMatchObject([{ cpu: null, mem: null, disk: null }]);
+    const t = hub.server.lastAt;
+    hub.server.history[0].at = t - 5000;
+    publish({ type: "server_stats", cpu: 0.2 });
+    expect(serverStatsForViewer()!.history).toMatchObject([{ cpu: null, mem: null, disk: null }]);
+  });
+
+  it("starts without a viewer, but not when turned off", () => {
     process.env.HQ_SERVER_STATS = "0";
     ensureServerStats();
     expect(hub.server.timer).toBeNull();
+    delete process.env.HQ_SERVER_STATS;
+    expect(hub.subs.size).toBe(0);
+    ensureServerStats();
+    expect(hub.server.timer).not.toBeNull();
   });
 
-  it("samples while someone watches and stops without viewers", async () => {
-    const seen: BridgeEvent[] = [];
-    const send = (ev: BridgeEvent) => seen.push(ev);
-    hub.subs.add(send);
+  it("samples without viewers and keeps them for the first viewer", async () => {
     ensureServerStats();
     const timer = hub.server.timer;
     expect(timer).not.toBeNull();
-    ensureServerStats(); // a second viewer does not start a second loop
+    ensureServerStats(); // a second call does not start a second loop
     expect(hub.server.timer).toBe(timer);
     await sleep(FIRST_SAMPLE_MS + 500);
-    const stats = seen.filter((e) => e.type === "server_stats");
-    expect(stats).toHaveLength(1);
-    expect(stats[0].cpu).not.toBeUndefined();
-    expect(typeof stats[0].ts).toBe("string");
-    expect(hub.server.last).toBe(stats[0]);
+    const last = hub.server.last!;
+    expect(last.type).toBe("server_stats");
+    expect(last.cpu).not.toBeUndefined();
+    expect(typeof last.ts).toBe("string");
+    expect(hub.server.history).toHaveLength(1);
     expect(hub.server.timer).not.toBeNull(); // next sample queued
+    expect(serverStatsForViewer()).toMatchObject({ type: "server_stats", history: [] });
   }, 10_000);
 });
 
@@ -133,7 +167,7 @@ describe("routes", () => {
     expect(listAgents().map((a) => a.id)).toEqual(["a"]);
   });
 
-  it("GET /api/stream sends the latest sample after the snapshot and starts the loop", async () => {
+  it("GET /api/stream sends the latest sample after the snapshot and starts the loop if it is not running", async () => {
     publish({ type: "server_stats", cpu: 0.25, interval_ms: 5000 });
     const ctrl = new AbortController();
     const res = await getStream(new Request("http://localhost:8787/api/stream", { signal: ctrl.signal }));
@@ -142,7 +176,7 @@ describe("routes", () => {
     const second = await it.next();
     expect(JSON.parse(first.value!.data).type).toBe("snapshot");
     const ev = JSON.parse(second.value!.data);
-    expect(ev).toMatchObject({ type: "server_stats", cpu: 0.25 });
+    expect(ev).toMatchObject({ type: "server_stats", cpu: 0.25, history: [] });
     expect(ev.age_ms).toBeGreaterThanOrEqual(0);
     expect(hub.subs.size).toBe(1);
     expect(hub.server.timer).not.toBeNull();

@@ -1,6 +1,7 @@
 // Server monitor (prd.md §7.8): measure the machine Agent HQ runs on with Node built-ins and publish
-// {"type":"server_stats"} every 5 s while someone watches the stream. Read only: no command is ever run, and no
-// host name, address, user or process list leaves the server.
+// {"type":"server_stats"} every 5 s from server start (instrumentation.ts), also while nobody watches, so the hub
+// always holds the last 30 minutes for the panel charts. Read only: no command is ever run, and no host name,
+// address, user or process list leaves the server.
 
 import { promises as fsp } from "node:fs";
 import os from "node:os";
@@ -9,7 +10,7 @@ import { hub, publish, type BridgeEvent } from "./hub";
 export const SAMPLE_MS = 5000;
 /** CPU busy share needs two readings: the first sample comes this long after the loop starts. */
 export const FIRST_SAMPLE_MS = 1000;
-/** A stored sample older than this is not sent to new viewers (the loop was stopped without viewers). */
+/** A stored sample older than this is not sent to new viewers (sampling stopped, e.g. the hub was reset). */
 export const VIEWER_MAX_AGE_MS = 3 * SAMPLE_MS;
 
 export interface CpuTimes {
@@ -96,34 +97,43 @@ export async function sampleServer(prev: CpuTimes | null, path = diskPath()): Pr
   return { ev, cpu };
 }
 
-/** The latest sample for a new viewer, with its age; null when there is none or it is old. */
+/**
+ * The latest sample for a new viewer, with its age and `history`: the earlier samples of the last 30 minutes, oldest
+ * first, as shares with their age. null when there is no sample or it is old.
+ */
 export function serverStatsForViewer(now = Date.now()): BridgeEvent | null {
   const s = hub.server;
   if (!s.last || now - s.lastAt > VIEWER_MAX_AGE_MS) return null;
-  return { ...s.last, age_ms: Math.max(0, now - s.lastAt) };
+  const history = s.history
+    .filter((p) => p.at < s.lastAt)
+    .map((p) => ({ age_ms: Math.max(0, now - p.at), cpu: round(p.cpu, 3), mem: round(p.mem, 3), disk: round(p.disk, 3) }));
+  return { ...s.last, age_ms: Math.max(0, now - s.lastAt), history };
 }
 
 async function tick(): Promise<void> {
   const s = hub.server;
-  if (!hub.subs.size || !serverStatsEnabled()) {
-    s.timer = null; // nobody watches: stop until the next viewer
+  if (!serverStatsEnabled()) {
+    s.timer = null;
     s.prev = null;
     return;
   }
   try {
     const { ev, cpu } = await sampleServer(s.prev);
     s.prev = cpu;
-    if (hub.server === s && hub.subs.size) publish(ev);
+    if (hub.server === s) publish(ev); // kept in the hub (history) even when nobody watches
   } catch {}
   if (hub.server !== s) return; // the hub was reset meanwhile (tests)
   s.timer = setTimeout(tick, SAMPLE_MS);
   s.timer.unref?.();
 }
 
-/** Start the sampling loop if a viewer is connected and it is not running yet (called by the stream route). */
+/**
+ * Start the sampling loop unless it runs already or HQ_SERVER_STATS turns it off. Called once at server start
+ * (instrumentation.ts) and again by the stream route, in case the server was started without instrumentation.
+ */
 export function ensureServerStats(): void {
   const s = hub.server;
-  if (s.timer || !hub.subs.size || !serverStatsEnabled()) return;
+  if (s.timer || !serverStatsEnabled()) return;
   s.prev = cpuTimes();
   s.timer = setTimeout(tick, FIRST_SAMPLE_MS);
   s.timer.unref?.();

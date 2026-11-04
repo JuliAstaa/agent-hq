@@ -149,7 +149,7 @@ meja atau ke ruangan timnya. Kalau tugasnya selesai sebelum kartu diambil, kartu
 santai. Papan punya tiga tempat. Kalau penuh, atau agen sudah sibuk sejak awal, agen langsung ke meja.
 
 **Ruang server** (Lt.2, kanan belakang) memantau mesin tempat Agent HQ jalan, misalnya VPS-mu. Server Agent HQ
-mengukurnya sendiri tiap 5 detik selama halaman dibuka, tanpa program tambahan:
+mengukurnya sendiri tiap 5 detik sejak start, juga saat tidak ada yang membuka halaman, tanpa program tambahan:
 
 - **Rak kiri = CPU, rak kanan = RAM.** Baris LED menyala dari bawah sesuai persen. Warnanya hijau di bawah 50%,
   kuning sampai 75%, oranye sampai 90%, lalu merah. Makin sibuk CPU, makin cepat LED-nya berkedip.
@@ -158,6 +158,10 @@ mengukurnya sendiri tiap 5 detik selama halaman dibuka, tanpa program tambahan:
 - **Peringatan** di Log Aktivitas (nama `Server`) dan toast: CPU 90% atau lebih selama 1 menit, RAM atau disk
   90% atau lebih. Baris "normal lagi" muncul setelah turun di bawah 85%.
 - Data berhenti datang lebih dari 20 detik: LED abu-abu dan layar menulis TERPUTUS.
+- **Klik rak, tabung, atau layarnya** (di tampilan Lt.2) untuk membuka panel **Server** di kanan: CPU, RAM, dan
+  disk dengan detailnya, grafik 30 menit terakhir (arahkan kursor ke grafik untuk membaca nilainya), uptime, memori
+  Agent HQ, dan peringatan server terakhir. Tutup dengan tombol Tutup atau Esc. Riwayat 30 menit disimpan di memori
+  server, jadi grafiknya langsung terisi saat halaman dibuka dan mulai kosong lagi setelah Agent HQ di-restart.
 
 Yang dikirim hanya angka; nama host, IP, dan daftar proses tidak pernah keluar dari server. Di mode demo ruangan
 ini hanya hiasan. Matikan dengan `HQ_SERVER_STATS=0`; disk lain dengan `HQ_DISK_PATH=/data`. Di Windows load

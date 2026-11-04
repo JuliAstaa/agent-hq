@@ -1,5 +1,6 @@
-// Server monitor over HTTP on the built app (`next start`, needs `npm run build`, prd.md §7.8): a viewer of /api/stream
-// receives samples, a later viewer gets the latest one right after the snapshot, and HQ_SERVER_STATS=0 turns it off.
+// Server monitor over HTTP on the built app (`next start`, needs `npm run build`, prd.md §7.8): sampling starts with
+// the server (instrumentation.ts), so the first viewer already gets history; a viewer of /api/stream receives samples,
+// a later viewer gets the latest one right after the snapshot, and HQ_SERVER_STATS=0 turns it off.
 
 import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
@@ -89,6 +90,22 @@ describe.skipIf(!BUILT)("server monitor on next start", () => {
     expect(agents.agents).toEqual([]); // never an agent
     a.stop();
     b.stop();
+  }, 60_000);
+
+  it("samples from server start, before anyone watches: the first viewer gets history", async () => {
+    const base = await start();
+    await sleep(7000); // first sample 1 s after start, the next 5 s later
+    const v = listen(base);
+    await until(() => v.events.length >= 2);
+    expect(v.events[0].type).toBe("snapshot");
+    const s = v.events[1];
+    expect(s.type).toBe("server_stats");
+    const history = s.history as { age_ms: number; cpu: number | null; mem: number | null; disk: number | null }[];
+    expect(history.length).toBeGreaterThanOrEqual(1);
+    expect(history[0].age_ms).toBeGreaterThan(s.age_ms as number);
+    expect(history[0].mem as number).toBeGreaterThan(0);
+    expect(history[0].mem as number).toBeLessThanOrEqual(1);
+    v.stop();
   }, 60_000);
 
   it("HQ_SERVER_STATS=0 sends no samples", async () => {

@@ -18,7 +18,7 @@ import { drawArcade, drawBoard, drawEmptyDesk, drawPlate, drawScreen, drawTaskBo
 import { drawRedWall, drawReportBoard, drawSOC, drawStation, newSocAnim } from "./displays/security";
 import { drawScheduleBoard } from "./displays/schedule";
 import { drawServerScreen, litRows } from "./displays/server";
-import { diskPct, LEVEL_COLOR, levelOf, memPct, OFFLINE_COLOR, serverStale } from "@/lib/server";
+import { diskPct, LEVEL_COLOR, levelOf, memPct, OFFLINE_COLOR, SERVER_ROOM_EVENT, serverStale } from "@/lib/server";
 import { CRON_BOARD_EVENT } from "@/lib/cron";
 import { createFx } from "./fx";
 import { createSkyEvents, type SkyEventKind } from "./skyEvents";
@@ -503,6 +503,13 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
     ray.setFromCamera(ndc, camera);
     return ray.intersectObject(SB.group, true).length > 0;
   }
+  /** Server room rack, tank or screen under the pointer: floor-2 view only, and only while it shows samples (not decor). */
+  function pickServerRoom(e: PointerEvent): boolean {
+    if (!serverOn() || !g2.visible || g3.visible) return false;
+    ndc.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
+    ray.setFromCamera(ndc, camera);
+    return ray.intersectObjects(SR.hit, true).some((h) => (h.object as THREE.Mesh).isMesh);
+  }
   const onDown = (e: PointerEvent) => {
     downAt = { x: e.clientX, y: e.clientY };
   };
@@ -511,11 +518,12 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
     const id = pickAgent(e);
     if (id) toggleFocus(id);
     else if (pickScheduleBoard(e)) stage.dispatchEvent(new CustomEvent(CRON_BOARD_EVENT, { bubbles: true }));
+    else if (pickServerRoom(e)) stage.dispatchEvent(new CustomEvent(SERVER_ROOM_EVENT, { bubbles: true }));
   };
   const onMove = (e: PointerEvent) => {
     if (performance.now() - hoverT < 60) return;
     hoverT = performance.now();
-    renderer.domElement.style.cursor = pickAgent(e) || pickScheduleBoard(e) ? "pointer" : "";
+    renderer.domElement.style.cursor = pickAgent(e) || pickScheduleBoard(e) || pickServerRoom(e) ? "pointer" : "";
   };
   const onResize = () => {
     camera.aspect = vw() / vh();

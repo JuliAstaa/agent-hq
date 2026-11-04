@@ -8,11 +8,13 @@ import { setLiveUrlSource } from "@/lib/rename";
 import { hqStore, type HQStore } from "@/lib/store";
 import { createTransport, type Transport } from "@/lib/transport";
 import { CRON_BOARD_EVENT } from "@/lib/cron";
+import { SERVER_ROOM_EVENT } from "@/lib/server";
 import ConnectModal from "./ConnectModal";
 import CronPanel from "./CronPanel";
 import HermesPanel, { useHermesAvailable } from "./HermesPanel";
 import LogPanel from "./LogPanel";
 import Roster from "./Roster";
+import ServerPanel from "./ServerPanel";
 import TerminalPanel, { useTerminalUrl } from "./TerminalPanel";
 import Toast from "./Toast";
 import TopBar from "./TopBar";
@@ -54,12 +56,14 @@ export default function Office() {
   const [hermesOpen, setHermesOpen] = useState(false);
   const closeHermes = useCallback(() => setHermesOpen(false), []);
   const hermesOn = useHermesAvailable(liveUrl);
-  // The Hermes and terminal panels take the same spot on the right, so opening one closes the other. The open
+  // The Hermes, terminal and server panels take the same spot on the right, so opening one closes the others. The open
   // terminal panel keeps its address: ttyd does not depend on the office stream, so a restart of Agent HQ (e.g.
   // ./start.sh typed in that terminal) hides the button for a moment but leaves the panel connected.
   const [termOpenUrl, setTermOpenUrl] = useState<string | null>(null);
   const closeTerm = useCallback(() => setTermOpenUrl(null), []);
   const termUrl = useTerminalUrl(liveUrl);
+  const [serverOpen, setServerOpen] = useState(false);
+  const closeServer = useCallback(() => setServerOpen(false), []);
 
   useEffect(() => {
     const engine = createEngine(stageRef.current!, labelsRef.current!, hqStore);
@@ -74,6 +78,13 @@ export default function Office() {
 
     const openCron = () => setCronOpen(true); // the 3D schedule board was clicked
     window.addEventListener(CRON_BOARD_EVENT, openCron);
+    const openServer = () => {
+      // the 3D server room was clicked
+      setHermesOpen(false);
+      setTermOpenUrl(null);
+      setServerOpen(true);
+    };
+    window.addEventListener(SERVER_ROOM_EVENT, openServer);
 
     window.agentHQ = {
       store: hqStore,
@@ -92,6 +103,7 @@ export default function Office() {
     };
     return () => {
       window.removeEventListener(CRON_BOARD_EVENT, openCron);
+      window.removeEventListener(SERVER_ROOM_EVENT, openServer);
       transport.close();
       demo.stop();
       engine.dispose();
@@ -113,6 +125,7 @@ export default function Office() {
           hermesOn
             ? () => {
                 setTermOpenUrl(null);
+                setServerOpen(false);
                 setHermesOpen((v) => !v);
               }
             : undefined
@@ -121,6 +134,7 @@ export default function Office() {
           termUrl
             ? () => {
                 setHermesOpen(false);
+                setServerOpen(false);
                 setTermOpenUrl((v) => (v ? null : termUrl));
               }
             : undefined
@@ -139,6 +153,7 @@ export default function Office() {
       {cronOpen && <CronPanel open onClose={closeCron} liveUrl={liveUrl} />}
       {hermesOpen && hermesOn && <HermesPanel onClose={closeHermes} liveUrl={liveUrl} />}
       {termOpenUrl && <TerminalPanel url={termOpenUrl} onClose={closeTerm} />}
+      {serverOpen && <ServerPanel onClose={closeServer} />}
     </>
   );
 }
