@@ -166,7 +166,7 @@ export default function MeetingPanel({ room, onRoom, onClose, liveUrl }: { room:
           <Button type="submit" tone="primary" className={OFF} disabled={!ready || busy || chosen.size >= 5 || !d.name.trim() || !d.role.trim()}>{busy ? "Membuat agen..." : "Buat dan tambahkan"}</Button>
         </form>}
         <label className="flex items-center gap-3 text-[13px]" htmlFor="meeting-rounds"><span className="shrink-0">Putaran diskusi</span><select id="meeting-rounds" className="w-[68px] [font-family:inherit] text-[13px] px-2 py-[6px] border-[2.5px] border-ink rounded-[10px] bg-paper" value={d.rounds} onChange={(e) => edit({ rounds: Number(e.target.value) })}>{[1, 2, 3, 4, 5].map((n) => <option key={n}>{n}</option>)}</select></label>
-        <p className="m-0 text-[12px]">Setiap peserta berbicara sekali per putaran, lalu fasilitator membuat kesimpulan. Rencana tidak dieksekusi otomatis.</p>
+        <p className="m-0 text-[12px]">Agen dapat memakai tool Hermes untuk riset dan membaca sumber. Setiap peserta berbicara sekali per putaran, lalu fasilitator membuat kesimpulan. Rencana tidak dieksekusi otomatis.</p>
         {automatic && <p className="m-0 text-[13px] bg-[#ffe6a6] p-2">Ruangan sedang dipakai {occupancy[room]?.name}. Pilih ruangan kosong atau tunggu rapat selesai.</p>}
         {unavailable && <p className="m-0 text-[13px]">Ada peserta yang sedang bekerja. Muat ulang atau pilih peserta lain.</p>}
         <Button tone="primary" className={OFF} disabled={!ready || busy || !d.goal.trim() || chosen.size < 2 || chosen.size > 5 || automatic || unavailable} onClick={() => {
@@ -188,7 +188,7 @@ export default function MeetingPanel({ room, onRoom, onClose, liveUrl }: { room:
         }}>
           {!view.messages.length && <p className="text-[13px]">Menunggu pendapat pertama...</p>}
           {view.messages.map((m) => <article key={m.id} className={cn("text-[13px] leading-[1.5]", m.kind === "user" && "bg-[#ffe6a6] p-2 rounded-[10px]", m.kind === "summary" && "bg-[#e2f1bf] p-2 rounded-[10px]")}>
-            <div className="flex items-baseline justify-between gap-2"><b>{m.kind === "summary" ? `Kesimpulan · ${m.name}` : m.name}</b><time className="text-[10px] shrink-0">{new Date(m.at).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}</time></div>
+            <div className="flex items-baseline justify-between gap-2"><b>{m.kind === "summary" ? `Kesimpulan · ${m.name}` : m.kind === "tool" ? `Tool Hermes · ${m.name}` : m.name}</b><time className="text-[10px] shrink-0">{new Date(m.at).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}</time></div>
             <p className={cn("m-0 whitespace-pre-wrap break-words", ["tool", "note"].includes(m.kind) && "text-[11px] opacity-80")}>{m.text}{m.streaming ? " ▍" : ""}</p>
             {m.approval?.status === "pending" && <div className="flex flex-wrap gap-2 pt-2">{m.approval.choices.map((choice) => <Button key={choice} size="log" className={OFF} disabled={!ready || busy} onClick={() => void act({ action: "approve", ...target, sessionId: m.approval!.sessionId, itemId: m.approval!.itemId, choice })}>{APPROVAL_LABEL[choice]}</Button>)}</div>}
           </article>)}

@@ -11,9 +11,11 @@ test.beforeAll(async () => {
   fake = await startFakeHermes();
   fake.script = async (t) => {
     t.send("run.started");
+    t.send("tool.started", { tool_name: "web_search", preview: "strategi rilis", args: { query: "strategi rilis" } });
     t.send("assistant.delta", { delta: `Pendapat ${t.sessionId}` });
     await new Promise((r) => setTimeout(r, 150));
-    t.send("assistant.completed", { content: `Pendapat ${t.sessionId}: usulkan pengujian sebelum rilis.` });
+    t.send("tool.completed", { tool_name: "web_search" });
+    t.send("assistant.completed", { content: `Pendapat ${t.sessionId}: usulkan pengujian sebelum rilis. Sumber: https://docs.example.org/releases` });
     t.send("run.completed"); t.send("done");
   };
   const port = await new Promise<number>((resolve) => {
@@ -83,6 +85,9 @@ test("monitor opens a discussion, create two real agents, see their shared chat,
   await expect(panel.getByText("Selesai", { exact: true })).toBeVisible({ timeout: 30_000 });
   await expect(panel.getByRole("log", { name: "Percakapan rapat" })).toContainText("Arsitek rapat");
   await expect(panel.getByRole("log", { name: "Percakapan rapat" })).toContainText("Penguji rapat");
+  await expect(panel.getByRole("log", { name: "Percakapan rapat" })).toContainText("Tool Hermes · Arsitek rapat");
+  await expect(panel.getByRole("log", { name: "Percakapan rapat" })).toContainText("web_search: strategi rilis (Selesai)");
+  await expect(panel.getByRole("log", { name: "Percakapan rapat" })).toContainText("https://docs.example.org/releases");
   await expect(panel.getByText("Kesimpulan · Arsitek rapat", { exact: true })).toBeVisible();
   await page.screenshot({ path: "test-results/meeting-discussion-desktop.png" });
   const calls = fake.calls.filter((c) => c.path.endsWith("/chat/stream"));

@@ -110,6 +110,31 @@ describe("manual discussions", () => {
     expect(store.getState().agents.size).toBe(2);
   });
 
+  it("allows Hermes research tools, streams their progress and shares sourced findings with the next participant", async () => {
+    const a = await create("Peneliti"), b = await create("Reviewer");
+    const seen: DiscussionView[] = [];
+    const off = subscribeDiscussions((event) => seen.push(event.view));
+    fake.script = async (t) => {
+      t.send("run.started");
+      t.send("tool.started", { tool_name: "web_search", preview: "panduan rilis", args: { query: "panduan rilis" } });
+      await new Promise((r) => setTimeout(r, 80));
+      t.send("tool.completed", { tool_name: "web_search" });
+      t.send("assistant.completed", { content: "Hasil riset: uji regresi sebelum rilis. Sumber: https://docs.example.org/releases" });
+      t.send("run.completed"); t.send("done");
+    };
+    expect((await start([a, b], { goal: "Cari panduan rilis terbaru dan bandingkan sumbernya" })).status).toBe(202);
+    await end(); off();
+    const calls = fake.calls.filter((c) => c.path.endsWith("/chat/stream"));
+    const instruction = (calls[0].body as { system_message: string }).system_message;
+    expect(instruction).toContain("gunakan tool untuk memeriksanya");
+    expect(instruction).not.toContain("jangan menjalankan tool");
+    expect(instruction).toContain("jangan mengubah file");
+    expect(seen.some((view) => view.messages.some((m) => m.kind === "tool" && m.text.includes("Berjalan")))).toBe(true);
+    expect(discussionSnapshot()[0].messages.some((m) => m.kind === "tool" && m.text === "web_search: panduan rilis (Selesai)")).toBe(true);
+    expect(calls[1].body).toMatchObject({ message: expect.stringContaining("Hasil riset: uji regresi sebelum rilis. Sumber: https://docs.example.org/releases") });
+    expect(discussionSnapshot()[0].summary).toContain("https://docs.example.org/releases");
+  });
+
   it("locks participants against overlapping meetings and ordinary messages; new directions reach the next speaker; stop is scoped", async () => {
     fake.script = async (t) => {
       t.send("run.started"); t.send("assistant.delta", { delta: "Masih berdiskusi" });

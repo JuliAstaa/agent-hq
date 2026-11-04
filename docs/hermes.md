@@ -492,6 +492,15 @@ Hermes (hanya provider yang sudah login) dan disimpan sementara selama 1 menit. 
 `agent-hq-hermes.json` (bisa diganti dengan `HQ_HERMES_CHAT_FILE`), jadi tetap berlaku setelah Agent HQ restart.
 **Terakhir dijawab** menunjukkan model yang benar-benar menjawab. Hermes versi lama tanpa route itu menampilkan
 "Daftar model" kosong; pakai `hermes model` di SSH.
+
+**Riset di ruang meeting.** Peserta rapat Lt.4 menggunakan sesi Hermes yang sama dengan kemampuan tool,
+skill, memori, dan riwayat sesi yang tersedia. Mereka boleh mencari informasi di web/browser, membaca atau
+mencari file, serta memakai konektor dan inspeksi terminal tanpa perubahan keadaan untuk mendukung goal.
+Temuan serta URL/path sumber diteruskan ke peserta berikutnya; panel menampilkan **Tool Hermes** dengan
+status Berjalan/Selesai/Gagal. Model diminta menjelaskan keterbatasan bila sumber atau akses tidak tersedia.
+Rapat tetap menghasilkan kesimpulan dan rencana, tanpa memulai perubahan proyek/server atau eksekusi lanjutan
+otomatis. Pengaturan toolset dan approval tetap mengikuti Hermes. Detail: [diskusi meeting](meeting-discussion.md).
+
 - **Izin perintah berbahaya.** Kalau approval Hermes menyala (`approvals.mode: smart` atau `manual` di
   `~/.hermes/config.yaml`), perintah seperti `rm -r` memunculkan kartu **Hermes minta izin** dengan tombol
   Izinkan sekali, Izinkan sesi ini, Selalu izinkan, dan Tolak. Dengan `approvals.mode: off`, Hermes menjalankan

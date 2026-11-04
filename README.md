@@ -199,6 +199,10 @@ tersedia di kantor dan Riwayat setelah rapat. Tekan **Mulai diskusi**: peserta b
 pesan peserta sebelumnya, lalu fasilitator membuat kesimpulan. Batas awal 3 putaran, dapat dipilih 1–5.
 Chat tampil langsung di panel; **Tambahkan arahan** diteruskan pada giliran berikutnya dan **Hentikan** hanya
 menghentikan rapat itu. Memerlukan Chat Hermes aktif (lihat [panduan Hermes](docs/hermes.md#11-chat-hermes)).
+Agen dapat memakai tool Hermes yang tersedia untuk riset, membaca file/halaman, mencari riwayat sesi, dan
+mengakses memori/skill. Temuan beserta URL/path sumber dibagikan kepada peserta berikutnya. Aktivitasnya
+ditandai **Tool Hermes** dengan status Berjalan, Selesai, atau Gagal di percakapan. Toolset dan izin tetap
+mengikuti konfigurasi Hermes; kegagalan akses dinyatakan sebagai informasi yang belum terverifikasi.
 Rapat menghasilkan rencana tindakan, tanpa memulai eksekusi lanjutan otomatis. Catatan rapat terakhir tiap
 ruangan disimpan di `meetings.json` di samping file state bridge (opsional `HQ_MEETINGS_FILE`); menutup panel
 atau memuat ulang halaman tidak menghentikan rapat. Setelah restart server, rapat yang terputus ditandai dan
