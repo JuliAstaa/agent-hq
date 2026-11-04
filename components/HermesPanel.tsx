@@ -3,13 +3,17 @@
 // Hermes chat panel (docs/hermes.md "Chat Hermes"): talk to Hermes from the office while watching it work. The Agent
 // HQ server holds the conversation with the Hermes API server (lib/bridge/hermes-chat.ts); this panel reads it from
 // GET /api/hermes/stream and sends actions to POST /api/hermes. Hermes keeps working when the panel is closed.
-// Every Hermes string is rendered as React text.
+// Riwayat switches between sessions, Baru starts one with its own office character, and each session can have its
+// own model. Every Hermes string is rendered as React text.
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "react";
 import { useStore } from "zustand";
+import { ago } from "@/lib/cron";
 import {
-  APPROVAL_LABEL, MAX_CHAT_MESSAGE, PHASE_LABEL, applyChatEvent, emptyChatView, hermesUrlFor,
-  type ApprovalChoice, type ChatEvent, type ChatItem, type ChatView, type ToolStatus,
+  APPROVAL_LABEL, CHAT_TEAMS, CHAT_TEAM_LABEL, DEFAULT_CHAT_AGENT, MAX_CHAT_MESSAGE, MAX_CHAT_TOPIC, PHASE_LABEL,
+  applyChatEvent, displayTitle, emptyChatView, hermesUrlFor, modelFromKey, modelKey, modelLabel,
+  type ApprovalChoice, type ChatEvent, type ChatItem, type ChatSession, type ChatTeam, type ChatView, type ModelChoice,
+  type ModelOptions, type ToolStatus,
 } from "@/lib/hermes-chat";
 import { sseFrames } from "@/lib/sse";
 import { hqStore } from "@/lib/store";
@@ -17,9 +21,148 @@ import { authHeader, readToken, saveToken } from "./token";
 import { Button, CARD, OFF, PILL, cn } from "./ui";
 
 type Conn = "connecting" | "open" | "down" | "auth";
+/** What the middle of the panel shows. */
+type Mode = "chat" | "history" | "new";
+type Reply = Record<string, unknown> & { ok?: boolean; error?: string };
 
 const TOOL_DOT: Record<ToolStatus, string> = { running: "#ffd23f", ok: "#a6e22e", error: "#ff4f5e" };
+const FIELD = "w-full font-[inherit] text-[13px] px-2 py-[5px] border-[2.5px] border-ink rounded-[10px] bg-white disabled:opacity-60";
+const NOTE = "m-0 text-[12.5px] border-2 border-ink rounded-[10px] px-[10px] py-[6px]";
 const here = () => (typeof location === "undefined" ? "http://localhost/" : location.href);
+
+/** Model picker: Hermes' default, then the models of each authenticated provider. */
+function ModelSelect({ value, options, onChange, disabled, id }: { value: ModelChoice | null; options: ModelOptions | null; onChange: (m: ModelChoice | null) => void; disabled?: boolean; id?: string }) {
+  const key = modelKey(value);
+  const listed = !value || !!options?.providers.some((p) => p.slug === value.provider && p.models.includes(value.model));
+  return (
+    <select id={id} className={FIELD} value={key} disabled={disabled} onChange={(e) => onChange(modelFromKey(e.target.value))}>
+      <option value="">Default Hermes{options?.current ? `: ${options.current.model}` : ""}</option>
+      {!listed && value && <option value={key}>{modelLabel(value)}</option>}
+      {options?.providers.map((p) => (
+        <optgroup key={p.slug} label={p.name}>
+          {p.models.map((m) => (
+            <option key={m} value={modelKey({ provider: p.slug, model: m })}>
+              {m}
+            </option>
+          ))}
+        </optgroup>
+      ))}
+    </select>
+  );
+}
+
+/** One line on Hermes' memory for the API server (hidden when Hermes did not say). */
+function MemoryLine({ options }: { options: ModelOptions | null }) {
+  if (!options || options.memory == null) return null;
+  const on = options.memory;
+  const text = !on
+    ? "Memori Hermes mati untuk API server. Nyalakan: hermes tools enable memory --platform api_server"
+    : options.sessionSearch === false
+      ? "Memori Hermes aktif. Pencarian sesi lama mati: hermes tools enable session_search --platform api_server"
+      : "Memori Hermes aktif, dipakai bersama semua sesi.";
+  return (
+    <span className="flex items-center gap-[5px]" title="Memori, skill, dan pencarian sesi lama Hermes berlaku untuk semua sesi">
+      <i className="inline-block w-[9px] h-[9px] rounded-full border-2 border-ink shrink-0" style={{ background: on ? "#a6e22e" : "#ff9f1c" }} />
+      {text}
+    </span>
+  );
+}
+
+function SessionRow({
+  s, now, current, locked, busy, onOpen, onRename, onDelete,
+}: {
+  s: ChatSession;
+  now: number;
+  current: boolean;
+  /** Hermes is working: no switching. */
+  locked: boolean;
+  busy: boolean;
+  onOpen: () => void;
+  onRename: (title: string) => Promise<boolean>;
+  onDelete: () => void;
+}) {
+  const [renaming, setRenaming] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [confirm, setConfirm] = useState(false);
+  const title = displayTitle(s.title) || "(tanpa judul)";
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (draft.trim() && (await onRename(draft.trim()))) setRenaming(false);
+  };
+  return (
+    <div className={cn("border-[2.5px] border-ink rounded-[12px] px-[10px] py-2 text-[13px]", current ? "bg-paper2 shadow-[3px_3px_0_var(--ink)]" : "bg-white")}>
+      {renaming ? (
+        <form
+          className="flex gap-[6px] items-center"
+          onSubmit={submit}
+          onKeyDown={(e) => {
+            if (e.key !== "Escape") return;
+            e.stopPropagation(); // Esc closes the rename, not the panel
+            setRenaming(false);
+          }}
+        >
+          <input className={FIELD} value={draft} maxLength={MAX_CHAT_TOPIC} autoFocus aria-label="Judul sesi" onChange={(e) => setDraft(e.target.value)} />
+          <Button size="log" tone="primary" type="submit" className={OFF} disabled={busy || !draft.trim()}>
+            Simpan
+          </Button>
+          <Button size="log" onClick={() => setRenaming(false)}>
+            Batal
+          </Button>
+        </form>
+      ) : (
+        <>
+          <div className="flex items-center gap-2">
+            <b className="flex-1 min-w-0 truncate" title={title}>
+              {title}
+            </b>
+            {current && (
+              <span className={PILL} style={{ background: "#a6e22e" }}>
+                Dibuka
+              </span>
+            )}
+          </div>
+          {s.preview && <div className="truncate text-[12px] opacity-75">{s.preview}</div>}
+          <div className="text-[11.5px] opacity-70">
+            {s.lastActive && now ? ago(s.lastActive, now) : "waktu tidak diketahui"} · {s.messages} pesan{s.agent ? ` · Agen: ${s.agent}` : ""}
+          </div>
+          {confirm ? (
+            <div className="mt-[6px] flex gap-[6px] items-center flex-wrap text-[12px]">
+              <span className="font-semibold">Hapus sesi ini dari Hermes? Riwayatnya dan agennya ikut hilang.</span>
+              <Button size="log" tone="alert" className={OFF} disabled={busy || (current && locked)} onClick={onDelete}>
+                Ya, hapus
+              </Button>
+              <Button size="log" onClick={() => setConfirm(false)}>
+                Batal
+              </Button>
+            </div>
+          ) : (
+            <div className="mt-[6px] flex gap-[6px] flex-wrap">
+              {!current && (
+                <Button size="log" tone="primary" className={OFF} disabled={busy || locked} title={locked ? "Tunggu Hermes selesai dulu" : "Lanjutkan sesi ini"} onClick={onOpen}>
+                  Buka
+                </Button>
+              )}
+              <Button
+                size="log"
+                className={OFF}
+                disabled={busy}
+                onClick={() => {
+                  setDraft(displayTitle(s.title));
+                  setRenaming(true);
+                }}
+              >
+                Ganti nama
+              </Button>
+              <Button size="log" className={OFF} disabled={busy || (current && locked)} onClick={() => setConfirm(true)}>
+                Hapus
+              </Button>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
 
 /** True when the page is live on an Agent HQ server whose Hermes chat is configured (GET /api/hermes). */
 export function useHermesAvailable(liveUrl: () => string | null): boolean {
@@ -106,8 +249,17 @@ export default function HermesPanel({ onClose, liveUrl }: { onClose: () => void;
   const [busy, setBusy] = useState(false);
   const [tokenDraft, setTokenDraft] = useState("");
   const [tokenRev, setTokenRev] = useState(0);
+  const [mode, setMode] = useState<Mode>("chat");
+  const [sessions, setSessions] = useState<ChatSession[] | null>(null);
+  const [sessionsErr, setSessionsErr] = useState("");
+  /** Server clock when the list was loaded: its "5 mnt lalu" texts count from here. */
+  const [sessionsAt, setSessionsAt] = useState(0);
+  const [models, setModels] = useState<ModelOptions | null>(null);
+  const [modelsErr, setModelsErr] = useState("");
+  const [newAgent, setNewAgent] = useState<{ name: string; role: string; team: ChatTeam; model: ModelChoice | null }>({ name: "", role: "", team: "office", model: null });
   const listRef = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
+  const agent = useStore(hqStore, (s) => (view.agentId ? s.agents.get(view.agentId) : undefined));
 
   // Read the conversation; reconnect after a drop (the server keeps it, nothing is lost).
   useEffect(() => {
@@ -163,39 +315,51 @@ export default function HermesPanel({ onClose, liveUrl }: { onClose: () => void;
   const hasDraft = draft.trim() !== "";
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !hasDraft) onClose(); // never drop a typed message
+      if (e.key !== "Escape") return;
+      if (mode !== "chat") setMode("chat"); // Riwayat / Sesi baru: back to the conversation first
+      else if (!hasDraft) onClose(); // never drop a typed message
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose, hasDraft]);
+  }, [onClose, hasDraft, mode]);
 
   // Follow new messages only while the list is scrolled to the bottom.
   useLayoutEffect(() => {
     const el = listRef.current;
     if (el && stick.current) el.scrollTop = el.scrollHeight;
-  }, [view]);
+  }, [view, mode]);
 
-  async function post(body: Record<string, unknown>): Promise<boolean> {
-    if (!url) return false;
-    setBusy(true);
+  /** POST one action. Returns the reply, or the error text (also shown in the panel unless `quiet`). */
+  async function request(body: Record<string, unknown>, quiet = false): Promise<Reply | string> {
+    if (!url) return "Chat tidak tersambung";
     try {
       const token = readToken();
       const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json", ...authHeader(token) }, body: JSON.stringify(body) });
       if (res.status === 401) {
         setConn("auth");
         setConnErr(token ? "Token salah. Masukkan lagi." : "Agent HQ memakai HQ_TOKEN. Masukkan tokennya dulu.");
-        return false;
+        return "token salah";
       }
-      if (!res.ok) {
-        const b = (await res.json().catch(() => null)) as { error?: string } | null;
-        setErr(b?.error || `Gagal (HTTP ${res.status})`);
-        return false;
+      const b = (await res.json().catch(() => null)) as Reply | null;
+      if (!res.ok || !b) {
+        const why = b?.error || `Gagal (HTTP ${res.status})`;
+        if (!quiet) setErr(why);
+        return why;
       }
-      setErr("");
-      return true;
+      if (!quiet) setErr("");
+      return b;
     } catch (e) {
-      setErr(`Agent HQ tidak bisa dihubungi: ${(e as Error).message}`);
-      return false;
+      const why = `Agent HQ tidak bisa dihubungi: ${(e as Error).message}`;
+      if (!quiet) setErr(why);
+      return why;
+    }
+  }
+
+  /** Like request(), with the buttons disabled meanwhile; true when it worked. */
+  async function post(body: Record<string, unknown>): Promise<boolean> {
+    setBusy(true);
+    try {
+      return typeof (await request(body)) !== "string";
     } finally {
       setBusy(false);
     }
@@ -205,12 +369,73 @@ export default function HermesPanel({ onClose, liveUrl }: { onClose: () => void;
   const working = phase !== "idle";
   const ready = conn === "open";
 
+  // The model list (and whether Hermes' memory is on) once the chat is connected; it does not block the buttons.
+  const modelsWanted = ready && !models && !modelsErr;
+  useEffect(() => {
+    if (!modelsWanted || !url) return;
+    const ac = new AbortController();
+    async function load() {
+      try {
+        const res = await fetch(url!, {
+          method: "POST",
+          headers: { "content-type": "application/json", ...authHeader(readToken()) },
+          body: JSON.stringify({ action: "models" }),
+          signal: ac.signal,
+        });
+        const b = (await res.json().catch(() => null)) as (ModelOptions & { error?: string }) | null;
+        if (!res.ok || !b) return setModelsErr(b?.error || `Gagal (HTTP ${res.status})`);
+        setModels(b);
+        if (b.error) setModelsErr(b.error);
+      } catch (e) {
+        if (!ac.signal.aborted) setModelsErr(`Agent HQ tidak bisa dihubungi: ${(e as Error).message}`);
+      }
+    }
+    void load();
+    return () => ac.abort();
+  }, [modelsWanted, url]);
+
+  async function loadSessions() {
+    setSessionsErr("");
+    const r = await request({ action: "sessions" }, true);
+    if (typeof r === "string") return setSessionsErr(r);
+    setSessionsAt(typeof r.now === "number" ? r.now : 0);
+    setSessions(Array.isArray(r.sessions) ? (r.sessions as ChatSession[]) : []);
+  }
+
   async function send() {
     const text = draft.trim();
     if (!text || working || busy || !ready) return;
     setDraft("");
     stick.current = true;
     if (!(await post({ action: "send", text }))) setDraft((d) => d || text);
+  }
+
+  async function startNew(e: FormEvent) {
+    e.preventDefault();
+    const { name, role, team, model } = newAgent;
+    // Nothing filled in: an unnamed "Hermes" character (no name pinned, nothing extra told to Hermes).
+    const named = name.trim() || role.trim() || team !== "office";
+    if (!(await post({ action: "new", model, ...(named ? { agent: { name, role, team } } : {}) }))) return;
+    setNewAgent({ name: "", role: "", team: "office", model });
+    setMode("chat");
+    stick.current = true;
+  }
+
+  async function openSession(id: string) {
+    if (await post({ action: "open", sessionId: id })) {
+      setMode("chat");
+      stick.current = true;
+    }
+  }
+
+  async function renameSession(id: string, title: string): Promise<boolean> {
+    const done = await post({ action: "rename", sessionId: id, title });
+    if (done) void loadSessions();
+    return done;
+  }
+
+  async function deleteSession(id: string) {
+    if (await post({ action: "delete", sessionId: id })) void loadSessions();
   }
 
   const pill = ready ? PHASE_LABEL[phase] : conn === "auth" ? { label: "Butuh token", color: "#ff9f1c" } : conn === "connecting" ? { label: "Menyambung", color: "#ffd23f" } : { label: "Terputus", color: "#ff4f5e" };
@@ -236,9 +461,31 @@ export default function HermesPanel({ onClose, liveUrl }: { onClose: () => void;
         <Button
           size="log"
           className={OFF}
-          title="Mulai percakapan baru. Sesi lama tetap tersimpan di Hermes."
-          disabled={!ready || working || busy || !view.items.length}
-          onClick={() => void post({ action: "new" })}
+          tone={mode === "history" ? "primary" : "paper"}
+          title="Sesi lama: lanjutkan, ganti nama, atau hapus"
+          aria-pressed={mode === "history"}
+          disabled={!ready}
+          onClick={() => {
+            if (mode === "history") return setMode("chat");
+            setMode("history");
+            setSessions(null);
+            void loadSessions();
+          }}
+        >
+          Riwayat
+        </Button>
+        <Button
+          size="log"
+          className={OFF}
+          tone={mode === "new" ? "primary" : "paper"}
+          title="Mulai sesi baru dengan agen baru di kantor. Sesi lama tetap tersimpan di Hermes."
+          aria-pressed={mode === "new"}
+          disabled={!ready || working || busy}
+          onClick={() => {
+            if (mode === "new") return setMode("chat");
+            setNewAgent((a) => ({ ...a, model: view.model }));
+            setMode("new");
+          }}
         >
           Baru
         </Button>
@@ -251,10 +498,37 @@ export default function HermesPanel({ onClose, liveUrl }: { onClose: () => void;
         {view.title && (
           <>
             {" "}
-            Sesi: <b className="break-all">{view.title}</b>
+            Sesi: <b className="break-all">{displayTitle(view.title)}</b>
           </>
         )}
       </p>
+      {ready && (
+        <div className="px-3 py-[6px] border-b-2 border-ink flex flex-col gap-1 text-[12px]">
+          <div className="flex items-center gap-2">
+            <label htmlFor="hq-hermes-model" className="font-bold shrink-0">
+              Model
+            </label>
+            <div className="flex-1 min-w-0">
+              <ModelSelect id="hq-hermes-model" value={view.model} options={models} disabled={busy} onChange={(model) => void post({ action: "model", model })} />
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-[2px] opacity-85">
+            {view.agentId && (
+              <button
+                type="button"
+                className="[font-family:inherit] text-[12px] p-0 bg-transparent border-0 underline cursor-pointer text-left"
+                title="Lihat agen sesi ini di kantor"
+                onClick={() => hqStore.getState().select(view.agentId, true)}
+              >
+                Agen: {agent ? `${agent.name} (${agent.role})` : DEFAULT_CHAT_AGENT.name}
+              </button>
+            )}
+            {view.runtime && <span title="Model yang menjawab pesan terakhir">Terakhir dijawab: {modelLabel(view.runtime)}</span>}
+            <MemoryLine options={models} />
+          </div>
+          {modelsErr && <span className="text-[11.5px] opacity-80">Daftar model: {modelsErr}</span>}
+        </div>
+      )}
       {!url && <p className="m-0 mx-3 mt-2 text-[13px] bg-[#ffe6a6] border-2 border-ink rounded-[10px] px-[10px] py-2">Chat hanya jalan saat halaman tersambung ke Agent HQ lewat /api/stream.</p>}
       {connErr && conn !== "open" && <p className="m-0 mx-3 mt-2 text-[13px] bg-[#ffd0d4] border-2 border-ink rounded-[10px] px-[10px] py-2">{connErr}</p>}
       {err && <p className="m-0 mx-3 mt-2 text-[13px] bg-[#ffd0d4] border-2 border-ink rounded-[10px] px-[10px] py-2">{err}</p>}
@@ -288,6 +562,95 @@ export default function HermesPanel({ onClose, liveUrl }: { onClose: () => void;
           </Button>
         </div>
       )}
+      {mode === "history" && (
+        <div className="flex-1 overflow-auto px-3 py-[10px] flex flex-col gap-2">
+          <div className="flex items-center gap-2">
+            <b className="text-[13px]">Riwayat sesi</b>
+            <span className="flex-1" />
+            <Button size="log" onClick={() => void loadSessions()}>
+              Muat ulang
+            </Button>
+            <Button size="log" onClick={() => setMode("chat")}>
+              Kembali
+            </Button>
+          </div>
+          {working && <p className={cn(NOTE, "bg-[#ffe6a6]")}>Hermes sedang bekerja. Pindah sesi setelah pekerjaannya selesai.</p>}
+          {sessionsErr && <p className={cn(NOTE, "bg-[#ffd0d4]")}>{sessionsErr}</p>}
+          {sessions === null && !sessionsErr && <p className="m-0 text-[13px] opacity-70">Memuat riwayat...</p>}
+          {sessions?.length === 0 && <p className="m-0 text-[13px] opacity-70">Belum ada sesi. Tekan Baru untuk mulai.</p>}
+          {sessions?.map((s) => (
+            <SessionRow
+              key={s.id}
+              s={s}
+              now={sessionsAt}
+              current={s.id === view.sessionId}
+              locked={working}
+              busy={busy}
+              onOpen={() => void openSession(s.id)}
+              onRename={(title) => renameSession(s.id, title)}
+              onDelete={() => void deleteSession(s.id)}
+            />
+          ))}
+          <p className="m-0 text-[11.5px] leading-[1.4] opacity-70">
+            Hanya sesi yang dibuat lewat API server Hermes yang bisa dilanjutkan di sini. Sesi CLI, Telegram, dan Discord tetap di tempatnya.
+          </p>
+        </div>
+      )}
+      {mode === "new" && (
+        <form className="flex-1 overflow-auto px-3 py-[10px] flex flex-col gap-2" onSubmit={(e) => void startNew(e)}>
+          <b className="text-[14px]">Sesi baru</b>
+          <p className="m-0 text-[12px] leading-[1.4] opacity-80">
+            Agen baru langsung muncul di kantor. Sesi lama tetap tersimpan di Riwayat, dan memori Hermes tetap dipakai bersama semua sesi.
+          </p>
+          <label className="text-[12px] font-bold">
+            Nama
+            <input className={FIELD} value={newAgent.name} maxLength={60} placeholder={DEFAULT_CHAT_AGENT.name} autoFocus onChange={(e) => setNewAgent((a) => ({ ...a, name: e.target.value }))} />
+          </label>
+          <label className="text-[12px] font-bold">
+            Peran
+            <input className={FIELD} value={newAgent.role} maxLength={60} placeholder={DEFAULT_CHAT_AGENT.role} onChange={(e) => setNewAgent((a) => ({ ...a, role: e.target.value }))} />
+          </label>
+          <label className="text-[12px] font-bold">
+            Tim
+            <select className={FIELD} value={newAgent.team} onChange={(e) => setNewAgent((a) => ({ ...a, team: e.target.value as ChatTeam }))}>
+              {CHAT_TEAMS.map((t) => (
+                <option key={t} value={t}>
+                  {CHAT_TEAM_LABEL[t]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="text-[12px] font-bold">
+            Model
+            <ModelSelect value={newAgent.model} options={models} onChange={(model) => setNewAgent((a) => ({ ...a, model }))} />
+          </label>
+          {modelsErr && (
+            <span className="flex items-center gap-2 text-[11.5px] opacity-80">
+              Daftar model belum ada.
+              <Button
+                size="log"
+                onClick={() => {
+                  setModels(null);
+                  setModelsErr("");
+                }}
+              >
+                Coba lagi
+              </Button>
+            </span>
+          )}
+          <p className="m-0 text-[11.5px] leading-[1.4] opacity-70">
+            Nama, peran, dan tim juga diberitahukan ke Hermes di setiap pesan sesi ini. Kosongkan untuk agen Hermes biasa.
+          </p>
+          <div className="flex gap-2 justify-end">
+            <Button onClick={() => setMode("chat")}>Batal</Button>
+            <Button tone="primary" type="submit" className={OFF} disabled={!ready || working || busy}>
+              {busy ? "Membuat..." : "Mulai sesi"}
+            </Button>
+          </div>
+        </form>
+      )}
+      {mode === "chat" && (
+      <>
       <div
         ref={listRef}
         className="flex-1 overflow-auto px-3 py-[10px] flex flex-col gap-2"
@@ -329,6 +692,8 @@ export default function HermesPanel({ onClose, liveUrl }: { onClose: () => void;
           </Button>
         )}
       </footer>
+      </>
+      )}
     </section>
   );
 }

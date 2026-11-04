@@ -3,7 +3,8 @@ import { describe, expect, it } from "vitest";
 import { siblingApiUrl } from "@/lib/api-url";
 import { cronUrlFor } from "@/lib/cron";
 import {
-  MAX_CHAT_ITEMS, MAX_CHAT_TEXT, appendCapped, applyChatEvent, emptyChatView, hermesUrlFor, upsertItem, type ChatItem,
+  MAX_CHAT_ITEMS, MAX_CHAT_TEXT, appendCapped, applyChatEvent, displayTitle, emptyChatView, hermesUrlFor, modelFromKey,
+  modelKey, modelLabel, upsertItem, type ChatItem,
 } from "@/lib/hermes-chat";
 import { sseFrames } from "@/lib/sse";
 
@@ -20,8 +21,10 @@ describe("applyChatEvent", () => {
     v = applyChatEvent(v, { type: "chat_item", item: { kind: "assistant", id: "m1", text: "Halo!", streaming: false, at: 2 } });
     expect(v.items).toHaveLength(2);
     expect(v.items[1]).toMatchObject({ text: "Halo!", streaming: false });
-    v = applyChatEvent(v, { type: "chat_state", phase: "running", thinking: true, sessionId: "s1", title: "Agent HQ x" });
-    expect(v).toMatchObject({ phase: "running", thinking: true, title: "Agent HQ x" });
+    const model = { provider: "openrouter", model: "anthropic/claude-sonnet-5.5" };
+    v = applyChatEvent(v, { type: "chat_state", phase: "running", thinking: true, sessionId: "s1", title: "Agent HQ x", agentId: "cc-1", model, runtime: null });
+    expect(v).toMatchObject({ phase: "running", thinking: true, title: "Agent HQ x", agentId: "cc-1", model, runtime: null });
+    expect(v.items).toHaveLength(2); // state never touches the items
   });
   it("a delta for an unknown or non-text item is ignored", () => {
     const v = applyChatEvent({ ...emptyChatView(), items: [user("u1")] }, { type: "chat_delta", id: "u1", delta: "x" });
@@ -34,6 +37,23 @@ describe("applyChatEvent", () => {
     expect(items).toHaveLength(MAX_CHAT_ITEMS);
     expect(items[0].id).toBe("u5");
     expect(appendCapped("x".repeat(MAX_CHAT_TEXT - 1), "abc")).toHaveLength(MAX_CHAT_TEXT);
+  });
+});
+
+describe("titles and model keys", () => {
+  it("displayTitle drops the Agent HQ topic prefix only", () => {
+    expect(displayTitle("Agent HQ · cek disk")).toBe("cek disk");
+    expect(displayTitle("Agent HQ 2026-11-03 10:00:00")).toBe("Agent HQ 2026-11-03 10:00:00");
+    expect(displayTitle("Telegram")).toBe("Telegram");
+  });
+  it("modelKey and modelFromKey round-trip; empty means Hermes' default", () => {
+    const m = { provider: "openrouter", model: "x-ai/grok::fast" };
+    expect(modelFromKey(modelKey(m))).toEqual(m);
+    expect(modelFromKey(modelKey({ provider: "", model: "gpt-5" }))).toEqual({ provider: "", model: "gpt-5" });
+    expect(modelKey(null)).toBe("");
+    expect(modelFromKey("")).toBeNull();
+    expect(modelFromKey("openrouter::")).toBeNull();
+    expect(modelLabel(m)).toBe("x-ai/grok::fast (openrouter)");
   });
 });
 

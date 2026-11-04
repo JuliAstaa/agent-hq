@@ -46,3 +46,5 @@ next-env.d.ts
 
 # agent rename overrides (local, written by POST /event {"type":"rename"})
 /agent-hq-names.json
+# Hermes chat: model picked per session (local, written by POST /api/hermes {"action":"model"})
+/agent-hq-hermes.json

@@ -34,21 +34,101 @@ export type ChatItem =
 /** idle: ready for a message. starting: creating the session / opening the stream. approval: waiting for a choice. */
 export type ChatPhase = "idle" | "starting" | "running" | "approval" | "stopping";
 
+/** A model for Hermes: model id plus the Hermes provider slug ("" lets Hermes pick the provider). */
+export interface ModelChoice {
+  provider: string;
+  model: string;
+}
+
 export interface ChatView {
   sessionId: string | null;
   title: string;
   phase: ChatPhase;
   /** Hermes is reasoning (no text or tool yet). */
   thinking: boolean;
+  /** Office character of this session (cc-<8 of sha1(session id)), null before the session exists. */
+  agentId: string | null;
+  /** Model the next message asks for; null = Hermes' default. */
+  model: ModelChoice | null;
+  /** Model that answered the last turn, as Hermes reported it (null = not known). */
+  runtime: ModelChoice | null;
   items: ChatItem[];
 }
+
+export type ChatState = Omit<ChatView, "items">;
 
 /** Server -> panel events on GET /api/hermes/stream. */
 export type ChatEvent =
   | { type: "chat_snapshot"; view: ChatView }
   | { type: "chat_item"; item: ChatItem }
   | { type: "chat_delta"; id: string; delta: string }
-  | { type: "chat_state"; phase: ChatPhase; thinking: boolean; sessionId: string | null; title: string };
+  | ({ type: "chat_state" } & ChatState);
+
+/** One row of the Riwayat list (POST /api/hermes {"action":"sessions"}). */
+export interface ChatSession {
+  id: string;
+  title: string;
+  /** Start of the last message, redacted. */
+  preview: string;
+  /** ms since epoch, null when Hermes did not say. */
+  lastActive: number | null;
+  messages: number;
+  /** Name of the session's office character when it was renamed (pinned), else "". */
+  agent: string;
+}
+
+/** Teams a chat agent can start in ("office" = no team, its desk on floor 2). */
+export type ChatTeam = "office" | "red" | "report" | "blue";
+export const CHAT_TEAMS: ChatTeam[] = ["office", "red", "report", "blue"];
+export const CHAT_TEAM_LABEL: Record<ChatTeam, string> = { office: "Kantor (tanpa tim)", red: "Red Team", report: "Laporan VA", blue: "Blue Team" };
+
+/** Who the office character of a new session is (POST {"action":"new","agent"}). */
+export interface ChatAgentInput {
+  name: string;
+  role: string;
+  team: ChatTeam;
+}
+
+/** Name and role of a chat character nobody named. */
+export const DEFAULT_CHAT_AGENT = { name: "Hermes", role: "Chat Hermes" } as const;
+
+/** One provider in the model picker (Hermes GET /api/model/options, authenticated providers only). */
+export interface ModelProvider {
+  slug: string;
+  name: string;
+  /** Hermes' current default provider. */
+  current: boolean;
+  models: string[];
+}
+
+/** POST {"action":"models"} reply: what the picker offers, and whether Hermes' memory is on for the API server. */
+export interface ModelOptions {
+  /** Hermes' default model (used when a session has no model of its own). */
+  current: ModelChoice | null;
+  providers: ModelProvider[];
+  /** memory / session_search toolsets enabled for the api_server platform; null = Hermes did not say. */
+  memory: boolean | null;
+  sessionSearch: boolean | null;
+}
+
+/** Sessions this panel makes are titled "Agent HQ <date time>", then "Agent HQ · <topic>" after the first message. */
+export const CHAT_TITLE_PREFIX = "Agent HQ";
+export const CHAT_TOPIC_PREFIX = `${CHAT_TITLE_PREFIX} · `;
+/** Longest topic part of a title. */
+export const MAX_CHAT_TOPIC = 80;
+
+/** The title as the panel shows it: "Agent HQ · cek disk" -> "cek disk". */
+export const displayTitle = (title: string): string => (title.startsWith(CHAT_TOPIC_PREFIX) ? title.slice(CHAT_TOPIC_PREFIX.length) : title);
+
+/** `<select>` value of a model choice ("" = Hermes' default). */
+export const modelKey = (m: ModelChoice | null): string => (m ? `${m.provider}::${m.model}` : "");
+
+export function modelFromKey(key: string): ModelChoice | null {
+  const i = key.indexOf("::");
+  return i < 0 || !key.slice(i + 2) ? null : { provider: key.slice(0, i), model: key.slice(i + 2) };
+}
+
+export const modelLabel = (m: ModelChoice): string => (m.provider ? `${m.model} (${m.provider})` : m.model);
 
 /** Items kept by the bridge and by the panel (oldest dropped first, same rule on both sides). */
 export const MAX_CHAT_ITEMS = 300;
@@ -65,7 +145,9 @@ export const PHASE_LABEL: Record<ChatPhase, { label: string; color: string }> = 
   stopping: { label: "Menghentikan", color: "#ff9f1c" },
 };
 
-export const emptyChatView = (): ChatView => ({ sessionId: null, title: "", phase: "idle", thinking: false, items: [] });
+export const emptyChatView = (): ChatView => ({
+  sessionId: null, title: "", phase: "idle", thinking: false, agentId: null, model: null, runtime: null, items: [],
+});
 
 export const appendCapped = (text: string, delta: string): string =>
   text.length >= MAX_CHAT_TEXT ? text : (text + delta).slice(0, MAX_CHAT_TEXT);
@@ -98,7 +180,16 @@ export function applyChatEvent(view: ChatView, ev: ChatEvent): ChatView {
       return { ...view, items };
     }
     case "chat_state":
-      return { ...view, phase: ev.phase, thinking: ev.thinking, sessionId: ev.sessionId, title: ev.title };
+      return {
+        ...view,
+        phase: ev.phase,
+        thinking: ev.thinking,
+        sessionId: ev.sessionId,
+        title: ev.title,
+        agentId: ev.agentId ?? null,
+        model: ev.model ?? null,
+        runtime: ev.runtime ?? null,
+      };
     default:
       return view;
   }

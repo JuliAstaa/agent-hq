@@ -38,7 +38,7 @@ async function start(env: Record<string, string>) {
   for (const k of Object.keys(base)) if (k.startsWith("HQ_")) delete base[k];
   const proc = spawn(process.execPath, [path.join(ROOT, "node_modules/next/dist/bin/next"), "start", "-H", "127.0.0.1", "-p", String(port)], {
     cwd: ROOT,
-    env: { ...base, HQ_NAMES_FILE: path.join(ROOT, ".next", `names-${port}.json`), ...env },
+    env: { ...base, HQ_NAMES_FILE: path.join(ROOT, ".next", `names-${port}.json`), HQ_HERMES_CHAT_FILE: path.join(ROOT, ".next", `hermes-${port}.json`), ...env },
     stdio: "ignore",
   });
   procs.add(proc);
@@ -122,6 +122,22 @@ describe.skipIf(!BUILT)("Hermes chat on next start", { timeout: 60_000 }, () => 
     expect((await fetch(url + "/api/hermes", { method: "POST", headers: { "content-type": "text/plain" }, body: "{}" })).status).toBe(415);
     const pre = await fetch(url + "/api/hermes", { method: "OPTIONS", headers: { origin: "https://evil.example", "access-control-request-method": "POST" } });
     expect(pre.headers.get("access-control-allow-origin")).toBeNull();
+  });
+
+  it("a new session's character shows up in the office routes; Riwayat lists it", async () => {
+    const { url, port } = await start({ HQ_HERMES_API_KEY: fake.key, HQ_HERMES_API_URL: fake.url });
+    const r = await post(url, { action: "new", agent: { name: "Budi", role: "Analis SOC", team: "blue" } });
+    expect(r.status).toBe(200);
+    const { sessionId, agentId } = (await r.json()) as { sessionId: string; agentId: string };
+    // the chat route and the office routes share one hub (globalThis), so the office sees the character
+    const agents = ((await (await fetch(url + "/api/agents")).json()) as { agents: { id: string; name: string; team: string | null }[] }).agents;
+    expect(agents).toContainEqual(expect.objectContaining({ id: agentId, name: "Budi", team: "blue" }));
+    expect(JSON.parse(fs.readFileSync(path.join(ROOT, ".next", `names-${port}.json`), "utf8")).agents[agentId]).toMatchObject({ name: "Budi" });
+    const list = (await (await post(url, { action: "sessions" })).json()) as { sessions: { id: string }[]; current: string };
+    expect(list.current).toBe(sessionId);
+    expect(list.sessions.map((s) => s.id)).toContain(sessionId);
+    expect((await post(url, { action: "model", model: { provider: "p", model: "m" } })).status).toBe(200);
+    expect(JSON.parse(fs.readFileSync(path.join(ROOT, ".next", `hermes-${port}.json`), "utf8")).sessions[sessionId].model).toEqual({ provider: "p", model: "m" });
   });
 
   it("HQ_TOKEN guards the stream and the actions; no key means no chat", async () => {

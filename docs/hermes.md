@@ -445,11 +445,47 @@ muncul kalau Agent HQ punya `HQ_HERMES_API_KEY`.
 
 - Tulis pesan, lalu Enter untuk kirim (Shift+Enter untuk baris baru). Jawaban Hermes muncul sambil ditulis. Tiap
   tool tampil sebagai baris kecil dengan titik kuning (jalan), hijau (selesai), atau merah (gagal).
-- **Hentikan** menghentikan pekerjaan yang sedang jalan. **Baru** memulai percakapan baru; sesi lama tetap
-  tersimpan di Hermes (`hermes sessions list`).
+- **Hentikan** menghentikan pekerjaan yang sedang jalan.
 - Panel boleh ditutup dan halaman boleh di-reload: Hermes tetap bekerja, dan percakapan tampil lagi saat panel
-  dibuka. Setelah Agent HQ restart, percakapan terakhir dilanjutkan (sesi berjudul `Agent HQ <tanggal jam>`).
-- Kalau hook terpasang dan diizinkan (bagian 6 dan 7), sesi chat ini juga tampil sebagai karakter di kantor.
+  dibuka. Setelah Agent HQ restart, sesi `Agent HQ` yang terakhir dipakai dilanjutkan.
+- Sesi diberi judul dari pesan pertamanya, misalnya `Agent HQ · cek disk penuh` (judul di Hermes harus unik,
+  jadi kalau sudah dipakai, jamnya ditambahkan).
+
+**Banyak sesi, satu memori.** Satu sesi terbuka pada satu waktu, tapi sesi lama tetap bisa dilanjutkan:
+
+- **Baru** membuka form **Sesi baru**: Nama, Peran, Tim (Kantor, Red Team, Laporan VA, Blue Team), dan Model.
+  Setelah **Mulai sesi**, Hermes langsung membuat sesinya dan agen baru masuk ke kantor, meski hook belum
+  dipasang. Kosongkan Nama, Peran, dan Tim untuk agen "Hermes" biasa.
+- Nama, peran, dan tim disimpan seperti rename di Daftar Agen (`agent-hq-names.json`), jadi event hook tidak
+  menimpanya. Karakternya memakai id yang sama dengan hook (`cc-` + 8 karakter SHA-1 id sesi), jadi chat dan hook
+  menggerakkan karakter yang sama.
+- Nama dan peran juga diberitahukan ke Hermes di setiap pesan sesi itu, lewat `system_message`. Hermes
+  menambahkannya ke system prompt untuk pesan itu saja; memori, skill, dan transkrip tidak diubah.
+- **Riwayat** menampilkan sesi API server, yang terakhir dipakai paling atas, dengan potongan pesan terakhir.
+  **Buka** melanjutkan sesi (riwayat, model, dan agennya ikut), **Ganti nama** mengganti judulnya, **Hapus**
+  menghapus sesi dari Hermes beserta agen dan namanya. Pindah sesi hanya bisa saat Hermes tidak sedang bekerja.
+  Agen sesi yang ditinggalkan keluar dari kantor, dan masuk lagi saat sesinya dibuka.
+- Sesi CLI, Telegram, dan Discord tidak muncul di Riwayat. Hermes hanya mengizinkan API server melanjutkan sesi
+  buatannya sendiri (sesi lain ditolak dengan `409 permission_denied`).
+- **Memori Hermes** (MEMORY.md, USER.md), skill, dan `session_search` berlaku untuk semua sesi, termasuk sesi
+  dari CLI dan Telegram. Jadi sesi baru tetap tahu apa yang dipelajari Hermes di sesi lama, dan makin sering
+  dipakai, makin banyak yang diingat. Di bawah pemilih model, panel menunjukkan apakah toolset `memory` dan
+  `session_search` menyala untuk API server (dibaca dari `GET /v1/toolsets`). Kalau mati, nyalakan:
+
+  ```bash
+  hermes tools enable memory session_search --platform api_server
+  hermes gateway restart   # kalau pesan berikutnya belum memakainya
+  ```
+
+- Kalau konteks sesi yang panjang dipadatkan (compression) dan Hermes memindahkan percakapan ke id sesi baru,
+  panel ikut pindah, bersama agen, namanya, dan modelnya.
+
+**Model per sesi.** Pemilih **Model** di atas percakapan berlaku untuk sesi yang terbuka, mulai pesan
+berikutnya. **Default Hermes** memakai model dari config Hermes. Daftarnya diambil dari `GET /api/model/options`
+Hermes (hanya provider yang sudah login) dan disimpan sementara selama 1 menit. Pilihan disimpan per sesi di
+`agent-hq-hermes.json` (bisa diganti dengan `HQ_HERMES_CHAT_FILE`), jadi tetap berlaku setelah Agent HQ restart.
+**Terakhir dijawab** menunjukkan model yang benar-benar menjawab. Hermes versi lama tanpa route itu menampilkan
+"Daftar model" kosong; pakai `hermes model` di SSH.
 - **Izin perintah berbahaya.** Kalau approval Hermes menyala (`approvals.mode: smart` atau `manual` di
   `~/.hermes/config.yaml`), perintah seperti `rm -r` memunculkan kartu **Hermes minta izin** dengan tombol
   Izinkan sekali, Izinkan sesi ini, Selalu izinkan, dan Tolak. Dengan `approvals.mode: off`, Hermes menjalankan
@@ -457,8 +493,8 @@ muncul kalau Agent HQ punya `HQ_HERMES_API_KEY`.
   HP atau dipakai orang lain.
 - Teks yang mirip rahasia (token, password, kunci) disamarkan jadi `***` di panel, sama seperti di log. Hermes
   tetap menerima pesanmu apa adanya.
-- Panel ini untuk percakapan dan perintah biasa. Pengaturan Hermes (model, skill, slash command) tetap lewat
-  `hermes` di SSH.
+- Panel ini untuk percakapan, perintah biasa, dan memilih model. Pengaturan Hermes lain (skill, slash command,
+  toolset) tetap lewat `hermes` di SSH.
 
 **Keamanan.** Pesan ke Hermes setara dengan akses terminal ke VPS, jadi chat dijaga lebih ketat dari kontrol jadwal:
 
@@ -480,6 +516,7 @@ Pengaturan chat ada di `.env.local` Agent HQ (bukan di `agent-hq.env`). Setelah 
 | `HQ_HERMES_API_KEY` | kosong | sama dengan `API_SERVER_KEY` Hermes; kosong berarti chat mati dan tombolnya tersembunyi |
 | `HQ_HERMES_API_URL` | `http://127.0.0.1:8642` | alamat API server Hermes |
 | `HQ_ALLOWED_HOSTS` | kosong | nama host selain localhost yang boleh memakai chat, dipisah koma (butuh `HQ_TOKEN`) |
+| `HQ_HERMES_CHAT_FILE` | `agent-hq-hermes.json` di folder Agent HQ | file model yang dipilih per sesi |
 
 ## 12. Pengaturan
 
@@ -650,8 +687,13 @@ Kalau API server Hermes tidak dipakai aplikasi lain, set juga `API_SERVER_ENABLE
 - Chat Hermes: server Agent HQ (`lib/bridge/hermes-chat.ts`) membuat sesi lewat `POST /api/sessions` di API
   server Hermes, mengirim pesan ke `/api/sessions/<id>/chat/stream`, dan membaca stream-nya sendiri. Ini perlu
   karena Hermes menghentikan pekerjaan kalau klien stream-nya putus, sedangkan panel boleh ditutup. Panel menerima
-  percakapan lewat `GET /api/hermes/stream` dan mengirim aksi (`send`, `approve`, `stop`, `new`) ke
-  `POST /api/hermes`. Izin dijawab lewat `/v1/runs/<id>/approval` dan berhenti lewat `/v1/runs/<id>/stop`.
+  percakapan lewat `GET /api/hermes/stream` dan mengirim aksi (`send`, `approve`, `stop`, `new`, `sessions`,
+  `open`, `rename`, `delete`, `models`, `model`) ke `POST /api/hermes`. Izin dijawab lewat
+  `/v1/runs/<id>/approval` dan berhenti lewat `/v1/runs/<id>/stop`. Riwayat memakai `GET /api/sessions?source=api_server`,
+  `GET`/`PATCH`/`DELETE /api/sessions/<id>`, dan `GET /api/sessions/<id>/messages`. Model dikirim per pesan
+  (`model`, `provider`), peran agen sebagai `system_message`. Daftar model dari `GET /api/model/options`, status
+  memori dari `GET /v1/toolsets`. Kalau `assistant.completed` atau `run.completed` membawa `session_id` lain
+  (compression), pesan berikutnya dikirim ke id itu.
 - Teks dari MCP disensor di Python dengan pola yang sama dengan `lib/bridge/redact.ts`, karena `/api/event`
   tidak menyensor apa pun.
 - Tes (ikut `npm test`): `tests/integration/hermes.test.ts` untuk hook, MCP, installer, dan reporter jadwal

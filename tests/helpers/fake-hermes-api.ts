@@ -1,5 +1,6 @@
 // A stand-in for the Hermes API server (gateway platform api_server) with the parts the chat bridge uses:
-// sessions, the session chat stream, run status, approval, and stop. Each test scripts the turn.
+// sessions (list, create, read, rename, delete), the session chat stream, run status, approval, stop, the model
+// picker inventory and the toolsets. Each test scripts the turn.
 
 import http from "node:http";
 import type { AddressInfo } from "node:net";
@@ -26,11 +27,18 @@ export interface Turn {
   drop(): void;
 }
 
+/** A session row as GET /api/sessions returns it (only id and title are required here). */
+export interface FakeSession {
+  id: string;
+  title: string | null;
+  [field: string]: unknown;
+}
+
 export interface FakeHermes {
   url: string;
   key: string;
   calls: Call[];
-  sessions: { id: string; title: string | null }[];
+  sessions: FakeSession[];
   messages: Map<string, unknown[]>;
   script: (t: Turn) => Promise<void>;
   /** Canonical session owner: approvals need {request_id, execution_generation, choice} exactly. */
@@ -38,6 +46,10 @@ export interface FakeHermes {
   rejectTitle: boolean;
   /** Status code for every chat/stream request (e.g. 401, 429), 0 = normal. */
   streamStatus: number;
+  /** GET /api/model/options body; null = an older Hermes without the route (404). */
+  modelOptions: Record<string, unknown> | null;
+  /** GET /v1/toolsets `data`; null = 404. */
+  toolsets: Record<string, unknown>[] | null;
   close(): Promise<void>;
 }
 
@@ -66,8 +78,13 @@ export async function startFakeHermes(key = "kunci-uji-0123456789abcdef"): Promi
     canonical: false,
     rejectTitle: false,
     streamStatus: 0,
+    modelOptions: null,
+    toolsets: null,
     close: async () => {},
   };
+  /** Sessions with a turn streaming right now (DELETE answers 409 like Hermes' active-turn guard). */
+  const active = new Set<string>();
+  const titleTaken = (title: unknown, self?: string) => fake.sessions.some((x) => x.title === title && x.id !== self);
   const reply = (res: http.ServerResponse, status: number, body: unknown) => {
     res.writeHead(status, { "content-type": "application/json" });
     res.end(JSON.stringify(body));
@@ -89,10 +106,32 @@ export async function startFakeHermes(key = "kunci-uji-0123456789abcdef"): Promi
 
     if (req.method === "GET" && path === "/api/sessions") return reply(res, 200, { object: "list", data: [...fake.sessions].reverse() });
     if (req.method === "POST" && path === "/api/sessions") {
-      if (fake.rejectTitle && b.title) return reply(res, 400, { error: { message: "title taken" } });
+      if ((fake.rejectTitle && b.title) || (b.title && titleTaken(b.title))) return reply(res, 400, { error: { message: "title taken" } });
       const s = { id: `api_${++n}`, title: typeof b.title === "string" ? b.title : null };
       fake.sessions.push(s);
-      return reply(res, 201, { object: "hermes.session", session: s });
+      return reply(res, 201, { object: "hermes.session", session: { ...s, source: "api_server" } });
+    }
+    if ((m = path.match(/^\/api\/sessions\/([^/]+)$/))) {
+      const sid = decodeURIComponent(m[1]);
+      const i = fake.sessions.findIndex((x) => x.id === sid);
+      if (i < 0) return reply(res, 404, { error: { message: `Session not found: ${sid}` } });
+      if (req.method === "GET") return reply(res, 200, { object: "hermes.session", session: { source: "api_server", ...fake.sessions[i] } });
+      if (req.method === "PATCH") {
+        if (fake.rejectTitle || titleTaken(b.title, sid)) return reply(res, 400, { error: { message: `Title '${String(b.title)}' is already in use by another session` } });
+        fake.sessions[i] = { ...fake.sessions[i], title: typeof b.title === "string" ? b.title : null };
+        return reply(res, 200, { object: "hermes.session", session: fake.sessions[i] });
+      }
+      if (req.method === "DELETE") {
+        if (active.has(sid)) return reply(res, 409, { error: { message: "session has an active turn", code: "session_active_turn" } });
+        fake.sessions.splice(i, 1);
+        return reply(res, 200, { object: "hermes.session.deleted", id: sid, deleted: true });
+      }
+    }
+    if (req.method === "GET" && path === "/api/model/options") {
+      return fake.modelOptions ? reply(res, 200, fake.modelOptions) : reply(res, 404, { error: { message: "no route" } });
+    }
+    if (req.method === "GET" && path === "/v1/toolsets") {
+      return fake.toolsets ? reply(res, 200, { object: "list", platform: "api_server", data: fake.toolsets }) : reply(res, 404, { error: { message: "no route" } });
     }
     if (req.method === "GET" && (m = path.match(/^\/api\/sessions\/([^/]+)\/messages$/))) {
       return reply(res, 200, { object: "list", data: fake.messages.get(decodeURIComponent(m[1])) || [] });
@@ -115,7 +154,8 @@ export async function startFakeHermes(key = "kunci-uji-0123456789abcdef"): Promi
         runId,
         message: b.message,
         send(event, data = {}) {
-          if (!res.writableEnded) res.write(`event: ${event}\ndata: ${JSON.stringify({ ...data, session_id: sid, run_id: runId, seq: ++seq })}\n\n`);
+          // `session_id` in `data` wins: after a context compression Hermes reports the new (effective) session id.
+          if (!res.writableEnded) res.write(`event: ${event}\ndata: ${JSON.stringify({ session_id: sid, ...data, run_id: runId, seq: ++seq })}\n\n`);
         },
         approval(fields = {}) {
           const prompt_id = `prm_${++n}`;
@@ -128,9 +168,11 @@ export async function startFakeHermes(key = "kunci-uji-0123456789abcdef"): Promi
         gone,
         drop: () => res.socket?.destroy(),
       };
+      active.add(sid);
       try {
         await fake.script(turn);
       } finally {
+        active.delete(sid);
         runs.delete(runId);
         if (!res.writableEnded) res.end();
       }

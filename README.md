@@ -256,7 +256,7 @@ Semua URL tersedia dalam dua bentuk: dengan awalan `/api` dan tanpa (sama sepert
 | `POST /api/cron` | perintah dari panel PAPAN JADWAL: jalankan, jeda, lanjutkan (hanya dari halaman Agent HQ sendiri) |
 | `GET /api/cron/commands`, `POST /api/cron/result` | dipakai reporter jadwal Hermes (`docs/hermes.md` bagian 10) |
 | `GET /api/hermes` | apakah chat Hermes aktif (`{"enabled": true}`) |
-| `POST /api/hermes`, `GET /api/hermes/stream` | panel chat Hermes: kirim pesan, jawab izin, hentikan, percakapan baru (`docs/hermes.md` bagian 11) |
+| `POST /api/hermes`, `GET /api/hermes/stream` | panel chat Hermes: kirim pesan, jawab izin, hentikan, sesi baru dengan agennya, riwayat sesi (buka, ganti nama, hapus), model per sesi (`docs/hermes.md` bagian 11) |
 | `GET /api/terminal` | alamat terminal web untuk tombol Terminal (`{"url": ...}`, `docs/terminal.md`) |
 
 Endpoint `/api/cron`, `/api/hermes`, dan `/api/terminal` hanya ada dengan awalan `/api` dan hanya di app Next.js
