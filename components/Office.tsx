@@ -47,6 +47,7 @@ export default function Office() {
   const stageRef = useRef<HTMLDivElement>(null);
   const labelsRef = useRef<HTMLDivElement>(null);
   const transportRef = useRef<Transport | null>(null);
+  const [infoHidden, setInfoHidden] = useState(false);
   const [rosterOpen, setRosterOpen] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const closeModal = useCallback(() => setModalOpen(false), []);
@@ -118,6 +119,8 @@ export default function Office() {
       <div ref={stageRef} className="hq-stage" />
       <div ref={labelsRef} className="hq-labels" />
       <TopBar
+        infoHidden={infoHidden}
+        onToggleInfo={() => setInfoHidden((v) => !v)}
         onConnect={() => setModalOpen(true)}
         onToggleRoster={() => setRosterOpen((v) => !v)}
         onCron={() => setCronOpen(true)}
@@ -140,20 +143,22 @@ export default function Office() {
             : undefined
         }
       />
-      <Roster open={rosterOpen} />
-      <LogPanel />
-      <Toast />
-      <ConnectModal
-        open={modalOpen}
-        liveUrl={liveUrl}
-        onClose={closeModal}
-        onConnect={(url) => transportRef.current?.connect(url)}
-        onDemo={() => transportRef.current?.backToDemo()}
-      />
-      {cronOpen && <CronPanel open onClose={closeCron} liveUrl={liveUrl} />}
-      {hermesOpen && hermesOn && <HermesPanel onClose={closeHermes} liveUrl={liveUrl} />}
-      {termOpenUrl && <TerminalPanel url={termOpenUrl} onClose={closeTerm} />}
-      {serverOpen && <ServerPanel onClose={closeServer} />}
+      <div data-hq-ui="panels" style={infoHidden ? { display: "none" } : undefined}>
+        <Roster open={rosterOpen} />
+        <LogPanel />
+        <Toast />
+        <ConnectModal
+          open={modalOpen}
+          liveUrl={liveUrl}
+          onClose={closeModal}
+          onConnect={(url) => transportRef.current?.connect(url)}
+          onDemo={() => transportRef.current?.backToDemo()}
+        />
+        {cronOpen && <CronPanel open onClose={closeCron} liveUrl={liveUrl} />}
+        {hermesOpen && hermesOn && <HermesPanel onClose={closeHermes} liveUrl={liveUrl} />}
+        {termOpenUrl && <TerminalPanel url={termOpenUrl} onClose={closeTerm} />}
+        {serverOpen && <ServerPanel onClose={closeServer} />}
+      </div>
     </>
   );
 }

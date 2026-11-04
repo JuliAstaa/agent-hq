@@ -121,8 +121,8 @@ describe("transcriptFor", () => {
     const main = `/r/proj/${SID}.jsonl`;
     expect(transcriptFor({ transcript_path: main })).toBe(main);
     expect(transcriptFor({ transcript_path: main, agent_id: "a1", agent_transcript_path: "/r/x.jsonl" })).toBe("/r/x.jsonl");
-    expect(transcriptFor({ transcript_path: main, agent_id: "ae0f8a26" })).toBe(`/r/proj/${SID}/subagents/agent-ae0f8a26.jsonl`);
-    expect(transcriptFor({ transcript_path: main, agent_id: "agent-abc123" })).toBe(`/r/proj/${SID}/subagents/agent-abc123.jsonl`);
+    expect(transcriptFor({ transcript_path: main, agent_id: "ae0f8a26" })).toBe(path.join("/r/proj", SID, "subagents", "agent-ae0f8a26.jsonl"));
+    expect(transcriptFor({ transcript_path: main, agent_id: "agent-abc123" })).toBe(path.join("/r/proj", SID, "subagents", "agent-abc123.jsonl"));
     expect(transcriptFor({ agent_id: "a1" })).toBeNull();
   });
 });

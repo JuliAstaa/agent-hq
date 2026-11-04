@@ -8,12 +8,16 @@ import StatusChips from "./StatusChips";
 import { Button, CARD, CARD_FRAME, cn } from "./ui";
 
 export default function TopBar({
+  infoHidden,
+  onToggleInfo,
   onConnect,
   onToggleRoster,
   onCron,
   onHermes,
   onTerminal,
 }: {
+  infoHidden: boolean;
+  onToggleInfo: () => void;
   onConnect: () => void;
   onToggleRoster: () => void;
   onCron: () => void;
@@ -24,6 +28,7 @@ export default function TopBar({
 }) {
   const conn = useStore(hqStore, (s) => s.conn);
   const hasCron = useStore(hqStore, (s) => s.cron !== null);
+  const infoAction = infoHidden ? "Tampilkan info" : "Sembunyikan info";
   const dot = conn.mode === "live" ? "bg-working animate-[hq-pulse_1.4s_infinite]" : conn.mode === "down" ? "bg-error" : "bg-thinking";
   // Layout (deviation 19): the controls always stay top right so they never cover the roster below them.
   // Wide: one row like the prototype. Floors and status chips share the middle group, and the chips drop under
@@ -37,45 +42,54 @@ export default function TopBar({
         </h1>
         <small className="block text-[11px] font-semibold mt-[3px]">kantor virtual para agen</small>
       </div>
-      <div className="flex-1 min-w-0 flex flex-wrap gap-3 items-start max-[1181px]:order-last max-[1181px]:basis-full">
+      <div data-hq-ui="navigation" style={infoHidden ? { display: "none" } : undefined} className="flex-1 min-w-0 flex flex-wrap gap-3 items-start max-[1181px]:order-last max-[1181px]:basis-full">
         <FloorSwitcher />
         <StatusChips />
       </div>
-      <div className={cn(CARD, "pointer-events-auto shrink-0 ml-auto flex items-center gap-2 py-[6px] pr-2 pl-3", "max-[820px]:shrink max-[820px]:min-w-0 max-[820px]:flex-wrap")}>
-        <span className="flex items-center gap-[6px] font-semibold text-[13px]" data-mode={conn.mode}>
-          <i className={cn("inline-block w-[10px] h-[10px] rounded-full border-2 border-ink", dot)} />
-          <span>{conn.text}</span>
-        </span>
-        <AudioControl />
-        <Button
-          title="Reset kamera"
-          onClick={() => {
-            hqStore.getState().select(null);
-            hqStore.getState().setFloor("all");
-          }}
-        >
-          ⌂
-        </Button>
-        <Button className="hidden max-[820px]:inline-block" onClick={onToggleRoster}>
-          Agen
-        </Button>
-        {hasCron && (
-          <Button title="Papan jadwal (cron Hermes)" onClick={onCron}>
-            Jadwal
+      <div className={cn("pointer-events-auto shrink-0 ml-auto flex items-center gap-2", !infoHidden && cn(CARD, "py-[6px] pr-2 pl-3 max-[820px]:shrink max-[820px]:min-w-0 max-[820px]:flex-wrap"))}>
+        <div data-hq-ui="controls" style={{ display: infoHidden ? "none" : "contents" }}>
+          <span className="flex items-center gap-[6px] font-semibold text-[13px]" data-mode={conn.mode}>
+            <i className={cn("inline-block w-[10px] h-[10px] rounded-full border-2 border-ink", dot)} />
+            <span>{conn.text}</span>
+          </span>
+          <AudioControl />
+          <Button
+            title="Reset kamera"
+            onClick={() => {
+              hqStore.getState().select(null);
+              hqStore.getState().setFloor("all");
+            }}
+          >
+            ⌂
           </Button>
-        )}
-        {onHermes && (
-          <Button title="Chat dengan Hermes" onClick={onHermes}>
-            Hermes
+          <Button className="hidden max-[820px]:inline-block" onClick={onToggleRoster}>
+            Agen
           </Button>
-        )}
-        {onTerminal && (
-          <Button title="Terminal server" onClick={onTerminal}>
-            Terminal
+          {hasCron && (
+            <Button title="Papan jadwal (cron Hermes)" onClick={onCron}>
+              Jadwal
+            </Button>
+          )}
+          {onHermes && (
+            <Button title="Chat dengan Hermes" onClick={onHermes}>
+              Hermes
+            </Button>
+          )}
+          {onTerminal && (
+            <Button title="Terminal server" onClick={onTerminal}>
+              Terminal
+            </Button>
+          )}
+          <Button tone="primary" onClick={onConnect}>
+            Sambungkan
           </Button>
-        )}
-        <Button tone="primary" onClick={onConnect}>
-          Sambungkan
+        </div>
+        <Button title={infoAction} aria-label={infoAction} aria-pressed={infoHidden} onClick={onToggleInfo} className="px-2 leading-none min-h-[36px]">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" />
+            <circle cx="12" cy="12" r="3" />
+            {!infoHidden && <path d="m3 3 18 18" />}
+          </svg>
         </Button>
       </div>
     </div>
