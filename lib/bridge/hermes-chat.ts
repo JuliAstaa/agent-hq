@@ -953,6 +953,17 @@ export async function listSessions(): Promise<Reply> {
   return ok({ sessions: rows.map((r) => r.row), current: chat.view.sessionId, now: Date.now() });
 }
 
+/** Resolve a roster character by its stable id, including cached runs outside the history's newest 50 rows. */
+export async function openAgentSession(agentId: unknown): Promise<Reply> {
+  if (typeof agentId !== "string" || !/^cc-[a-f0-9]{8}$/.test(agentId)) {
+    return fail(404, "Chat agen ini belum tersedia. Panel hanya bisa membuka sesi Hermes API server.");
+  }
+  const cached = [...chat.sessions.values()].find((ctx) => ctx.view.agentId === agentId);
+  const id = cached?.view.sessionId ?? (await fetchSessions()).find((s) => hermesAgentId(s.id) === agentId)?.id;
+  if (!id) return fail(404, "Chat agen ini belum tersedia. Sesi CLI, Telegram, dan Discord tetap dibuka di tempat asalnya.");
+  return openSession(id);
+}
+
 /** Continue another session while every other session's turn keeps running. */
 export async function openSession(sessionId: unknown): Promise<Reply> {
   const id = cleanId(sessionId);
@@ -1101,7 +1112,7 @@ const ACTIONS = "send, approve, stop, new, sessions, open, rename, delete, model
 
 /**
  * POST /api/hermes body: {"action": "send", "text"} | {"action": "approve", "choice", "id"?} | {"action": "stop"} |
- * {"action": "new", "agent"?, "model"?} | {"action": "sessions"} | {"action": "open", "sessionId"} |
+ * {"action": "new", "agent"?, "model"?} | {"action": "sessions"} | {"action": "open", "sessionId" or "agentId"} |
  * {"action": "rename", "sessionId"?, "title"} | {"action": "delete", "sessionId"} | {"action": "models", "refresh"?} |
  * {"action": "model", "model": {"provider", "model"} | null}.
  */
@@ -1128,7 +1139,7 @@ export async function chatAction(body: unknown): Promise<Reply> {
       case "sessions":
         return await listSessions();
       case "open":
-        return await openSession(b.sessionId);
+        return b.sessionId === undefined && b.agentId !== undefined ? await openAgentSession(b.agentId) : await openSession(b.sessionId);
       case "rename":
         return await renameSession(b.sessionId, b.title);
       case "delete":

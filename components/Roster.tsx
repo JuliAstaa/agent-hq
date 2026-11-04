@@ -6,7 +6,11 @@ import { hqStore } from "@/lib/store";
 import AgentCard from "./AgentCard";
 import { CARD, PILL, cn } from "./ui";
 
-export default function Roster({ open }: { open: boolean }) {
+export default function Roster({ open, onOpenChat, openingChatId }: {
+  open: boolean;
+  onOpenChat?: (id: string) => void;
+  openingChatId: string | null;
+}) {
   const agents = useStore(hqStore, (s) => s.agents);
   const selectedId = useStore(hqStore, (s) => s.selectedId);
   const [now, setNow] = useState(() => Date.now());
@@ -34,7 +38,9 @@ export default function Roster({ open }: { open: boolean }) {
         {agents.size === 0 ? (
           <div className="text-[13px] opacity-70 px-1 py-[6px]">Belum ada agen. Menunggu data...</div>
         ) : (
-          [...agents.values()].map((a) => <AgentCard key={a.id} a={a} selected={a.id === selectedId} now={now} />)
+          [...agents.values()].map((a) => (
+            <AgentCard key={a.id} a={a} selected={a.id === selectedId} now={now} onOpenChat={onOpenChat} openingChatId={openingChatId} />
+          ))
         )}
       </div>
     </aside>

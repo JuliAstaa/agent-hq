@@ -92,3 +92,56 @@ test("Hermes: create and switch sessions while both work, preserve drafts, stop 
   await expect(panel.getByRole("button", { name: "Kirim", exact: true })).toBeVisible();
   expect(errors).toEqual([]);
 });
+
+test("roster chat buttons open the matching Hermes session and leave unsupported agents unchanged", async ({ page }) => {
+  const action = async (data: Record<string, unknown>) => {
+    const res = await page.request.post(base + "/api/hermes", { data });
+    expect(res.ok()).toBe(true);
+    return res.json();
+  };
+  const a = await action({ action: "new", agent: { name: "Agen satu" } });
+  await action({ action: "send", sessionId: a.sessionId, text: "roster A" });
+  const b = await action({ action: "new", agent: { name: "Agen dua" } });
+  await action({ action: "send", sessionId: b.sessionId, text: "roster B" });
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await blockExternal(page);
+  await page.goto(base);
+  const roster = page.locator('[data-hq-ui="roster"]');
+  const panel = page.getByRole("dialog", { name: "Chat Hermes" });
+  const buttonA = roster.getByRole("button", { name: "Buka chat Agen satu", exact: true });
+  await expect(page.getByRole("button", { name: "Hermes", exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(buttonA).toBeEnabled();
+  await buttonA.click();
+  await expect(panel.getByRole("button", { name: /Agen: Agen satu/ })).toBeVisible();
+  await expect(panel.getByText("Mengerjakan roster A", { exact: false })).toBeVisible();
+  await expect(roster.locator(".sel")).toHaveCount(0); // clicking the button does not select the card
+  await panel.getByRole("textbox", { name: "Pesan untuk Hermes" }).fill("draft roster A");
+  await panel.getByRole("button", { name: "Riwayat", exact: true }).click();
+  await roster.getByRole("button", { name: "Buka chat Agen dua", exact: true }).focus();
+  await roster.getByRole("button", { name: "Buka chat Agen dua", exact: true }).press("Enter");
+  await expect(panel.getByText("Mengerjakan roster B", { exact: false })).toBeVisible();
+  await buttonA.focus();
+  await buttonA.press("Enter");
+  await expect(panel.getByRole("textbox", { name: "Pesan untuk Hermes" })).toHaveValue("draft roster A");
+  await panel.getByRole("button", { name: "Tutup", exact: true }).click();
+  await roster.getByRole("button", { name: "Buka chat Agen dua", exact: true }).click();
+  await expect(panel.getByRole("button", { name: /Agen: Agen dua/ })).toBeVisible();
+  await expect(panel.getByText("Mengerjakan roster B", { exact: false })).toBeVisible();
+  await expect(panel.getByText("Mengerjakan roster A", { exact: false })).toBeHidden();
+  await panel.getByRole("button", { name: "Tutup", exact: true }).click();
+  await page.evaluate(() => window.agentHQ!.applyEvent({ type: "agent_update", id: "demo-test", name: "Tanpa sesi", status: "idle" }));
+  await roster.getByRole("button", { name: "Buka chat Tanpa sesi", exact: true }).click();
+  await expect(page.locator('[data-hq-ui="toast"]')).toContainText("Chat agen ini belum tersedia");
+  await expect(panel).toBeHidden();
+  expect((await action({ action: "sessions" })).current).toBe(b.sessionId);
+  await page.screenshot({ path: "test-results/visual/roster-chat.png" });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole("button", { name: "Agen", exact: true }).click();
+  await expect(buttonA).toBeVisible();
+  await buttonA.click();
+  await expect(panel.getByText("Mengerjakan roster A", { exact: false })).toBeVisible();
+  await action({ action: "stop", sessionId: a.sessionId });
+  await action({ action: "stop", sessionId: b.sessionId });
+  expect(errors).toEqual([]);
+});

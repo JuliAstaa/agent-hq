@@ -110,6 +110,8 @@ Sumber: `prd.md` §5, §6, §7, §8, §14, §15 (M1), §16; prototipe di `refere
 
 25. **Sembunyikan semua info** (diminta dan disetujui user, 2026-11-04). Tombol mata di kanan atas menyembunyikan pemilih lantai, chip status, kontrol atas, Daftar Agen, Log Aktivitas, toast, serta panel/modal yang sedang terbuka. Judul `AGENT HQ` dan subjudul `kantor virtual para agen` tetap terlihat, bersama tombol `Tampilkan info` untuk memulihkan tampilan. Panel tetap terpasang agar filter log, keadaan minimize, pengaturan, dan sesi terminal/chat tidak direset; engine dan koneksi tetap berjalan. Tampilan awal tetap menampilkan info. Kode: `components/Office.tsx`, `components/TopBar.tsx`.
 
+26. **Buka chat dari Daftar Agen** (diminta dan disetujui user, 2026-11-04). Setiap kartu punya tombol **Buka chat**, aktif saat koneksi live dan Chat Hermes tersedia. Tombol membuka sesi Hermes milik ID agen itu, termasuk setelah rename atau restart, tanpa membuat sesi baru, memilih kartu, atau menghentikan sesi lain. Resolusi menggunakan sesi yang masih di memori lalu daftar sesi API server Hermes; nama tampilan tidak dipakai untuk pencocokan. Sesi yang tidak tersedia (termasuk CLI/Telegram/Discord dan agen non-Hermes) menampilkan keterangan tanpa mengganti percakapan. Jika HQ_TOKEN diperlukan, pengguna diarahkan mengisinya lewat panel Hermes. Tidak ada dependency runtime baru. Tes: unit resolusi/isolasi sesi dan browser desktop/mobile di `tests/e2e/hermes.spec.ts`. Verifikasi: lint, typecheck, build, 418 tes Vitest, serta 5 tes browser Hermes/UI lolos.
+
 ## Langkah
 
 ### 0. Fondasi

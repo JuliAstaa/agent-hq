@@ -475,6 +475,55 @@ describe("Riwayat", () => {
     expect(chat.view.sessionId).toBeNull();
   });
 
+  it("opens the roster agent's existing session by id after a restart, even when its name changed", async () => {
+    fake.sessions.push({ id: "api_old", title: "Agent HQ · cek disk" });
+    fake.messages.set("api_old", [{ id: 1, role: "assistant", content: "41%" }]);
+    const agentId = hermesAgentId("api_old");
+    hub.overrides.set(agentId, { name: "Nama baru" });
+    expect(await chatAction({ action: "open", agentId })).toMatchObject({ status: 200, body: { sessionId: "api_old" } });
+    expect(chat.view.agentId).toBe(agentId);
+    expect(items()).toEqual([["assistant", "41%"]]);
+    expect(hub.agents.get(agentId)?.name).toBe("Nama baru");
+    expect(fake.sessions).toHaveLength(1);
+    expect(streams()).toHaveLength(0);
+  });
+
+  it("opens cached roster sessions without a history lookup and preserves another session's running turn", async () => {
+    fake.script = async (t) => {
+      t.send("run.started");
+      await t.stopped;
+      t.send("run.cancelled");
+      t.send("done");
+    };
+    await send("tugas A");
+    await until(() => chat.view.phase === "running");
+    const agentId = chat.view.agentId!;
+    const sid = chat.view.sessionId!;
+    await chatAction({ action: "new" });
+    await send("tugas B");
+    await until(() => chat.view.phase === "running");
+    const bid = chat.view.sessionId!;
+    fake.calls.length = 0;
+    expect(await chatAction({ action: "open", agentId })).toMatchObject({ status: 200, body: { sessionId: sid } });
+    expect(chat.view).toMatchObject({ agentId, phase: "running" });
+    expect(chat.sessions.get(bid)?.view.phase).toBe("running");
+    expect(fake.calls).toHaveLength(0);
+    await chatAction({ action: "stop", sessionId: sid });
+    await chatAction({ action: "stop", sessionId: bid });
+    await until(() => [...chat.sessions.values()].every((ctx) => ctx.view.phase === "idle"));
+  });
+
+  it("does not switch or create a conversation for unavailable, foreign, hidden or invalid roster agents", async () => {
+    await chatAction({ action: "new" });
+    const sid = chat.view.sessionId;
+    fake.sessions.push({ id: "cli_1", title: "CLI", source: "cli" }, { id: "hidden_1", title: "Hidden", hidden: true });
+    for (const agentId of ["demo", null, "cc-nope", hermesAgentId("missing"), hermesAgentId("cli_1"), hermesAgentId("hidden_1")]) {
+      expect((await chatAction({ action: "open", agentId })).status).toBe(404);
+      expect(chat.view.sessionId).toBe(sid);
+    }
+    expect(fake.calls.filter((c) => c.method === "POST" && c.path === "/api/sessions")).toHaveLength(1);
+  });
+
   it("rename keeps the Agent HQ prefix; a taken title is refused", async () => {
     await send("halo");
     await idle();

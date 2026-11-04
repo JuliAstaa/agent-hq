@@ -9,7 +9,7 @@ import { MEETING_ROOMS } from "@/lib/meeting";
 import { renameAgent, type RenamePatch } from "@/lib/rename";
 import { hqStore, type Agent } from "@/lib/store";
 import { DEPTS, type Dept } from "@/lib/teams";
-import { Button, PILL, cn } from "./ui";
+import { Button, OFF, PILL, cn } from "./ui";
 
 const FIELD = "w-full font-[inherit] text-[13px] px-2 py-[5px] border-[2.5px] border-ink rounded-[10px] bg-white";
 const TEAM_CHOICES: [string, string][] = [
@@ -93,7 +93,13 @@ function RenameForm({ a, onDone }: { a: Agent; onDone: () => void }) {
 }
 
 /** One roster card (`.agent` in the prototype). `now` ticks every second for the "ago" text. */
-function AgentCard({ a, selected, now }: { a: Agent; selected: boolean; now: number }) {
+function AgentCard({ a, selected, now, onOpenChat, openingChatId }: {
+  a: Agent;
+  selected: boolean;
+  now: number;
+  onOpenChat?: (id: string) => void;
+  openingChatId: string | null;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   const [editing, setEditing] = useState(false);
   useEffect(() => {
@@ -149,6 +155,21 @@ function AgentCard({ a, selected, now }: { a: Agent; selected: boolean; now: num
       </div>
       <div className="text-[11.5px] opacity-60 font-mono">
         {fmtNum(a.tokens)} token{a.cost != null ? " · $" + a.cost.toFixed(3) : ""} · {ago(a.updatedAt, now)}
+      </div>
+      <div className="mt-2 flex justify-end">
+        <Button
+          size="log"
+          className={OFF}
+          aria-label={`Buka chat ${a.name}`}
+          disabled={!onOpenChat || openingChatId !== null}
+          title={onOpenChat ? "Buka sesi chat Hermes agen ini" : "Chat tersedia saat terhubung ke server dengan Chat Hermes aktif"}
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpenChat?.(a.id);
+          }}
+        >
+          {openingChatId === a.id ? "Membuka..." : "Buka chat"}
+        </Button>
       </div>
       {selected && (
         <div className="mt-2 [border-top:2px_dashed_var(--ink)] pt-2">

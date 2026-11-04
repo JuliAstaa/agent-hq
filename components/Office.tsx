@@ -9,15 +9,17 @@ import { hqStore, type HQStore } from "@/lib/store";
 import { createTransport, type Transport } from "@/lib/transport";
 import { CRON_BOARD_EVENT } from "@/lib/cron";
 import { SERVER_ROOM_EVENT } from "@/lib/server";
+import { hermesUrlFor } from "@/lib/hermes-chat";
 import ConnectModal from "./ConnectModal";
 import CronPanel from "./CronPanel";
-import HermesPanel, { useHermesAvailable } from "./HermesPanel";
+import HermesPanel, { useHermesAvailable, type HermesPanelHandle } from "./HermesPanel";
 import LogPanel from "./LogPanel";
 import Roster from "./Roster";
 import ServerPanel from "./ServerPanel";
 import TerminalPanel, { useTerminalUrl } from "./TerminalPanel";
 import Toast from "./Toast";
 import TopBar from "./TopBar";
+import { authHeader, readToken } from "./token";
 
 export interface AgentHQHandle {
   store: HQStore;
@@ -57,6 +59,9 @@ export default function Office() {
   const [hermesOpen, setHermesOpen] = useState(false);
   const closeHermes = useCallback(() => setHermesOpen(false), []);
   const hermesOn = useHermesAvailable(liveUrl);
+  const hermesPanelRef = useRef<HermesPanelHandle>(null);
+  const chatRequestRef = useRef<AbortController | null>(null);
+  const [openingChatId, setOpeningChatId] = useState<string | null>(null);
   // The Hermes, terminal and server panels take the same spot on the right, so opening one closes the others. The open
   // terminal panel keeps its address: ttyd does not depend on the office stream, so a restart of Agent HQ (e.g.
   // ./start.sh typed in that terminal) hides the button for a moment but leaves the panel connected.
@@ -65,6 +70,38 @@ export default function Office() {
   const termUrl = useTerminalUrl(liveUrl);
   const [serverOpen, setServerOpen] = useState(false);
   const closeServer = useCallback(() => setServerOpen(false), []);
+
+  const openAgentChat = useCallback(async (agentId: string) => {
+    const url = hermesOn ? hermesUrlFor(liveUrl(), window.location.href) : null;
+    if (!url || chatRequestRef.current) return;
+    const ac = new AbortController();
+    chatRequestRef.current = ac;
+    setOpeningChatId(agentId);
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json", ...authHeader(readToken()) },
+        body: JSON.stringify({ action: "open", agentId }),
+        signal: ac.signal,
+      });
+      const body = await res.json().catch(() => null) as { ok?: boolean; error?: string } | null;
+      if (res.status === 401) {
+        hqStore.getState().showToast("Buka panel Hermes dan masukkan HQ_TOKEN dulu, lalu coba lagi.");
+      } else if (!res.ok || !body?.ok) {
+        hqStore.getState().showToast(body?.error || `Chat tidak bisa dibuka (HTTP ${res.status}).`);
+      } else {
+        setTermOpenUrl(null);
+        setServerOpen(false);
+        hermesPanelRef.current?.showChat();
+        setHermesOpen(true);
+      }
+    } catch {
+      if (!ac.signal.aborted) hqStore.getState().showToast("Chat tidak bisa dibuka. Cek koneksi ke Agent HQ.");
+    } finally {
+      if (!ac.signal.aborted) setOpeningChatId(null);
+      chatRequestRef.current = null;
+    }
+  }, [hermesOn, liveUrl]);
 
   useEffect(() => {
     const engine = createEngine(stageRef.current!, labelsRef.current!, hqStore);
@@ -103,6 +140,7 @@ export default function Office() {
       engine,
     };
     return () => {
+      chatRequestRef.current?.abort();
       window.removeEventListener(CRON_BOARD_EVENT, openCron);
       window.removeEventListener(SERVER_ROOM_EVENT, openServer);
       transport.close();
@@ -144,7 +182,7 @@ export default function Office() {
         }
       />
       <div data-hq-ui="panels" style={infoHidden ? { display: "none" } : undefined}>
-        <Roster open={rosterOpen} />
+        <Roster open={rosterOpen} onOpenChat={hermesOn ? openAgentChat : undefined} openingChatId={openingChatId} />
         <LogPanel />
         <Toast />
         <ConnectModal
@@ -155,7 +193,7 @@ export default function Office() {
           onDemo={() => transportRef.current?.backToDemo()}
         />
         {cronOpen && <CronPanel open onClose={closeCron} liveUrl={liveUrl} />}
-        {hermesOpen && hermesOn && <HermesPanel onClose={closeHermes} liveUrl={liveUrl} />}
+        {hermesOpen && hermesOn && <HermesPanel ref={hermesPanelRef} onClose={closeHermes} liveUrl={liveUrl} />}
         {termOpenUrl && <TerminalPanel url={termOpenUrl} onClose={closeTerm} />}
         {serverOpen && <ServerPanel onClose={closeServer} />}
       </div>

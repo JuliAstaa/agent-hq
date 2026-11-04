@@ -446,6 +446,7 @@ muncul kalau Agent HQ punya `HQ_HERMES_API_KEY`.
 - Tulis pesan, lalu Enter untuk kirim (Shift+Enter untuk baris baru). Jawaban Hermes muncul sambil ditulis. Tiap
   tool tampil sebagai baris kecil dengan titik kuning (jalan), hijau (selesai), atau merah (gagal).
 - **Hentikan** menghentikan pekerjaan yang sedang jalan.
+- **Buka chat** pada tiap kartu di **Daftar Agen** membuka sesi Hermes milik agen itu, termasuk setelah namanya diganti. Sesi lain tetap bekerja. Tombol aktif saat terhubung ke server dengan Chat Hermes aktif. Jika memakai HQ_TOKEN, masukkan token lewat panel Hermes terlebih dahulu. Agen yang sesinya tidak tersedia menampilkan keterangan; sesi CLI, Telegram, dan Discord tetap dibuka di tempat asalnya.
 - Panel boleh ditutup dan halaman boleh di-reload: Hermes tetap bekerja, dan percakapan tampil lagi saat panel
   dibuka. Setelah Agent HQ restart, sesi `Agent HQ` yang terakhir dipakai dilanjutkan.
 - Sesi diberi judul dari pesan pertamanya, misalnya `Agent HQ · cek disk penuh` (judul di Hermes harus unik,

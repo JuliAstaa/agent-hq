@@ -6,7 +6,7 @@
 // Riwayat switches between sessions, Baru starts one with its own office character, and each session can have its
 // own model. Every Hermes string is rendered as React text.
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type FormEvent, type Ref } from "react";
 import { useStore } from "zustand";
 import { ago } from "@/lib/cron";
 import {
@@ -239,7 +239,11 @@ function ChatRow({ item, busy, onAnswer }: { item: ChatItem; busy: boolean; onAn
   }
 }
 
-export default function HermesPanel({ onClose, liveUrl }: { onClose: () => void; liveUrl: () => string | null }) {
+export interface HermesPanelHandle {
+  showChat: () => void;
+}
+
+export default function HermesPanel({ onClose, liveUrl, ref }: { onClose: () => void; liveUrl: () => string | null; ref?: Ref<HermesPanelHandle> }) {
   const [url] = useState(() => hermesUrlFor(liveUrl(), here()));
   const [view, setView] = useState<ChatView>(emptyChatView);
   const [conn, setConn] = useState<Conn>("connecting");
@@ -255,6 +259,7 @@ export default function HermesPanel({ onClose, liveUrl }: { onClose: () => void;
   const [tokenDraft, setTokenDraft] = useState("");
   const [tokenRev, setTokenRev] = useState(0);
   const [mode, setMode] = useState<Mode>("chat");
+  useImperativeHandle(ref, () => ({ showChat: () => setMode("chat") }), []);
   const [sessions, setSessions] = useState<ChatSession[] | null>(null);
   const [sessionsErr, setSessionsErr] = useState("");
   /** Server clock when the list was loaded: its "5 mnt lalu" texts count from here. */
