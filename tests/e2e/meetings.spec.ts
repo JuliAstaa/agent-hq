@@ -114,3 +114,30 @@ test("meeting routes reject cross-site control, invalid JSON and unsupported ses
   expect(response.status()).toBe(200);
   expect(Array.isArray((await response.json()).rooms)).toBe(true);
 });
+
+test("manual meeting agents remain seated across speaking turns instead of visiting the task board", async ({ page }) => {
+  await blockExternal(page); await page.goto(base);
+  await page.waitForFunction(() => !!window.agentHQ);
+  await expect(page.locator('[data-hq-ui="top"] [data-mode]')).toHaveAttribute("data-mode", "live");
+  await page.evaluate(() => {
+    const hq = window.agentHQ!;
+    hq.stopSim();
+    hq.applyEvent({ id: "nav-speaker", name: "Pembicara", status: "working" });
+    hq.applyEvent({ id: "nav-listener", name: "Peserta", status: "idle" });
+    hq.applyEvent({ type: "meeting_state", discussion: {
+      id: "nav-discussion", room: 2, goal: "Uji pergantian giliran", phase: "running", round: 1, rounds: 3,
+      speaker: "nav-speaker", since: Date.now(), error: "", participants: [
+        { agentId: "nav-speaker", sessionId: "nav-session-a", name: "Pembicara", role: "Reviewer", model: null },
+        { agentId: "nav-listener", sessionId: "nav-session-b", name: "Peserta", role: "QA", model: null },
+      ],
+    } });
+    hq.placeAt("nav-speaker", "seat:10");
+  });
+  for (const status of ["idle", "thinking", "working", "idle", "thinking", "working"]) {
+    await page.evaluate((status) => window.agentHQ!.applyEvent({ id: "nav-speaker", status }), status);
+    await expect.poll(() => page.evaluate(() => window.agentHQ!.store.getState().agents.get("nav-speaker")?.loc?.where)).toBe("Meeting C · Lt.4");
+    // Give the animation loop time to observe each status, including the idle -> thinking transition.
+    await page.waitForTimeout(300);
+    expect(await page.evaluate(() => window.agentHQ!.store.getState().logs.some((l) => l.id === "nav-speaker" && l.message.includes("ambil tugas di papan")))).toBe(false);
+  }
+});

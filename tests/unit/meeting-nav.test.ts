@@ -162,6 +162,44 @@ describe("movement with a meeting seat", () => {
     expect(m.mv.dest).toBe(s);
     expect(m.mv.mode).toBe("desk");
   });
+
+  it("manual discussion participants go directly to their seat and stay through repeated speaking turns", () => {
+    const { ctx, mk, run, logs } = setup();
+    const m = mk("speaker"), s = seat();
+    const a: NavAgent = { status: "idle", dept: null, seat: s, discussionId: "discussion-1" };
+    run(m, a, 0.1);
+    run(m, { ...a, status: "thinking" }, 40);
+    expect(m.mv.dest).toBe(s);
+    expect(m.root.position.distanceTo(s.final)).toBeLessThan(1e-6);
+    for (let round = 0; round < 3; round++) {
+      for (const status of ["idle", "thinking", "working", "waiting", "error", "idle"] as const) {
+        run(m, { ...a, status }, 0.3);
+        expect(m.mv).toMatchObject({ mode: "desk", fetching: false, carrying: false });
+        expect(m.mv.dest).toBe(s);
+      }
+    }
+    expect(ctx.boards.every((b) => b.occ !== m.id)).toBe(true);
+    expect(logs.some((line) => line.includes("ambil tugas di papan"))).toBe(false);
+    // After the discussion ends, an ordinary new prompt still fetches a card.
+    run(m, { status: "idle", dept: null }, 0.1);
+    run(m, { status: "thinking", dept: null }, 0.1);
+    expect(m.mv.dest.kind).toBe("board");
+  });
+
+  it("joining a manual discussion cancels a pending pickup and releases the board", () => {
+    const { ctx, mk, run } = setup();
+    const m = mk("joining"), s = seat();
+    run(m, { status: "idle", dept: null }, 0.1);
+    run(m, { status: "thinking", dept: null }, 0.1);
+    const board = m.mv.dest;
+    expect(board.kind).toBe("board");
+    expect(board.occ).toBe(m.id);
+    run(m, { status: "working", dept: null, seat: s, discussionId: "discussion-2" }, 0.1);
+    expect(m.mv.dest).toBe(s);
+    expect(m.mv).toMatchObject({ fetching: false, carrying: false });
+    expect(board.occ).toBeNull();
+    expect(ctx.boards.every((b) => b.occ !== m.id)).toBe(true);
+  });
 });
 
 describe("sliding doors (deviation 23)", () => {

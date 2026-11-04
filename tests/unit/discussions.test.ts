@@ -100,7 +100,7 @@ describe("manual discussions", () => {
     const a = await create("A"), b = await create("B");
     const first = start([a, b], { room: 2 });
     await first;
-    expect(store.getState().agents.get(b.agentId)?.meeting).toMatchObject({ room: 2, seat: 1 });
+    expect(store.getState().agents.get(b.agentId)?.meeting).toMatchObject({ room: 2, seat: 1, discussionId: discussions.rooms.get(2)!.id });
     await end();
     expect(store.getState().agents.size).toBe(2);
     expect(store.getState().agents.get(a.agentId)?.meeting).toBeNull();

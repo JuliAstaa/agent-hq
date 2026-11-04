@@ -21,6 +21,8 @@ export interface MeetingSeat {
 /** Seat of one agent, with the team's display name (roster: "rapat <team>"). */
 export interface AgentMeeting extends MeetingSeat {
   team: string;
+  /** Manual discussions receive their goal from the room monitor, rather than the task board. */
+  discussionId?: string;
 }
 
 export interface MeetingRoom {
@@ -195,7 +197,7 @@ export function planMeetings(agents: MeetingAgent[], prev: MeetingState, now: nu
     if (!r) return;
     const d = manual.find((d) => d.room === room);
     if (d) {
-      d.participants.forEach((p, seat) => { if (byId.has(p.agentId)) seats.set(p.agentId, { room, seat, team: "Diskusi" }); });
+      d.participants.forEach((p, seat) => { if (byId.has(p.agentId)) seats.set(p.agentId, { room, seat, team: "Diskusi", discussionId: d.id }); });
       return;
     }
     const t = teams.get(r.key)!;
@@ -228,7 +230,7 @@ export function planMeetings(agents: MeetingAgent[], prev: MeetingState, now: nu
 
 /** Same seat and team name? */
 export const sameMeeting = (a: AgentMeeting | null | undefined, b: AgentMeeting | null | undefined) =>
-  (!a && !b) || (!!a && !!b && a.room === b.room && a.seat === b.seat && a.team === b.team);
+  (!a && !b) || (!!a && !!b && a.room === b.room && a.seat === b.seat && a.team === b.team && a.discussionId === b.discussionId);
 
 /** Same room list (for skipping store updates)? */
 export const sameRooms = (a: (MeetingRoom | null)[], b: (MeetingRoom | null)[]) =>

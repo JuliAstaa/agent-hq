@@ -52,6 +52,8 @@ export interface NavAgent {
   dept: Dept | null;
   /** Meeting seat assigned by the store (prd.md §7.9): wins over the team station, and holds an idle leader. */
   seat?: SeatPlace | null;
+  /** A manual meeting's shared goal is read at the monitor; a new speaking turn is not a board pickup. */
+  discussionId?: string;
 }
 
 export interface NavCtx {
@@ -190,9 +192,13 @@ export function updateNav(ctx: NavCtx, m: Mover, a: NavAgent, dt: number) {
   // the card up at the task board. Agents that appear already busy (snapshot, first event) go straight to work.
   const prev = mv.lastStatus;
   mv.lastStatus = a.status;
+  const seat = a.status !== "offline" ? (a.seat ?? null) : null;
+  const discussion = !!seat && !!a.discussionId;
+  // Joining a manual discussion supersedes an old pickup. Free the board and go to the assigned seat.
+  if (discussion) cancelFetch(ctx, m, false, seat);
   const newTask = (prev === "idle" || prev === "offline") && (a.status === "thinking" || a.status === "working");
   // A subagent without a desk works at its meeting seat only: no trip down to the task board.
-  if (newTask && !mv.fetching && m.home.kind === "desk") {
+  if (newTask && !discussion && !mv.fetching && m.home.kind === "desk") {
     const slot = freeBoard(ctx, m);
     if (slot) {
       mv.fetching = true;
@@ -201,7 +207,6 @@ export function updateNav(ctx: NavCtx, m: Mover, a: NavAgent, dt: number) {
       goTo(ctx, m, slot, true);
     }
   }
-  const seat = a.status !== "offline" ? (a.seat ?? null) : null;
   if (a.status === "idle" || a.status === "offline") cancelFetch(ctx, m, a.status === "offline", seat);
   if (a.status === "idle" && seat) {
     // An idle leader waits for its subagents at the table (prd.md §7.9), and a finished subagent keeps its seat.

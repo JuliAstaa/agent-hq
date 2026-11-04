@@ -19,6 +19,7 @@ Pengguna membuka monitor Meeting A, B, atau C, memilih peserta, menulis goal, la
 ## Model diskusi
 
 - Setiap peserta memakai sesi dan modelnya sendiri. Jawaban berasal dari panggilan agen sesungguhnya.
+- Goal diskusi diterima dari monitor ruangan. Peserta langsung menuju kursinya dan tetap di ruang meeting saat menunggu atau berganti giliran, tanpa mengambil kartu di Papan Tugas. Pickup lama dibatalkan saat bergabung. Prompt biasa dan rapat otomatis tetap mengikuti aturan Papan Tugas yang sudah ada.
 - Agen baru tersimpan sebagai sesi Hermes biasa dan tetap tersedia di kantor serta Riwayat sesudah rapat. Membatalkan pengaturan rapat tidak menghapus sesi yang sudah berhasil dibuat. Kegagalan membuat agen menampilkan pesan tanpa menambahkan peserta palsu atau mereset goal/peserta lain; tombol dicegah dari klik ganda saat proses berlangsung.
 - Peserta berbicara bergiliran. Setiap giliran menerima goal, identitas/peran peserta, percakapan bersama yang relevan, dan arahan terbaru pengguna.
 - Batas awal: 3 putaran diskusi, dapat dipilih 1 sampai 5 sebelum mulai, lalu 1 giliran rangkuman oleh peserta pertama sebagai fasilitator. Tampilkan batas ini di form agar rapat tidak berjalan tanpa akhir.

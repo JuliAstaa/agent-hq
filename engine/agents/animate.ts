@@ -55,7 +55,7 @@ export function animateAgent(ctx: AnimCtx, rt: AgentRuntime, a: Agent, t: number
       delete v.spawn;
     }
   }
-  updateNav(ctx.nav, rt, { status: a.status, dept: a.dept, seat: ctx.seatOf(a) }, dt);
+  updateNav(ctx.nav, rt, { status: a.status, dept: a.dept, seat: ctx.seatOf(a), discussionId: a.meeting?.discussionId }, dt);
   const col = STATUS[st].color;
   const mode = mv.mode, act = mode === "act" ? mv.activity : null;
   if (mode === "act") mv.actT += dt;
