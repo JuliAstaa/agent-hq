@@ -146,8 +146,8 @@ are green. Do not commit unless the user asks.
 
 ## Git
 - Never add a `Co-Authored-By: Claude` trailer, or any other co-author, to commits. Commits are authored by the repository owner only, so that only their name appears in the GitHub contributor list.
-- Commit and push finished work straight to `main` once the checks pass (lint, typecheck, tests, build), then confirm CI is green and that the deploy after it went through. There is no need to ask first; the owner approved this on 2026-10-12.
-- Git lives only at the repository root. `frontend/` and `backend/` keep their own `.gitignore` but are not separate repositories.
+- Commit and push finished work once the checks pass (lint, typecheck, tests, build), then the deploy after it went through. There is no need to ask first; the owner approved this on 2026-11-04.
+- Git lives only at the repository root.
 
 <!-- BEGIN:nextjs-agent-feedback -->
 
