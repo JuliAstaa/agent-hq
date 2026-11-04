@@ -466,8 +466,9 @@ muncul kalau Agent HQ punya `HQ_HERMES_API_KEY`.
   menghapus sesi dari Hermes beserta agen dan namanya. **Baru** dan **Buka** tetap bisa dipakai saat sesi lain
   bekerja. Tiap sesi punya stream, jawaban, model, dan permintaan izin sendiri. **Hentikan** hanya menghentikan
   sesi yang dipilih. Riwayat menunjukkan sesi yang sedang bekerja atau menunggu izin; sesi yang sedang bekerja
-  tidak bisa dihapus. Agen sesi yang masih bekerja tetap di kantor saat panel pindah; agen sesi idle keluar dan
-  masuk lagi saat sesinya dibuka. Sesi latar yang selesai normal keluar dari kantor, hasilnya tetap bisa dibuka.
+  tidak bisa dihapus. Agen tetap di kantor saat panel pindah dan setelah pekerjaannya selesai. Agen yang selesai
+  menjadi idle dan bisa beraktivitas santai; membuka chat lagi tidak membuat ulang atau mereset agennya.
+  **Hapus** pada Riwayat menghapus sesi beserta agennya.
   Batas run bersamaan dari Hermes/provider tetap berlaku; kalau penuh, panel menampilkan pesan dari Hermes.
 - Sesi CLI, Telegram, dan Discord tidak muncul di Riwayat. Hermes hanya mengizinkan API server melanjutkan sesi
   buatannya sendiri (sesi lain ditolak dengan `409 permission_denied`).

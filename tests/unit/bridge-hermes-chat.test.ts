@@ -364,7 +364,7 @@ describe("resume after a restart", () => {
 });
 
 describe("new session with its own character", () => {
-  it("creates the session right away; the character walks in named, the previous one leaves", async () => {
+  it("creates the session right away; the character walks in named, the previous one stays idle", async () => {
     await send("halo");
     await idle();
     const first = chat.view.agentId!;
@@ -373,8 +373,8 @@ describe("new session with its own character", () => {
     const sid = r.body.sessionId as string;
     const id = hermesAgentId(sid);
     expect(chat.view).toMatchObject({ sessionId: sid, agentId: id, items: [] });
-    expect(office).toContainEqual(expect.objectContaining({ type: "remove", id: first }));
-    expect(hub.agents.has(first)).toBe(false);
+    expect(office).not.toContainEqual(expect.objectContaining({ type: "remove", id: first }));
+    expect(hub.agents.get(first)).toMatchObject({ status: "idle", task: "Menunggu pesan berikutnya" });
     expect(hub.agents.get(id)).toMatchObject({ name: "Budi", role: "Analis SOC", team: "blue", status: "idle" });
     // pinned like a roster rename, so later hook events cannot overwrite it
     expect(json(namesFile).agents[id]).toMatchObject({ name: "Budi", role: "Analis SOC", team: "blue" });
@@ -565,6 +565,8 @@ describe("parallel conversations", () => {
     turns.get(bid)!.send("assistant.delta", { delta: " rahasia B" });
     releases.get(bid)!();
     await until(() => chat.sessions.get(bid)?.view.phase === "idle");
+    expect(hub.agents.get(hermesAgentId(bid))).toMatchObject({ status: "idle", task: "Menunggu pesan berikutnya" });
+    expect(office).not.toContainEqual(expect.objectContaining({ type: "remove", id: hermesAgentId(bid) }));
     expect(chat.view.phase).toBe("running");
     expect(events.slice(before).filter((e) => e.type === "chat_item" || e.type === "chat_delta")).toEqual([]);
     expect(JSON.stringify(chat.view.items)).not.toContain("hasil tugas B");
@@ -573,6 +575,8 @@ describe("parallel conversations", () => {
     expect(chat.view.items.at(-1)).toMatchObject({ kind: "assistant", text: "hasil tugas A" });
     await chatAction({ action: "open", sessionId: bid });
     expect(chat.view.items.at(-1)).toMatchObject({ kind: "assistant", text: "hasil tugas B" });
+    expect(hub.agents.get(hermesAgentId(aid))?.status).toBe("idle");
+    expect(hub.agents.get(hermesAgentId(bid))).toMatchObject({ status: "idle", task: "Menunggu pesan berikutnya" });
     expect((await chatAction({ action: "send", sessionId: "missing", text: "stale" })).status).toBe(409);
   });
 

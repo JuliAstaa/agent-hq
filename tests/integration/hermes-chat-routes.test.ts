@@ -200,4 +200,46 @@ describe.skipIf(!BUILT)("Hermes chat on next start", { timeout: 60_000 }, () => 
       fake.script = helloTurn;
     }
   });
+
+  it("keeps a completed background agent visible and removes it only when its session is deleted", async () => {
+    let complete: (() => void) | undefined;
+    fake.script = async (t) => {
+      t.send("run.started");
+      await new Promise<void>((resolve) => { complete = resolve; });
+      t.send("assistant.completed", { content: "Tugas A selesai" });
+      t.send("run.completed");
+      t.send("done");
+    };
+    const { url } = await start({ HQ_HERMES_API_KEY: fake.key, HQ_HERMES_API_URL: fake.url });
+    const agents = async () => (await (await fetch(url + "/api/agents")).json()).agents as { id: string; status: string }[];
+    try {
+      const a = await (await post(url, { action: "new", agent: { name: "A" } })).json();
+      expect((await post(url, { action: "send", sessionId: a.sessionId, text: "kerja A" })).status).toBe(202);
+      await until(() => !!complete);
+      const b = await (await post(url, { action: "new", agent: { name: "B" } })).json();
+      complete!();
+      let phase = "";
+      for (let attempt = 0; attempt < 100; attempt++) {
+        const list = await (await post(url, { action: "sessions" })).json();
+        phase = list.sessions.find((s: { id: string }) => s.id === a.sessionId)?.phase;
+        if (phase === "idle") break;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      expect(phase).toBe("idle");
+      for (const sessionId of [b.sessionId, a.sessionId, b.sessionId]) {
+        expect((await post(url, { action: "open", sessionId })).status).toBe(200);
+        expect(await agents()).toEqual(expect.arrayContaining([
+          expect.objectContaining({ id: a.agentId, status: "idle" }),
+          expect.objectContaining({ id: b.agentId, status: "idle" }),
+        ]));
+      }
+      expect((await post(url, { action: "delete", sessionId: a.sessionId })).status).toBe(200);
+      const remaining = await agents();
+      expect(remaining.some((agent) => agent.id === a.agentId)).toBe(false);
+      expect(remaining.some((agent) => agent.id === b.agentId)).toBe(true);
+    } finally {
+      complete?.();
+      fake.script = helloTurn;
+    }
+  });
 });

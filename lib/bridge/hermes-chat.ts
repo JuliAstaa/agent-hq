@@ -509,15 +509,14 @@ export function sessionRows(data: unknown[]): { id: string; title: string; row: 
 }
 
 /**
- * Make `s` the open session. Running sessions retain their stream, character, and pending approvals.
+ * Make `s` the open session. Other sessions retain their character, stream, and pending approvals.
  * `model` given = the session's new model; otherwise the one remembered for it.
  */
 function switchTo(s: { id: string; title: string }, items: ChatItem[], opts: { who?: ChatAgentInput; model?: ModelChoice | null; autoTitle?: boolean } = {}): void {
-  if (chat.view.phase === "idle") hideAgent();
   const cached = chat.sessions.get(s.id);
   if (cached) {
     chat.current = cached;
-    if (cached.view.phase === "idle") showAgent(s.id, cached.view.title);
+    if (cached.view.phase === "idle" && !hub.agents.has(hermesAgentId(s.id))) showAgent(s.id, cached.view.title);
     emitSnapshot();
     return;
   }
@@ -755,7 +754,6 @@ function finishTurn(ctx: ChatRuntime = chat.current): void {
   ctx.runId = "";
   setState({ phase: "idle", thinking: false }, ctx);
   agentSays(ctx.outcome === "completed" ? { status: "idle", task: "Menunggu pesan berikutnya" } : ctx.outcome === "cancelled" ? { status: "idle", task: "Dihentikan" } : { status: "error" }, ctx);
-  if (ctx !== chat.current && ctx.outcome === "completed") hideAgent(ctx);
 }
 
 async function consume(res: Response, abort: AbortController, ctx: ChatRuntime = chat.current): Promise<void> {

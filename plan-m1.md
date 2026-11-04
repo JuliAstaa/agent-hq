@@ -4,6 +4,8 @@ Status: **disetujui 2026-11-02**. Checkpoint langkah 4 disetujui user 2026-11-03
 
 ## Progres
 
+Perbaikan atas laporan user 2026-11-04: **agen Hermes tetap di kantor setelah tugas selesai**. Agen sesi latar yang selesai menjadi idle, tanpa event remove. Pindah panel dari sesi idle juga tidak menghapus agennya; membuka sesi yang agennya masih ada tidak mereset status/tugas terakhir. Penghapusan sesi secara eksplisit tetap menghapus agen, sedangkan pergantian id saat compression tetap memindahkan karakter seperti sebelumnya. Tes unit dan integrasi memeriksa agen tetap terlihat setelah completion dan pindah sesi, serta hanya agen sesi yang dihapus yang keluar.
+
 Perbaikan atas laporan user 2026-11-04: **sesi Hermes paralel** (lanjutan deviasi 22). Batas idle pada Baru/Buka dihapus; setiap sesi punya stream, status, jawaban, approval, model, dan penghentian sendiri. Sesi yang ditinggalkan tetap bekerja beserta agennya, hasilnya dapat dibuka lagi; Hentikan hanya memengaruhi sesi yang dituju. Riwayat menunjukkan status per sesi dan melarang hapus sesi yang bekerja. Draft pesan dipisahkan per sesi. Kontrak lama tanpa sessionId tetap didukung. Batas run Hermes/provider tetap berlaku. Dependency dev Vite dicatat eksplisit karena Vitest tidak dapat dimulai dari instalasi bersih tanpa peer tersebut. Verifikasi: unit paralel (jawaban, model, stop, approval, pindah saat starting), integrasi next start, lint, typecheck, build, dan tes browser.
 
 Sisipan atas permintaan user 2026-11-04: **agen bertahan setelah deploy/restart di Ubuntu**. Ini menyetujui
