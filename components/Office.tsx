@@ -2,6 +2,7 @@
 
 // Mounts the Three.js engine, wires store, transport and demo, and renders the React 2D UI on top.
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useStore } from "zustand";
 import { createEngine, type Engine } from "@/engine";
 import { createDemo } from "@/lib/demo";
 import { setLiveUrlSource } from "@/lib/rename";
@@ -20,6 +21,10 @@ import TerminalPanel, { useTerminalUrl } from "./TerminalPanel";
 import Toast from "./Toast";
 import TopBar from "./TopBar";
 import { authHeader, readToken } from "./token";
+import { MEETING_OPEN_EVENT } from "@/lib/discussions";
+import { MEETING_ROOMS } from "@/lib/meeting";
+import MeetingPanel from "./MeetingPanel";
+import { Button, CARD, cn } from "./ui";
 
 export interface AgentHQHandle {
   store: HQStore;
@@ -70,6 +75,12 @@ export default function Office() {
   const termUrl = useTerminalUrl(liveUrl);
   const [serverOpen, setServerOpen] = useState(false);
   const closeServer = useCallback(() => setServerOpen(false), []);
+  const [meetingRoom, setMeetingRoom] = useState<number | null>(null);
+  const closeMeeting = useCallback(() => setMeetingRoom(null), []);
+  const floor = useStore(hqStore, (s) => s.floorMode);
+  const openMeeting = useCallback((room: number) => {
+    setHermesOpen(false); setTermOpenUrl(null); setServerOpen(false); setMeetingRoom(room);
+  }, []);
 
   const openAgentChat = useCallback(async (agentId: string) => {
     const url = hermesOn ? hermesUrlFor(liveUrl(), window.location.href) : null;
@@ -90,6 +101,7 @@ export default function Office() {
       } else if (!res.ok || !body?.ok) {
         hqStore.getState().showToast(body?.error || `Chat tidak bisa dibuka (HTTP ${res.status}).`);
       } else {
+        setMeetingRoom(null);
         setTermOpenUrl(null);
         setServerOpen(false);
         hermesPanelRef.current?.showChat();
@@ -121,8 +133,11 @@ export default function Office() {
       setHermesOpen(false);
       setTermOpenUrl(null);
       setServerOpen(true);
+      setMeetingRoom(null);
     };
     window.addEventListener(SERVER_ROOM_EVENT, openServer);
+    const meeting = (event: Event) => openMeeting((event as CustomEvent<number>).detail);
+    window.addEventListener(MEETING_OPEN_EVENT, meeting);
 
     window.agentHQ = {
       store: hqStore,
@@ -143,6 +158,7 @@ export default function Office() {
       chatRequestRef.current?.abort();
       window.removeEventListener(CRON_BOARD_EVENT, openCron);
       window.removeEventListener(SERVER_ROOM_EVENT, openServer);
+      window.removeEventListener(MEETING_OPEN_EVENT, meeting);
       transport.close();
       demo.stop();
       engine.dispose();
@@ -150,7 +166,7 @@ export default function Office() {
       setLiveUrlSource(() => null);
       delete window.agentHQ;
     };
-  }, []);
+  }, [openMeeting]);
 
   return (
     <>
@@ -165,6 +181,7 @@ export default function Office() {
         onHermes={
           hermesOn
             ? () => {
+                setMeetingRoom(null);
                 setTermOpenUrl(null);
                 setServerOpen(false);
                 setHermesOpen((v) => !v);
@@ -174,6 +191,7 @@ export default function Office() {
         onTerminal={
           termUrl
             ? () => {
+                setMeetingRoom(null);
                 setHermesOpen(false);
                 setServerOpen(false);
                 setTermOpenUrl((v) => (v ? null : termUrl));
@@ -182,6 +200,9 @@ export default function Office() {
         }
       />
       <div data-hq-ui="panels" style={infoHidden ? { display: "none" } : undefined}>
+        {floor === "4" && meetingRoom === null && <nav data-hq-ui="meeting-access" aria-label="Buka ruang meeting" className={cn(CARD, "fixed bottom-[14px] right-[14px] z-[5] flex gap-2 p-2")}>
+          {MEETING_ROOMS.map((name, room) => <Button key={name} size="log" onClick={() => openMeeting(room)}>{name}</Button>)}
+        </nav>}
         <Roster open={rosterOpen} onOpenChat={hermesOn ? openAgentChat : undefined} openingChatId={openingChatId} />
         <LogPanel />
         <Toast />
@@ -196,6 +217,7 @@ export default function Office() {
         {hermesOpen && hermesOn && <HermesPanel ref={hermesPanelRef} onClose={closeHermes} liveUrl={liveUrl} />}
         {termOpenUrl && <TerminalPanel url={termOpenUrl} onClose={closeTerm} />}
         {serverOpen && <ServerPanel onClose={closeServer} />}
+        {meetingRoom !== null && <MeetingPanel room={meetingRoom} onRoom={openMeeting} onClose={closeMeeting} liveUrl={liveUrl} />}
       </div>
     </>
   );

@@ -37,6 +37,7 @@ export function drawMeetingScreen(F: Fonts | null, cv: CanvasTex, room: string, 
   if (!info) {
     ctx.fillStyle = "rgba(255,255,255,.22)"; ctx.font = `56px ${F.bungee}`; ctx.textAlign = "center";
     ctx.fillText("KOSONG", W / 2, 170);
+    ctx.font = `500 22px ${F.fredoka}`; ctx.fillStyle = "#fff6e3"; ctx.fillText("Klik layar untuk diskusi", W / 2, 218);
     tex.needsUpdate = true;
     return;
   }

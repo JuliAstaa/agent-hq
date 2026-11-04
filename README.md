@@ -192,6 +192,18 @@ santai tetap duduk menunggu subagennya. Subagen yang dapat kursi tidak memakai m
 menampilkan nama tim, tugas ketua, anggota, dan lama rapat. Ruangan penuh atau anggota lebih dari lima? Sisanya
 kerja di meja seperti biasa. Log mencatat `Rapat mulai` dan `Rapat selesai` dengan nama `Meeting`.
 
+**Diskusi dengan goal:** klik monitor Meeting A/B/C di Lt.4 (atau tombol nama ruangan di kanan bawah).
+Isi goal, pilih 2–5 agen Hermes, dan/atau tekan **Buat agen baru** untuk mengisi Nama, Peran, dan Model.
+**Buat dan tambahkan** membuat sesi agen sungguhan dan langsung memilihnya sebagai peserta. Agen baru tetap
+tersedia di kantor dan Riwayat setelah rapat. Tekan **Mulai diskusi**: peserta berbicara bergiliran dan menerima
+pesan peserta sebelumnya, lalu fasilitator membuat kesimpulan. Batas awal 3 putaran, dapat dipilih 1–5.
+Chat tampil langsung di panel; **Tambahkan arahan** diteruskan pada giliran berikutnya dan **Hentikan** hanya
+menghentikan rapat itu. Memerlukan Chat Hermes aktif (lihat [panduan Hermes](docs/hermes.md#11-chat-hermes)).
+Rapat menghasilkan rencana tindakan, tanpa memulai eksekusi lanjutan otomatis. Catatan rapat terakhir tiap
+ruangan disimpan di `meetings.json` di samping file state bridge (opsional `HQ_MEETINGS_FILE`); menutup panel
+atau memuat ulang halaman tidak menghentikan rapat. Setelah restart server, rapat yang terputus ditandai dan
+tidak dijalankan ulang otomatis. Detail: [diskusi meeting](docs/meeting-discussion.md).
+
 **Papan Tugas:** setiap kali agen yang sedang santai atau offline menerima tugas baru (prompt), kartu berwarna
 agen itu muncul di Papan Tugas di dinding kiri Lt.2. Agen lari ke papan, mengambil kartunya, lalu membawanya ke
 meja atau ke ruangan timnya. Kalau tugasnya selesai sebelum kartu diambil, kartunya batal dan agen kembali

@@ -7,11 +7,13 @@ import { CORS_HEADERS, preflight } from "@/lib/bridge/auth";
 import { scheduleForViewer } from "@/lib/bridge/cron";
 import { hub, type BridgeEvent } from "@/lib/bridge/hub";
 import { ensureServerStats, serverStatsForViewer } from "@/lib/bridge/server-stats";
+import { ensureDiscussions } from "@/lib/bridge/discussions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
+  ensureDiscussions();
   const enc = new TextEncoder();
   let cleanup = () => {};
   const stream = new ReadableStream<Uint8Array>({
@@ -19,6 +21,7 @@ export async function GET(req: Request) {
       const write = (s: string) => ctrl.enqueue(enc.encode(s));
       const send = (ev: BridgeEvent) => write(`data: ${JSON.stringify(ev)}\n\n`);
       write("retry: 2000\n\n");
+      for (const discussion of hub.discussions.values()) send({ type: "meeting_state", discussion });
       send({ type: "snapshot", agents: [...hub.agents.values()] });
       const schedule = scheduleForViewer(); // scheduled jobs (not in the prototype)
       if (schedule) send(schedule);

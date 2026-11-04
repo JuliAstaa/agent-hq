@@ -35,6 +35,7 @@ import { buildFloor3 } from "./world/floor3";
 import { buildFloor4, flyCard, MEETING_IDLE, stepCards, stepDoors } from "./world/floor4";
 import { drawMeetingScreen, type MeetingScreenInfo } from "./displays/meeting";
 import { MEETING_ROOMS, SEATS_PER_ROOM } from "@/lib/meeting";
+import { DISCUSSION_LABEL, discussionActive, MEETING_OPEN_EVENT } from "@/lib/discussions";
 import { avatarColor } from "@/lib/palette";
 import type { Build } from "./world/structure";
 
@@ -583,11 +584,20 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
     ray.setFromCamera(ndc, camera);
     return ray.intersectObjects(SR.hit, true).some((h) => (h.object as THREE.Mesh).isMesh);
   }
+  function pickMeetingScreen(e: PointerEvent): number | null {
+    if (!g4.visible) return null;
+    ndc.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
+    ray.setFromCamera(ndc, camera);
+    const hit = ray.intersectObjects(F4P.rooms.map((r) => r.screenMesh), false)[0];
+    return hit ? F4P.rooms.findIndex((r) => r.screenMesh === hit.object) : null;
+  }
   const onDown = (e: PointerEvent) => {
     downAt = { x: e.clientX, y: e.clientY };
   };
   const onUp = (e: PointerEvent) => {
     if (!downAt || Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) > 5) return;
+    const meetingRoom = pickMeetingScreen(e);
+    if (meetingRoom !== null) { stage.dispatchEvent(new CustomEvent(MEETING_OPEN_EVENT, { detail: meetingRoom, bubbles: true })); return; }
     const id = pickAgent(e);
     if (id) toggleFocus(id);
     else if (pickScheduleBoard(e)) stage.dispatchEvent(new CustomEvent(CRON_BOARD_EVENT, { bubbles: true }));
@@ -596,7 +606,7 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
   const onMove = (e: PointerEvent) => {
     if (performance.now() - hoverT < 60) return;
     hoverT = performance.now();
-    renderer.domElement.style.cursor = pickAgent(e) || pickScheduleBoard(e) || pickServerRoom(e) ? "pointer" : "";
+    renderer.domElement.style.cursor = pickMeetingScreen(e) !== null || pickAgent(e) || pickScheduleBoard(e) || pickServerRoom(e) ? "pointer" : "";
   };
   const onResize = () => {
     camera.aspect = vw() / vh();
@@ -674,6 +684,12 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
   /* ---------------- floor 4: room screens and talking turns (prd.md §7.9) ---------------- */
   function meetingInfo(ri: number, s: HQState): MeetingScreenInfo | null {
     const r = s.meetings[ri];
+    const d = s.discussions.find((d) => d.room === ri);
+    if (d && (!r || r.key === "d:" + d.id)) return {
+      team: `${DISCUSSION_LABEL[d.phase]} ${d.round}/${d.rounds}`, color: "#ff6fd8", goal: d.goal, since: d.since,
+      members: d.participants.map((p) => ({ name: p.name, color: avatarColor(p.agentId), status: s.agents.get(p.agentId)?.status ?? "idle",
+        task: d.speaker === p.agentId ? "Giliran bicara" : discussionActive(d.phase) ? "Menunggu giliran" : DISCUSSION_LABEL[d.phase] })),
+    };
     if (!r) return null;
     const members = [...s.agents.values()].filter((a) => a.meeting?.room === ri).sort((p, q) => p.meeting!.seat - q.meeting!.seat);
     const leader = r.leaderId ? s.agents.get(r.leaderId) : undefined;
@@ -692,12 +708,14 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
   const talk = MEETING_ROOMS.map(() => ({ speaker: null as string | null, until: 0, next: 0 }));
   function stepTalk(ri: number, here: AgentRuntime[], s: HQState, t: number) {
     const tk = talk[ri];
+    const manual = s.discussions.find((d) => d.room === ri && discussionActive(d.phase));
     const calm = here.filter((rt) => {
       const st = s.agents.get(rt.id)?.status;
       return st === "working" || st === "thinking";
     });
-    if (tk.speaker && (t >= tk.until || !calm.some((rt) => rt.id === tk.speaker))) tk.speaker = null;
-    if (!tk.speaker && t >= tk.next) {
+    if (manual) { tk.speaker = manual.speaker; tk.until = t + 0.2; }
+    else if (tk.speaker && (t >= tk.until || !calm.some((rt) => rt.id === tk.speaker))) tk.speaker = null;
+    if (!manual && !tk.speaker && t >= tk.next) {
       if (here.length >= 2 && calm.length) {
         tk.speaker = calm[Math.floor(Math.random() * calm.length)].id;
         tk.until = t + 2 + Math.random();
@@ -868,6 +886,7 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
         if (!a) sp.chair.position.y = F4;
       }
       const here = byRoom[ri];
+      if (s.discussions.some((d) => d.room === ri && discussionActive(d.phase))) roomHush.add(ri); // manual chat is real; suppress random dialogue
       if (here.some((rt) => ["waiting", "error"].includes(s.agents.get(rt.id)?.status ?? ""))) roomHush.add(ri);
       stepTalk(ri, here, s, t);
     });

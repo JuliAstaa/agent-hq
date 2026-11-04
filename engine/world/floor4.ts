@@ -26,6 +26,7 @@ export interface MeetingSeatProp {
 export interface MeetingRoomProp {
   /** Team screen on the back wall (drawMeetingScreen). */
   screen: CanvasTex;
+  screenMesh: THREE.Mesh;
   /** Accent strip under the screen: the team color, dark while the room is empty. */
   strip: BasicMesh;
   seats: MeetingSeatProp[];
@@ -187,7 +188,7 @@ export function buildFloor4(b: Build, g4: THREE.Group, tentacles: THREE.Group[],
     lp.position.y = 0.03 + lh / 2; leaf.add(lp);
     for (const sx of [-DOOR_HALF, DOOR_HALF]) boxAt(leaf, 0.06, lh, 0.07, sx, 0.03, 0, frameM, 0.02, false);
     boxAt(leaf, 0.05, 0.7, 0.1, DOOR_HALF - 0.2, 0.75, 0.04, M.dark, 0.02, false); // pull handle
-    return { screen, strip, seats: roomSeats, center: new THREE.Vector3(cx, F4 + 1.1, TABLE_Z), door: { leaf, open: 0, x: cx } };
+    return { screen, screenMesh: sc, strip, seats: roomSeats, center: new THREE.Vector3(cx, F4 + 1.1, TABLE_Z), door: { leaf, open: 0, x: cx } };
   });
 
   // lift: the glass tube from floor 3 continues up to a lid above this floor

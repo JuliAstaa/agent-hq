@@ -1,6 +1,6 @@
 # Diskusi agen melalui monitor ruang meeting
 
-Status: **alur disetujui pengguna 2026-11-04 dengan tambahan membuat agen baru langsung dari pengaturan rapat**. Pengguna memberi goal melalui monitor ruang meeting Lt.4, beberapa agen berdiskusi, dan pengguna melihat chat mereka. Implementasi awal memakai sesi Hermes API server yang sudah dapat dikendalikan aplikasi dan menghasilkan kesimpulan serta rencana tindakan.
+Status: **diimplementasikan dan diverifikasi 2026-11-04**, berdasarkan alur yang disetujui pengguna dengan tambahan membuat agen baru langsung dari pengaturan rapat. Pengguna memberi goal melalui monitor ruang meeting Lt.4, beberapa agen berdiskusi, dan pengguna melihat chat mereka. Versi awal memakai sesi Hermes API server dan menghasilkan kesimpulan serta rencana tindakan.
 
 ## Tujuan dan aksi utama
 
@@ -16,7 +16,7 @@ Pengguna membuka monitor Meeting A, B, atau C, memilih peserta, menulis goal, la
 6. Pengguna dapat mengirim **Tambahkan arahan** untuk giliran berikutnya atau menekan **Hentikan**. Menutup panel atau memuat ulang halaman tidak menghentikan proses di server.
 7. Rapat menghasilkan kesimpulan, keputusan, pertanyaan yang belum terjawab, dan rencana tindakan. Chat tetap dapat dibuka setelah rapat selesai.
 
-## Model diskusi yang diusulkan
+## Model diskusi
 
 - Setiap peserta memakai sesi dan modelnya sendiri. Jawaban berasal dari panggilan agen sesungguhnya.
 - Agen baru tersimpan sebagai sesi Hermes biasa dan tetap tersedia di kantor serta Riwayat sesudah rapat. Membatalkan pengaturan rapat tidak menghapus sesi yang sudah berhasil dibuat. Kegagalan membuat agen menampilkan pesan tanpa menambahkan peserta palsu atau mereset goal/peserta lain; tombol dicegah dari klik ganda saat proses berlangsung.
@@ -49,7 +49,7 @@ Pengguna membuka monitor Meeting A, B, atau C, memilih peserta, menulis goal, la
 - Server restart: pulihkan catatan rapat dari penyimpanan; tandai proses yang terputus dan jangan mengulang panggilan model otomatis.
 - Mode demo atau Hermes belum tersedia: jelaskan bahwa diskusi langsung belum dapat dimulai; jangan memalsukan chat agen.
 
-## Rencana teknis
+## Implementasi
 
 - Buat pengatur diskusi di server yang menargetkan sesi peserta secara eksplisit, tanpa mengganti sesi yang sedang dibuka di panel Hermes.
 - Gunakan pembuatan sesi Hermes yang sama untuk agen rapat, dengan jalur latar yang tidak mengganti chat yang sedang dibuka; kembalikan ID sesi/agen, nama/peran dan model agar form dapat langsung memilihnya.
@@ -65,10 +65,12 @@ Pengguna membuka monitor Meeting A, B, atau C, memilih peserta, menulis goal, la
 - Browser: klik monitor dan alternatif keyboard; isi goal/peserta; buat agen dari panel, gabungkan agen lama dan baru, kegagalan pembuatan tidak menghilangkan form; pesan streaming; baca pesan lama; arahan; hentikan; tutup/buka panel; muat ulang; tampilan 360 px.
 - Jalankan lint, typecheck, test, build, serta cek route API tetap dinamis dan paritas yang relevan.
 
+Hasil: lint, typecheck, build server, build demo statis, dan 427 tes Vitest lolos. Tes browser meeting memeriksa klik monitor, pembuatan agen yang gagal lalu berhasil tanpa kehilangan goal, penerusan jawaban dua peserta, kesimpulan, buka ulang setelah reload, pilihan agen lama, serta form agen baru pada lebar 360 px tanpa kolom goal menyusut. Tes browser Hermes, UI, dispose dan demo statis juga lolos. `/api/meetings` dan `/api/meetings/stream` tetap dinamis (`ƒ`).
+
 ## Keputusan implementasi
 
 1. Peserta boleh agen Hermes lama maupun baru. Pembuatan agen langsung dalam panel rapat diminta pengguna saat menyetujui rencana. Adapter kontrol Claude Code/Codex belum tersedia dan tidak dimasukkan ke lingkup awal.
 2. Rapat menghasilkan diskusi, kesimpulan, dan rencana tindakan. Eksekusi lanjutan tidak dimulai otomatis; permintaan awal pengguna adalah berdiskusi dan melihat chat.
 3. Alur monitor, goal, peserta, percakapan, batas putaran, serta kontrol arahan/hentikan disetujui pengguna melalui jawaban "rencana sudah bagus" dengan tambahan fitur membuat agen.
 
-Referensi implementasi desain: `C:/Users/YOGA/.agents/skills/impeccable/reference/interaction-design.md` dan `spatial-design.md`, dengan aturan tampilan proyek sebagai acuan utama.
+Referensi implementasi desain: `interaction-design.md` dan `spatial-design.md` dari skill impeccable, dengan aturan tampilan proyek sebagai acuan utama.

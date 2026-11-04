@@ -20,7 +20,7 @@ export async function POST(req: Request) {
       if (!ev || typeof ev !== "object") continue;
       const type = String((ev as BridgeEvent).type || "").toLowerCase();
       if (type === "rename") renames.push(renameAgent(ev as BridgeEvent));
-      else if (type !== "server_stats") publish(ev as BridgeEvent);
+      else if (!["server_stats", "meeting_state"].includes(type)) publish(ev as BridgeEvent);
     }
     if (!renames.length) return json(202, JSON.stringify({ ok: true, received: list.length }));
     if (!Array.isArray(parsed)) return json(renames[0].status, JSON.stringify(renames[0].body));

@@ -6,6 +6,7 @@ import { normalizeCronCommand, normalizeSchedule, type CronCmd, type CronState }
 import { normalizeServerStats, type ServerHistoryPoint, type ServerStats } from "./server";
 import { normalizeGroup, normalizeParent } from "./meeting";
 import { normalizeTeam, type Dept } from "./teams";
+import { readDiscussion, type DiscussionSummary } from "./discussions";
 
 export type Status = "working" | "thinking" | "waiting" | "idle" | "error" | "offline";
 
@@ -100,6 +101,7 @@ export interface AgentPatch {
 }
 
 export type HQEvent =
+  | { kind: "meeting_state"; discussion: DiscussionSummary }
   | { kind: "metric"; name: string; value: number; login: boolean }
   | { kind: "alert"; agentId: string | null; sev: Severity; text: string; ip: string; replay: boolean; agent: AgentPatch | null }
   | { kind: "finding"; agentId: string | null; sev: Severity; title: string; node: AttackNode; agent: AgentPatch | null }
@@ -172,6 +174,10 @@ export function normalizeEvent(input: unknown, now = Date.now()): HQEvent[] {
   if (Array.isArray(input)) return input.flatMap((x) => normalizeEvent(x, now));
   const ev = input as RawEvent;
   const type = eventType(ev);
+  if (type === "meeting_state") {
+    const discussion = readDiscussion(ev.discussion);
+    return discussion ? [{ kind: "meeting_state", discussion }] : [];
+  }
   if (type === "snapshot") {
     const list = Array.isArray(ev.agents) ? ev.agents : [];
     return list.flatMap((x) => normalizeEvent({ ...(x as object), type: "agent_update", _quiet: true, _snap: true }, now));

@@ -13,6 +13,7 @@ import { inferDept, type Dept } from "./teams";
 import { emptyMeetingState, MEETING_LOG_ID, planMeetings, sameMeeting, sameRooms, type AgentMeeting, type MeetingRoom } from "./meeting";
 import { avatarColor } from "./palette";
 import { truncate } from "./format";
+import type { DiscussionSummary } from "./discussions";
 
 export type FloorMode = "all" | "1" | "2" | "3" | "4";
 export type ConnMode = "demo" | "live" | "down";
@@ -118,6 +119,7 @@ export interface HQState {
   serverHistory: ServerPoint[];
   /** Meeting rooms A, B, C (prd.md §7.9): the team holding each, or null. */
   meetings: (MeetingRoom | null)[];
+  discussions: DiscussionSummary[];
 
   applyEvent: (raw: unknown) => void;
   pushLog: (entry: { id: string; level?: string; message?: string }) => void;
@@ -245,7 +247,7 @@ export function createHQStore(): HQStore {
         id: a.id, name: a.name, status: a.status, parent: a.parent, group: a.group, dept: a.dept,
         hasDesk: a.slot != null, seat: a.meeting,
       }));
-      const plan = planMeetings(list, { rooms: d.meetings, full: meetingFull }, Date.now());
+      const plan = planMeetings(list, { rooms: d.meetings, full: meetingFull }, Date.now(), get().discussions);
       meetingFull = plan.full;
       if (!sameRooms(plan.rooms, d.meetings)) d.meetings = plan.rooms;
       for (const msg of plan.logs) logInto(d, { id: MEETING_LOG_ID, level: "info", message: msg });
@@ -339,6 +341,13 @@ export function createHQStore(): HQStore {
     };
 
     const applyOne = (e: ReturnType<typeof normalizeEvent>[number]) => {
+      if (e.kind === "meeting_state") {
+        set({ discussions: [...get().discussions.filter((d) => d.room !== e.discussion.room), e.discussion] });
+        const d = draft();
+        planInto(d, false);
+        commit(d);
+        return;
+      }
       if (e.kind === "metric") {
         if (e.login) emit({ type: "metric", value: e.value });
         return;
@@ -426,6 +435,7 @@ export function createHQStore(): HQStore {
       server: null,
       serverHistory: [],
       meetings: emptyMeetingState().rooms,
+      discussions: [],
 
       applyEvent: (raw) => {
         for (const e of normalizeEvent(raw)) {
@@ -441,6 +451,7 @@ export function createHQStore(): HQStore {
       },
 
       clearAgents: () => {
+        set({ discussions: [] });
         const d = draft();
         for (const id of [...d.agents.keys()]) removeInto(d, id);
         d.stats = { done: 0, errors: 0 };

@@ -6,6 +6,9 @@ import { normalizeServerStats, serverPoint, trimHistory, type ServerPoint } from
 import { redact, trunc } from "./redact";
 import { IDENTITY_FIELDS, loadOverrides, mergeOverride, namesFile, saveOverrides, type Identity, type Override } from "./overrides";
 import { loadSnapshot, saveSnapshot, stateFile, type Removal } from "./persistence";
+import { emptyMeetingState, planMeetings, type AgentMeeting, type MeetingState } from "../meeting";
+import { normStatus } from "../events";
+import { readDiscussion, type DiscussionSummary } from "../discussions";
 
 export type BridgeEvent = Record<string, unknown>;
 export type Send = (ev: BridgeEvent) => void;
@@ -50,6 +53,11 @@ export interface ServerHub {
 const newServerHub = (): ServerHub => ({ last: null, lastAt: 0, history: [], timer: null, prev: null });
 
 interface Hub {
+  discussions: Map<number, DiscussionSummary>;
+  meetingState: MeetingState;
+  meetingSeats: Map<string, AgentMeeting>;
+  meetingDeskless: Set<string>;
+  meetingKnown: Set<string>;
   /** id -> last known agent state (snapshot for new viewers). */
   agents: Map<string, BridgeEvent>;
   /** Last 80 log / finding / alert events (replayed to new viewers). */
@@ -76,6 +84,7 @@ function createHub(): Hub {
   const file = stateFile();
   const saved = loadSnapshot(file);
   return {
+    discussions: new Map(), meetingState: emptyMeetingState(), meetingSeats: new Map(), meetingDeskless: new Set(), meetingKnown: new Set(),
     agents: new Map(saved?.agents.map((a) => [String(a.id), a])),
     recent: saved?.recent ?? [],
     lastSeen: new Map(saved?.lastSeen),
@@ -101,6 +110,11 @@ hub.sourceIdentity ??= new Map();
 hub.cron ??= newCronHub();
 hub.server ??= newServerHub();
 hub.server.history ??= [];
+hub.discussions ??= new Map();
+hub.meetingState ??= emptyMeetingState();
+hub.meetingSeats ??= new Map();
+hub.meetingDeskless ??= new Set();
+hub.meetingKnown ??= new Set();
 hub.removals ??= new Map();
 if (hub.persistenceFile === undefined) hub.persistenceFile = stateFile();
 
@@ -131,6 +145,11 @@ export const idOf = (ev: BridgeEvent): string => String(ev.id ?? ev.agent_id ?? 
 
 export function remember(ev: BridgeEvent): void {
   const type = String(ev.type || "agent_update").toLowerCase();
+  if (type === "meeting_state") {
+    const d = readDiscussion(ev.discussion);
+    if (d) hub.discussions.set(d.room, d);
+    return;
+  }
   // Scheduled jobs are not agents: keep the latest snapshot for new viewers; commands are tracked by ./cron.ts.
   if (type === "schedule") {
     hub.cron.schedule = ev;
@@ -210,9 +229,26 @@ export function publish(ev: BridgeEvent): void {
   if (typeof ev.group === "string") ev.group = trunc(redact(ev.group), 40);
   applyIdentity(ev);
   remember(ev);
+  syncMeetingPlan();
   // Live server metrics and schedule commands are unrelated to agent restart state.
-  if (!["server_stats", "schedule", "cron_command"].includes(String(ev.type || "").toLowerCase())) persistHub();
+  if (!["server_stats", "schedule", "cron_command", "meeting_state"].includes(String(ev.type || "").toLowerCase())) persistHub();
   broadcast(ev);
+}
+
+/** Mirror the client's pure planner so a manual meeting cannot claim an occupied automatic room. */
+export function syncMeetingPlan(): void {
+  const list = [...hub.agents.values()].map((a) => {
+    const id = String(a.id);
+    const fresh = !hub.meetingKnown.has(id) && !!a.parent;
+    if (fresh) hub.meetingDeskless.add(id);
+    return { id, name: String(a.name || id), status: normStatus(a.status ?? a.state) ?? "idle", parent: a.parent ? String(a.parent) : null,
+      group: a.group ? String(a.group) : null, dept: null, hasDesk: !hub.meetingDeskless.has(id), seat: hub.meetingSeats.get(id) ?? null };
+  });
+  const p = planMeetings(list, hub.meetingState, Date.now(), [...hub.discussions.values()]);
+  hub.meetingState = { rooms: p.rooms, full: p.full };
+  hub.meetingSeats = p.seats;
+  hub.meetingKnown = new Set(list.map((a) => a.id));
+  for (const id of hub.meetingDeskless) if (!p.seats.has(id)) hub.meetingDeskless.delete(id);
 }
 
 /* ---------------- rename ---------------- */
@@ -340,6 +376,7 @@ function armRemoval(id: string, { mark, at }: Removal): void {
 
 /** Test helper: forget everything. */
 export function resetHub(): void {
+  hub.discussions.clear(); hub.meetingState = emptyMeetingState(); hub.meetingSeats.clear(); hub.meetingDeskless.clear(); hub.meetingKnown.clear();
   for (const t of hub.removeTimers.values()) clearTimeout(t);
   hub.agents.clear();
   hub.recent.length = 0;

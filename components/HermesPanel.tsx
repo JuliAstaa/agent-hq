@@ -31,7 +31,7 @@ const NOTE = "m-0 text-[12.5px] border-2 border-ink rounded-[10px] px-[10px] py-
 const here = () => (typeof location === "undefined" ? "http://localhost/" : location.href);
 
 /** Model picker: Hermes' default, then the models of each authenticated provider. */
-function ModelSelect({ value, options, onChange, disabled, id }: { value: ModelChoice | null; options: ModelOptions | null; onChange: (m: ModelChoice | null) => void; disabled?: boolean; id?: string }) {
+export function ModelSelect({ value, options, onChange, disabled, id }: { value: ModelChoice | null; options: ModelOptions | null; onChange: (m: ModelChoice | null) => void; disabled?: boolean; id?: string }) {
   const key = modelKey(value);
   const listed = !value || !!options?.providers.some((p) => p.slug === value.provider && p.models.includes(value.model));
   return (

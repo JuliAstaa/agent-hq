@@ -132,7 +132,7 @@ interface SessionPrefs {
   updatedAt: string;
 }
 
-interface ChatRuntime {
+export interface ChatRuntime {
   view: ChatView;
   /** Hermes run id of the turn in progress ("" before run.started). */
   runId: string;
@@ -149,6 +149,9 @@ interface ChatRuntime {
   autoTitle: boolean;
   /** A delete in progress cannot race a new message in this session. */
   deleting: boolean;
+  /** A manual meeting owns its participants until it releases them. */
+  meetingOwner: string | null;
+  turnInstructions: string;
 }
 
 interface ChatHub {
@@ -157,6 +160,7 @@ interface ChatHub {
   sessions: Map<string, ChatRuntime>;
   view: ChatView;
   subs: Set<(ev: ChatEvent) => void>;
+  sessionSubs: Set<(ev: ChatEvent, ctx: ChatRuntime) => void>;
   seq: number;
   /** Look-up of the newest "Agent HQ" session in Hermes, once per server start (retried if Hermes was down). */
   resumed: Promise<void> | null;
@@ -204,6 +208,8 @@ const newRuntime = (): ChatRuntime => ({
   epoch: 0,
   autoTitle: false,
   deleting: false,
+  meetingOwner: null,
+  turnInstructions: "",
 });
 
 const newHub = (): ChatHub => {
@@ -214,6 +220,7 @@ const newHub = (): ChatHub => {
     get view() { return this.current.view; },
     set view(view: ChatView) { this.current.view = view; },
     subs: new Set(),
+    sessionSubs: new Set(),
     seq: 0,
     resumed: null,
     prefs: loadPrefs(prefsFile),
@@ -230,6 +237,7 @@ if (!chat.prefs) {
   chat.prefs = loadPrefs(chat.prefsFile);
 }
 chat.models ??= null;
+chat.sessionSubs ??= new Set();
 // Migrate the older single-session hub during dev reloads.
 if (!chat.current) {
   const legacy = chat as ChatHub & Partial<ChatRuntime>;
@@ -269,6 +277,7 @@ function rememberModel(sessionId: string | null, model: ModelChoice | null): voi
 const nextId = (prefix: string) => `${prefix}${++chat.seq}`;
 
 function emit(ev: ChatEvent, ctx: ChatRuntime = chat.current): void {
+  for (const send of chat.sessionSubs) send(ev, ctx);
   if (ctx !== chat.current) return;
   for (const send of chat.subs) {
     try {
@@ -303,6 +312,13 @@ const find = (id: string | null, ctx: ChatRuntime = chat.current) => (id ? ctx.v
 export function subscribeChat(send: (ev: ChatEvent) => void): () => void {
   chat.subs.add(send);
   return () => chat.subs.delete(send);
+}
+
+/** Observe a specific background session without changing the chat panel's selected conversation. */
+export function observeSession(ctx: ChatRuntime, send: (ev: ChatEvent) => void): () => void {
+  const listener = (ev: ChatEvent, source: ChatRuntime) => { if (source === ctx) send(ev); };
+  chat.sessionSubs.add(listener);
+  return () => chat.sessionSubs.delete(listener);
 }
 
 /* ---------------- the session's office character ---------------- */
@@ -540,7 +556,7 @@ function switchTo(s: { id: string; title: string }, items: ChatItem[], opts: { w
   // Bound retained transcripts; never evict the selected session or a running turn.
   for (const [id, session] of chat.sessions) {
     if (chat.sessions.size <= 50) break;
-    if (session !== chat.current && session.view.phase === "idle" && !session.deleting) chat.sessions.delete(id);
+    if (session !== chat.current && session.view.phase === "idle" && !session.deleting && !session.meetingOwner) chat.sessions.delete(id);
   }
 }
 
@@ -794,17 +810,19 @@ function turnBody(msg: string, ctx: ChatRuntime = chat.current): Record<string, 
     if (m.provider) body.provider = m.provider;
   }
   const persona = personaPrompt(ctx.view.agentId);
-  if (persona) body.system_message = persona;
+  if (persona || ctx.turnInstructions) body.system_message = [persona, ctx.turnInstructions].filter(Boolean).join("\n\n");
   return body;
 }
 
-export async function sendMessage(text: unknown, ctx: ChatRuntime = chat.current): Promise<Reply> {
+export async function sendMessage(text: unknown, ctx: ChatRuntime = chat.current, meeting?: { owner: string; instructions: string }): Promise<Reply> {
   const epoch = ctx.epoch;
   const msg = typeof text === "string" ? text.trim() : "";
   if (!msg) return fail(400, "Pesan kosong");
   if (msg.length > MAX_CHAT_MESSAGE) return fail(413, `Pesan terlalu panjang (maks ${MAX_CHAT_MESSAGE} karakter)`);
   if (ctx.deleting) return fail(409, "Sesi sedang dihapus");
+  if (ctx.meetingOwner && ctx.meetingOwner !== meeting?.owner) return fail(409, "Agen sedang mengikuti rapat. Gunakan panel meeting untuk memberi arahan.");
   if (ctx.view.phase !== "idle") return fail(409, "Hermes masih mengerjakan pesan sebelumnya. Tunggu atau tekan Hentikan.");
+  ctx.turnInstructions = meeting?.instructions ?? "";
   const abort = new AbortController();
   ctx.abort = abort;
   ctx.runId = "";
@@ -815,7 +833,7 @@ export async function sendMessage(text: unknown, ctx: ChatRuntime = chat.current
   const open = () =>
     hermes(`/api/sessions/${enc(ctx.view.sessionId!)}/chat/stream`, { method: "POST", body: turnBody(msg, ctx), signal: abort.signal, accept: "text/event-stream" });
   try {
-    await resumeLatest();
+    if (!meeting) await resumeLatest();
     if (!ctx.view.sessionId) {
       const s = await createSession();
       if (ctx.epoch !== epoch) return fail(409, "Percakapan sudah direset");
@@ -825,6 +843,7 @@ export async function sendMessage(text: unknown, ctx: ChatRuntime = chat.current
     agentSays({ status: "thinking", task: trunc(redact(msg), 140), progress: null }, ctx);
     let res = await open();
     if (res.status === 404) {
+      if (ctx.meetingOwner) throw new HermesError("Sesi peserta tidak tersedia lagi di Hermes", 409);
       note("Sesi lama tidak ada lagi di Hermes, jadi percakapan baru dimulai.", "info", ctx);
       hideAgent(ctx);
       if (ctx.view.sessionId) chat.sessions.delete(ctx.view.sessionId);
@@ -944,6 +963,44 @@ export async function newConversation(agent?: unknown, model?: unknown): Promise
   return ok({ sessionId: s.id, agentId: chat.view.agentId });
 }
 
+/** Create an ordinary Hermes agent for a meeting, leaving the selected chat and its model untouched. */
+export async function createMeetingAgent(agent: unknown, model: unknown): Promise<ChatRuntime> {
+  const who = parseAgent(agent);
+  if (!who || "error" in who) throw new HermesError(who && "error" in who ? who.error : "Nama dan peran agen diperlukan", 400);
+  const m = model == null ? null : parseModel(model);
+  if (model != null && !m) throw new HermesError(MODEL_ERR, 400);
+  const s = await createSession();
+  const ctx = newRuntime();
+  const a = showAgent(s.id, s.title, who);
+  ctx.view = { ...emptyChatView(), sessionId: s.id, title: s.title, agentId: a.id, model: m };
+  if (a.error) note(`Nama agen tidak tersimpan: ${trunc(a.error, 160)}`, "error", ctx);
+  ctx.autoTitle = true;
+  chat.sessions.set(s.id, ctx);
+  rememberModel(s.id, m);
+  chat.resumed = Promise.resolve();
+  return ctx;
+}
+
+/** Load a participant without switching the ordinary Hermes panel. */
+export async function meetingSession(id: string): Promise<ChatRuntime> {
+  const cached = chat.sessions.get(id);
+  if (cached) return cached;
+  if (!cleanId(id)) throw new HermesError("ID sesi tidak valid", 400);
+  const res = await hermes(`/api/sessions/${enc(id)}`);
+  if (!res.ok) throw await upstreamError(res);
+  const s = (await readJson(res))?.session;
+  if (!isObj(s) || s.source !== "api_server") throw new HermesError("Peserta harus sesi Hermes API server", 409);
+  const ctx = newRuntime();
+  const aid = hermesAgentId(id);
+  if (!hub.agents.has(aid)) showAgent(id, str(s.title));
+  ctx.view = { ...emptyChatView(), sessionId: id, title: str(s.title), agentId: aid, model: chat.prefs.get(id)?.model ?? null, items: await loadHistory(id) };
+  // A simultaneous request may have finished loading this session while the history was fetched.
+  const existing = chat.sessions.get(id);
+  if (existing) return existing;
+  chat.sessions.set(id, ctx);
+  return ctx;
+}
+
 /**
  * Riwayat: the API server's sessions (other surfaces' sessions cannot be continued through the API server).
  * `now` is the server's clock, so "5 mnt lalu" does not depend on the viewer's clock.
@@ -1015,7 +1072,7 @@ export async function deleteSession(sessionId: unknown): Promise<Reply> {
   const id = cleanId(sessionId);
   if (!id) return fail(400, "sessionId tidak valid");
   const ctx = chat.sessions.get(id);
-  if (ctx && (ctx.view.phase !== "idle" || ctx.deleting)) return fail(409, "Hentikan dulu pekerjaan yang sedang berjalan");
+  if (ctx && (ctx.view.phase !== "idle" || ctx.deleting || ctx.meetingOwner)) return fail(409, "Hentikan dulu pekerjaan atau rapat yang sedang berjalan");
   if (ctx) ctx.deleting = true;
   try {
     const res = await hermes(`/api/sessions/${enc(id)}`, { method: "DELETE" });
@@ -1127,6 +1184,7 @@ export async function chatAction(body: unknown): Promise<Reply> {
       if (!target) return fail(409, "Sesi berubah. Buka lagi sesi yang ingin dipakai.");
       ctx = target;
     }
+    if (ctx.meetingOwner && ["stop", "model"].includes(str(b.action))) return fail(409, "Agen sedang mengikuti rapat. Gunakan panel meeting untuk menghentikannya.");
     switch (b.action) {
       case "send":
         return await sendMessage(b.text, ctx);
@@ -1168,6 +1226,7 @@ export function resetChat(): void {
   chat.current = next.current;
   chat.sessions = next.sessions;
   chat.subs = next.subs;
+  chat.sessionSubs = next.sessionSubs;
   chat.seq = next.seq;
   chat.resumed = next.resumed;
   chat.prefs = next.prefs;

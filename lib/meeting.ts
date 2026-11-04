@@ -3,6 +3,7 @@
 
 import type { Status } from "./events";
 import type { Dept } from "./teams";
+import { discussionActive, type DiscussionSummary } from "./discussions";
 
 export const MEETING_ROOMS = ["Meeting A", "Meeting B", "Meeting C"] as const;
 export const SEATS_PER_ROOM = 5;
@@ -122,11 +123,14 @@ export function teamsOf(agents: MeetingAgent[]) {
  * The meeting rule and room/seat assignment (prd.md §7.9). `agents` in roster order (it decides which team gets a
  * room first and who sits first). Returns the seats, the new room list, and the log lines to write.
  */
-export function planMeetings(agents: MeetingAgent[], prev: MeetingState, now: number): MeetingPlan {
+export function planMeetings(agents: MeetingAgent[], prev: MeetingState, now: number, discussions: DiscussionSummary[] = []): MeetingPlan {
   const { byId, key, root, named, isSub } = teamsOf(agents);
+  const manual = discussions.filter((d) => discussionActive(d.phase));
+  const reserved = new Set(manual.flatMap((d) => d.participants.map((p) => p.agentId)));
   interface Team { key: string; members: MeetingAgent[]; attend: MeetingAgent[]; on: boolean; leaderId: string | null; name: string }
   const teams = new Map<string, Team>();
   for (const a of agents) {
+    if (reserved.has(a.id)) continue;
     const k = key.get(a.id);
     if (!k) continue;
     let t = teams.get(k);
@@ -159,12 +163,17 @@ export function planMeetings(agents: MeetingAgent[], prev: MeetingState, now: nu
   // 1. Rooms stay with their team while it has someone at the table; otherwise the meeting is over.
   rooms.forEach((r, i) => {
     if (!r) return;
+    if (r.key.startsWith("d:") && manual.some((d) => d.room === i && r.key === "d:" + d.id)) return;
     const t = teams.get(r.key);
     if (!t || !t.attend.length) {
       logs.push(`Rapat selesai: ${r.name} (${minutes(now - r.since)} mnt)`);
       rooms[i] = null;
     }
   });
+  for (const d of manual) {
+    if (rooms[d.room]?.key !== "d:" + d.id) logs.push(`Rapat mulai: Diskusi di ${MEETING_ROOMS[d.room]}`);
+    rooms[d.room] = { key: "d:" + d.id, name: "Diskusi", leaderId: d.participants[0].agentId, dept: null, since: d.since };
+  }
   // 2. Teams at the table without a room take the first free one, in roster order.
   for (const t of teams.values()) {
     if (!t.attend.length || rooms.some((r) => r?.key === t.key)) continue;
@@ -184,6 +193,11 @@ export function planMeetings(agents: MeetingAgent[], prev: MeetingState, now: nu
   const seats = new Map<string, AgentMeeting>();
   rooms.forEach((r, room) => {
     if (!r) return;
+    const d = manual.find((d) => d.room === room);
+    if (d) {
+      d.participants.forEach((p, seat) => { if (byId.has(p.agentId)) seats.set(p.agentId, { room, seat, team: "Diskusi" }); });
+      return;
+    }
     const t = teams.get(r.key)!;
     const taken: (string | null)[] = Array(SEATS_PER_ROOM).fill(null);
     const waiting: MeetingAgent[] = [];
