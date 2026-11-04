@@ -167,8 +167,9 @@ curl -s -X POST http://127.0.0.1:8787/event -H 'content-type: application/json' 
   - **Red Team Lab:** peta target. Node yang punya temuan jadi merah.
   - **Ruang Laporan VA:** papan jumlah temuan per severity.
   - **SOC Blue Team:** grafik login gagal per menit. Saat ada alert, sirene berputar dan ruangan berkedip merah.
-- **Lt.4 Meeting** (lift terus naik dari Lt.3): tiga ruang meeting (A, B, C), masing-masing meja dengan 5 kursi
-  dan layar tim. Di tampilan Semua lantai ini ada di paling atas, jadi layar dinding belakang Lt.3 hanya terlihat
+- **Lt.4 Meeting** (lift terus naik dari Lt.3): tiga ruang meeting (A, B, C) tertutup kaca seperti kantor biasa:
+  kaca buram setinggi 2,2 lalu kaca bening sampai atas, dengan pintu geser yang terbuka sendiri saat agen lewat.
+  Masing-masing berisi meja dengan 5 kursi dan layar tim. Di tampilan Semua lantai ini ada di paling atas, jadi layar dinding belakang Lt.3 hanya terlihat
   penuh di tampilan Lt.3 (alert tetap muncul di log dan toast).
 
 **Ruang meeting:** satu tim = satu sesi + subagennya, atau agen dengan grup yang sama (`HQ_GROUP`, field `group`).

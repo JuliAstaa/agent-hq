@@ -327,9 +327,9 @@ Stations face the back wall so the camera sees agents and their monitors over th
 ### Floor 4: Meeting (§7.9)
 | Room | Content |
 |---|---|
-| Meeting A, B, C | Side by side along the back wall, low glass partitions between them, open to the corridor. Table with five seats and laptops (head seat at the back facing the camera, two per side), room screen on the back wall, accent strip in the team color, rug per room |
+| Meeting A, B, C | Side by side along the back wall, enclosed like ordinary office meeting rooms: glass walls on the corridor, between the rooms and on Meeting C's open side, frosted up to 2.2 (with a pink band at eye level) and clear above it up to the trim, in light frames; a sliding frosted door in the middle of each front wall opens while an agent is at it (every route in and out goes through it). Seated agents stay visible from the camera over the frosted part. Table with five seats and laptops (head seat at the back facing the camera, two per side), room screen on the back wall, accent strip in the team color, rug per room |
 | Corridor | In front of the rooms, from the lift. Sign `MEETING` on the left wall, alien plants |
-| Lift | Top stop of the glass tube |
+| Lift | Top stop of the glass tube. Pink rings only at floor level: the ring at the top of the floor-3 tube is hidden while floor 4 is shown, so none floats between the floors |
 
 Labels: `MEETING A`, `MEETING B`, `MEETING C`, `LIFT`.
 

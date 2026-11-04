@@ -36,8 +36,9 @@ export interface Sec {
   siren: { dome: ToonMesh; beams: THREE.Group; light: THREE.PointLight };
   pad: BasicMesh;
   stations: Station[];
-  /** Lid on top of the lift tube: hidden while floor 4 is shown (the tube goes on up). */
-  liftTop: THREE.Mesh;
+  /** Lid and top ring of the lift tube: hidden while floor 4 is shown (the tube goes on up, and the ring would
+   *  float between the floors). */
+  liftTop: THREE.Object3D[];
   /** "LIFT KE LT.3 & 4" on floor 2 ("LIFT KE LT.3" without the meeting floor). */
   liftLabel2: CSS2DObject;
 }
@@ -167,10 +168,11 @@ export function buildFloor3(b: Build, g2: THREE.Group, g3: THREE.Group, tentacle
   cyl(g2, 1.12, 1.12, 0.1, LX, F2, LZ, M.dark, 32);
   const pad = mesh(new THREE.CircleGeometry(0.9, 32), noLine(flat("#ff6fd8")), false, false) as BasicMesh;
   pad.rotation.x = -Math.PI / 2; pad.position.set(LX, F2 + 0.11, LZ); g2.add(pad);
-  SEC.liftTop = cyl(g3, 1.12, 1.12, 0.14, LX, F3 + 2.8, LZ, M.dark, 32);
+  SEC.liftTop = [cyl(g3, 1.12, 1.12, 0.14, LX, F3 + 2.8, LZ, M.dark, 32)];
   for (const [g, y] of [[g2, F2 + 0.15], [g2, F3 - 0.5], [g3, F3 + 0.05], [g3, F3 + 2.7]] as const) {
     const r = mesh(new THREE.TorusGeometry(0.97, 0.05, 8, 40), noLine(flat("#ff6fd8")), false, false);
     r.rotation.x = Math.PI / 2; r.position.set(LX, y, LZ); g.add(r);
+    if (y === F3 + 2.7) SEC.liftTop.push(r);
   }
   SEC.pad = pad;
   SEC.liftLabel2 = roomLabel(b, g2, "LIFT KE LT.3 & 4", LX, F2 + 0.2, LZ + 1.6, 2);

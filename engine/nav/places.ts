@@ -165,6 +165,11 @@ export function createBoardSlots(): BoardPlace[] {
 export const ROOM_XS = [-8.4, 0, 8.6];
 /** Room walls between the rooms (glass partitions), x. */
 export const ROOM_WALLS = [-4.2, 4.2];
+/** Enclosed glass rooms: the front wall on the corridor (z), Meeting C's right wall (x, the building side is open),
+ *  and the sliding door in the middle of each front wall (half width). */
+export const ROOM_FRONT_Z = 1.0;
+export const ROOM_RIGHT_X = 12.9;
+export const DOOR_HALF = 0.75;
 /** Table center z, half sizes. Seats sit 0.4 from its edge, like a desk chair. */
 export const TABLE_Z = -3.6;
 export const TABLE_HALF_X = 0.9;
@@ -172,6 +177,8 @@ export const TABLE_HALF_Z = 1.6;
 /** Corridor walkway in front of the rooms (graph nodes M0..M2) and the lanes beside / behind each table. */
 export const CORRIDOR_Z = 2.6;
 const LANE_X = 2.3, ENTRY_Z = -0.8, BACK_Z = -6.7;
+/** Just inside the door: every way in and out of a room goes through its door. */
+const DOOR_IN_Z = ROOM_FRONT_Z - 0.7;
 /** Seat 0 at the back facing the camera, then left front/back and right front/back facing the table. */
 export const SEAT_LAYOUT: { dx: number; z: number; face: number }[] = [
   { dx: 0, z: TABLE_Z - TABLE_HALF_Z - 0.4, face: 0 },
@@ -182,7 +189,8 @@ export const SEAT_LAYOUT: { dx: number; z: number; face: number }[] = [
 ];
 export const roomNode = (room: number) => `M${room}`;
 
-/** All 15 seats, index = room * 5 + seat. Paths keep to the lanes beside the table, never across it. */
+/** All 15 seats, index = room * 5 + seat. Paths go through the room's door, then keep to the lanes beside the
+ *  table, never across it. */
 export function createSeats(): SeatPlace[] {
   const out: SeatPlace[] = [];
   ROOM_XS.forEach((cx, roomIndex) => {
@@ -190,8 +198,8 @@ export function createSeats(): SeatPlace[] {
       const side = seat === 0 ? -1 : Math.sign(s.dx);
       const lane = cx + side * LANE_X;
       const via = seat === 0
-        ? [[lane, ENTRY_Z], [lane, BACK_Z], [cx, BACK_Z]]
-        : [[lane, ENTRY_Z], [lane, s.z]];
+        ? [[cx, DOOR_IN_Z], [lane, ENTRY_Z], [lane, BACK_Z], [cx, BACK_Z]]
+        : [[cx, DOOR_IN_Z], [lane, ENTRY_Z], [lane, s.z]];
       out.push({
         kind: "seat", roomIndex, seat, index: roomIndex * SEATS_PER_ROOM + seat, room: MEETING_ROOMS[roomIndex], floor: 4,
         hub: roomNode(roomIndex), via: via.map(([x, z]) => new THREE.Vector3(x, F4, z)),

@@ -3,13 +3,14 @@ import * as THREE from "three";
 import { describe, expect, it } from "vitest";
 import { ADJ, N, shortest } from "@/engine/nav/graph";
 import {
-  createBoardSlots, createDeskSlots, createSeats, createSpots, ROOM_WALLS, ROOM_XS, stationPlace, STATION_LAYOUT,
-  TABLE_HALF_X, TABLE_HALF_Z, TABLE_Z, type Place,
+  createBoardSlots, createDeskSlots, createSeats, createSpots, DOOR_HALF, ROOM_FRONT_Z, ROOM_RIGHT_X, ROOM_WALLS, ROOM_XS,
+  stationPlace, STATION_LAYOUT, TABLE_HALF_X, TABLE_HALF_Z, TABLE_Z, type Place,
 } from "@/engine/nav/places";
 import { atPlace, route } from "@/engine/nav/router";
 import { floorOf, locText, newMovement, updateNav, workTarget, type Mover, type NavAgent, type NavCtx } from "@/engine/agents/movement";
 import { F4 } from "@/engine/constants";
 import { SEATS_PER_ROOM } from "@/lib/meeting";
+import { stepDoors, type MeetingRoomProp } from "@/engine/world/floor4";
 
 const seats = createSeats();
 const desks = createDeskSlots();
@@ -56,28 +57,41 @@ describe("seats (prd.md §7.9)", () => {
     }
   });
 
-  it("no floor-4 route crosses a table, a glass partition, or the walls", () => {
+  it("every seat is reached through its room's door", () => {
+    for (const s of seats) {
+      const cx = ROOM_XS[s.roomIndex];
+      expect(s.via[0].x).toBe(cx);
+      expect(s.via[0].z).toBeLessThan(ROOM_FRONT_Z);
+    }
+  });
+
+  it("no floor-4 route crosses a table or a glass wall except through a door, nor the building walls", () => {
     const pad = 0.25;
     const inTable = (x: number, z: number) => ROOM_XS.some((cx) => Math.abs(x - cx) < TABLE_HALF_X + pad && Math.abs(z - TABLE_Z) < TABLE_HALF_Z + pad);
-    const inGlass = (x: number, z: number) => z < 1.0 + pad && ROOM_WALLS.some((wx) => Math.abs(x - wx) < pad);
+    const inDoor = (x: number) => ROOM_XS.some((cx) => Math.abs(x - cx) < DOOR_HALF - 0.1);
+    // enclosed rooms (deviation 23): the front wall on the corridor, the walls between rooms, Meeting C's right wall
+    const inGlass = (x: number, z: number) =>
+      (Math.abs(z - ROOM_FRONT_Z) < pad && x > -12.6 && x < ROOM_RIGHT_X + pad && !inDoor(x)) ||
+      (z < ROOM_FRONT_Z + pad && [...ROOM_WALLS, ROOM_RIGHT_X].some((wx) => Math.abs(x - wx) < pad));
     const all = [...seats, desks[0].place, stations[0], spots[0]];
+    const bad: string[] = [];
     for (const a of all) {
       for (const b of seats) {
         if (a === b) continue;
-        const r = route(atPlace(a), b);
+        for (const r of [route(atPlace(a), b), route(atPlace(b), a)]) {
         for (let i = 1; i < r.length; i++) {
           const p = r[i - 1].p, q = r[i].p;
           if (Math.abs(p.y - F4) > 0.3 || Math.abs(q.y - F4) > 0.3) continue;
-          for (let k = 0; k <= 30; k++) {
-            const x = p.x + ((q.x - p.x) * k) / 30, z = p.z + ((q.z - p.z) * k) / 30;
-            const where = `${a.final.toArray()} -> ${b.final.toArray()} at (${x.toFixed(2)}, ${z.toFixed(2)})`;
-            expect(inTable(x, z), where).toBe(false);
-            expect(inGlass(x, z), where).toBe(false);
-            expect(z > -7.6 + pad && x > -12.6 + pad && x < 13, where).toBe(true);
+          for (let k = 0; k <= 80; k++) {
+            const x = p.x + ((q.x - p.x) * k) / 80, z = p.z + ((q.z - p.z) * k) / 80;
+            const what = inTable(x, z) ? "table" : inGlass(x, z) ? "glass" : !(z > -7.6 + pad && x > -12.6 + pad && x < 13) ? "wall" : "";
+            if (what && bad.length < 10) bad.push(`${what}: ${a.final.toArray()} -> ${b.final.toArray()} at (${x.toFixed(2)}, ${z.toFixed(2)})`);
           }
+        }
         }
       }
     }
+    expect(bad).toEqual([]);
   });
 });
 
@@ -147,5 +161,23 @@ describe("movement with a meeting seat", () => {
     expect(m.mv.fetching).toBe(false);
     expect(m.mv.dest).toBe(s);
     expect(m.mv.mode).toBe("desk");
+  });
+});
+
+describe("sliding doors (deviation 23)", () => {
+  it("open while an agent is at the door, close again once it has gone in", () => {
+    const leaf = new THREE.Group();
+    const room = { door: { leaf, open: 0, x: ROOM_XS[1] } } as unknown as MeetingRoomProp;
+    const agent = new THREE.Vector3(ROOM_XS[1], F4, ROOM_FRONT_Z + 0.8);
+    for (let i = 0; i < 30; i++) stepDoors([room], [agent], 0.05);
+    expect(room.door.open).toBeGreaterThan(0.95);
+    expect(leaf.position.x).toBeLessThan(-DOOR_HALF * 2 * 0.95); // slid aside over the glass
+    agent.set(ROOM_XS[1], F4, TABLE_Z); // at the table
+    for (let i = 0; i < 30; i++) stepDoors([room], [agent], 0.05);
+    expect(room.door.open).toBeLessThan(0.05);
+    // an agent on another floor below the door does not open it
+    agent.set(ROOM_XS[1], F4 - 5.6, ROOM_FRONT_Z);
+    stepDoors([room], [agent], 0.05);
+    expect(room.door.open).toBeLessThan(0.05);
   });
 });

@@ -1,12 +1,12 @@
-// Floor 4 "Meeting" (prd.md §7.9): three meeting rooms side by side along the back wall (table, five seats with
-// laptops, team screen, accent strip), a corridor from the lift, and the lift tube continuing up from floor 3.
-// Not in the prototype.
+// Floor 4 "Meeting" (prd.md §7.9): three enclosed glass meeting rooms side by side along the back wall (frosted
+// glass up to 2.2 with a clear band above, a sliding frosted door each; table, five seats with laptops, team screen,
+// accent strip), a corridor from the lift, and the lift tube continuing up from floor 3. Not in the prototype.
 
 import * as THREE from "three";
 import { F3, F4 } from "../constants";
 import type { Fonts } from "../scene/fonts";
 import { boxAt, canvasTex, cyl, mesh, noLine, rbox, thin, type CanvasTex } from "../scene/kit";
-import { ROOM_WALLS, ROOM_XS, TABLE_HALF_X, TABLE_HALF_Z, TABLE_Z, type SeatPlace } from "../nav/places";
+import { DOOR_HALF, ROOM_FRONT_Z, ROOM_RIGHT_X, ROOM_WALLS, ROOM_XS, TABLE_HALF_X, TABLE_HALF_Z, TABLE_Z, type SeatPlace } from "../nav/places";
 import { MEETING_ROOMS, SEATS_PER_ROOM } from "@/lib/meeting";
 import { alienPlant } from "./props/alienPlant";
 import { LIFT_GAP, LIFT_X, LIFT_Z } from "./floor3";
@@ -31,6 +31,8 @@ export interface MeetingRoomProp {
   seats: MeetingSeatProp[];
   /** Middle of the table top (world, without the island bob). */
   center: THREE.Vector3;
+  /** Sliding frosted door in the front wall: `open` 0..1 (stepDoors), `x` its middle. */
+  door: { leaf: THREE.Group; open: number; x: number };
 }
 
 /** A small task card that flies from the leader's seat to a new member's seat (0.6 s). */
@@ -51,6 +53,10 @@ export const MEETING_SCREEN_W = 640, MEETING_SCREEN_H = 280;
 /** Accent color of an empty room's strip and chairs. */
 export const MEETING_IDLE = "#3a3360";
 const CARD_SECONDS = 0.6;
+/** Glass walls: frosted up to FROST above the floor, clear up to TOP (the back wall's trim). */
+const FROST = 2.2, TOP = 4.4, PANE = 0.06;
+/** How far the door leaf slides to open (its width plus a little). */
+const DOOR_SLIDE = DOOR_HALF * 2 + 0.05;
 
 export function buildFloor4(b: Build, g4: THREE.Group, tentacles: THREE.Group[], fonts: Fonts, seats: SeatPlace[]): Floor4 {
   const { M } = b;
@@ -101,16 +107,61 @@ export function buildFloor4(b: Build, g4: THREE.Group, tentacles: THREE.Group[],
   rug(-3.9, 3.9, -7.4, 0.8, "#2f7a63");
   rug(4.5, 12.8, -7.4, 0.8, "#9a5a3a");
 
-  // glass partitions between the rooms (low enough to see over from the camera)
-  const glass = thin(toon("#bfe9ff", { transparent: true, opacity: 0.25, side: THREE.DoubleSide, depthWrite: false }), 0.7);
-  const PZ0 = -7.6, PZ1 = 1.0, PH = 2.3;
-  for (const x of ROOM_WALLS) {
-    const pane = mesh(new THREE.BoxGeometry(0.06, PH - 0.2, PZ1 - PZ0), glass, false, false);
-    pane.position.set(x, F4 + 0.1 + (PH - 0.2) / 2, (PZ0 + PZ1) / 2); g4.add(pane);
-    boxAt(g4, 0.16, 0.12, PZ1 - PZ0 + 0.1, x, F4, (PZ0 + PZ1) / 2, M.trim, 0.03);
-    boxAt(g4, 0.16, 0.12, PZ1 - PZ0 + 0.1, x, F4 + PH - 0.1, (PZ0 + PZ1) / 2, M.trim, 0.03);
-    boxAt(g4, 0.18, PH, 0.18, x, F4, PZ1, M.trim, 0.03);
+  // Enclosed glass rooms like an ordinary office: frosted glass up to 2.2 (a pink safety band at eye level), clear
+  // glass above it up to the trim. Seated agents stay visible from the camera over the frosted part.
+  const frost = canvasTex(4, 256);
+  {
+    const c = frost.ctx;
+    const grad = c.createLinearGradient(0, 0, 0, 256);
+    grad.addColorStop(0, "rgba(236,244,255,0.82)");
+    grad.addColorStop(1, "rgba(226,238,252,0.93)");
+    c.fillStyle = grad; c.fillRect(0, 0, 4, 256);
+    c.fillStyle = "rgba(255,255,255,0.95)"; c.fillRect(0, 0, 4, 4);
+    c.fillStyle = "rgba(255,111,216,0.9)"; c.fillRect(0, 78, 4, 6); c.fillRect(0, 90, 4, 3);
   }
+  // No outline on the panes: on a large transparent pane the outline hull shows through as a dark sheet. The trim
+  // frames draw the cartoon edges instead.
+  const frostM = noLine(toon("#ffffff", { map: frost.tex, transparent: true, depthWrite: false }));
+  const clearM = noLine(toon("#bfe9ff", { transparent: true, opacity: 0.16, depthWrite: false }));
+  const posts = new Map<string, [number, number]>();
+  const pane = (axis: "x" | "z", c: number, a0: number, a1: number, y0: number, h: number, mat: THREE.Material) => {
+    if (a1 - a0 < 0.01) return;
+    const len = a1 - a0, mid = (a0 + a1) / 2;
+    const m = mesh(axis === "x" ? new THREE.BoxGeometry(len, h, PANE) : new THREE.BoxGeometry(PANE, h, len), mat, false, false);
+    m.position.set(axis === "x" ? mid : c, y0 + h / 2, axis === "x" ? c : mid);
+    g4.add(m);
+  };
+  const rail = (axis: "x" | "z", c: number, a0: number, a1: number, y0: number, h: number) => {
+    const len = a1 - a0, mid = (a0 + a1) / 2;
+    boxAt(g4, axis === "x" ? len : 0.12, h, axis === "x" ? 0.12 : len, axis === "x" ? mid : c, y0, axis === "x" ? c : mid, M.trim, 0.03, false);
+  };
+  /** One glass wall from a0 to a1 along `axis` (x: at z = c, z: at x = c); `gap` leaves a door opening below FROST. */
+  const glassWall = (axis: "x" | "z", c: number, a0: number, a1: number, gap?: [number, number]) => {
+    const lower: [number, number][] = gap ? [[a0, gap[0]], [gap[1], a1]] : [[a0, a1]];
+    for (const [s0, s1] of lower) {
+      pane(axis, c, s0, s1, F4 + 0.12, FROST - 0.12, frostM);
+      rail(axis, c, s0, s1, F4, 0.12);
+    }
+    pane(axis, c, a0, a1, F4 + FROST, TOP - FROST, clearM);
+    rail(axis, c, a0, a1, F4 + FROST - 0.05, 0.1);
+    rail(axis, c, a0, a1, F4 + TOP - 0.06, 0.12);
+    // posts at the ends, at the door and about every 2.9 between them
+    const at = new Set([a0, a1, ...(gap ?? [])]);
+    const n = Math.max(1, Math.round((a1 - a0) / 2.9));
+    for (let i = 1; i < n; i++) {
+      const a = a0 + ((a1 - a0) * i) / n;
+      if (!gap || a < gap[0] - 0.4 || a > gap[1] + 0.4) at.add(a);
+    }
+    for (const a of at) {
+      const [x, z] = axis === "x" ? [a, c] : [c, a];
+      posts.set(`${x.toFixed(2)},${z.toFixed(2)}`, [x, z]);
+    }
+  };
+  const BACK = -7.6;
+  const fronts = [-12.6, ...ROOM_WALLS, ROOM_RIGHT_X];
+  ROOM_XS.forEach((cx, i) => glassWall("x", ROOM_FRONT_Z, fronts[i], fronts[i + 1], [cx - DOOR_HALF, cx + DOOR_HALF]));
+  for (const x of [...ROOM_WALLS, ROOM_RIGHT_X]) glassWall("z", x, BACK, ROOM_FRONT_Z);
+  for (const [x, z] of posts.values()) boxAt(g4, 0.14, TOP, 0.14, x, F4, z, M.trim, 0.03, false);
 
   // rooms: table, seats, laptops, screen, strip
   const rooms: MeetingRoomProp[] = ROOM_XS.map((cx, ri) => {
@@ -125,7 +176,14 @@ export function buildFloor4(b: Build, g4: THREE.Group, tentacles: THREE.Group[],
     const strip = mesh(rbox(4.6, 0.12, 0.06, 0.02), flat(MEETING_IDLE)) as BasicMesh;
     strip.position.set(cx, F4 + 1.62, -7.42); g4.add(strip);
     const roomSeats = seats.filter((s) => s.roomIndex === ri).sort((p, q) => p.seat - q.seat).map((place) => buildSeat(b, g4, place));
-    return { screen, strip, seats: roomSeats, center: new THREE.Vector3(cx, F4 + 1.1, TABLE_Z) };
+    // sliding door: a frosted leaf on the corridor side of the front wall, slides left over the glass to open
+    const door = new THREE.Group(); door.position.set(cx, F4, ROOM_FRONT_Z + 0.1); g4.add(door);
+    const leaf = new THREE.Group(); door.add(leaf);
+    const lp = mesh(new THREE.BoxGeometry(DOOR_HALF * 2, FROST - 0.1, 0.05), frostM, false, false);
+    lp.position.y = 0.05 + (FROST - 0.1) / 2; leaf.add(lp);
+    for (const sx of [-DOOR_HALF, DOOR_HALF]) boxAt(leaf, 0.07, FROST - 0.1, 0.08, sx, 0.05, 0, M.trim, 0.02, false);
+    boxAt(leaf, 0.05, 0.6, 0.12, DOOR_HALF - 0.22, 0.8, 0, M.steel, 0.02, false);
+    return { screen, strip, seats: roomSeats, center: new THREE.Vector3(cx, F4 + 1.1, TABLE_Z), door: { leaf, open: 0, x: cx } };
   });
 
   // lift: the glass tube from floor 3 continues up to a lid above this floor
@@ -133,7 +191,7 @@ export function buildFloor4(b: Build, g4: THREE.Group, tentacles: THREE.Group[],
   const tube = mesh(new THREE.CylinderGeometry(0.95, 0.95, 5.6, 32, 1, true, LIFT_GAP + 0.7, Math.PI * 2 - 1.4), glassM, false, false);
   tube.position.set(LIFT_X, F4, LIFT_Z); g4.add(tube);
   cyl(g4, 1.12, 1.12, 0.14, LIFT_X, F4 + 2.8, LIFT_Z, M.dark, 32);
-  for (const y of [F4 + 0.05, F4 + 2.7]) {
+  for (const y of [F4 + 0.05]) { // rings only at floor level (none floating under the lid)
     const r = mesh(new THREE.TorusGeometry(0.97, 0.05, 8, 40), noLine(flat("#ff6fd8")), false, false);
     r.rotation.x = Math.PI / 2; r.position.set(LIFT_X, y, LIFT_Z); g4.add(r);
   }
@@ -188,6 +246,15 @@ function buildSeat(b: Build, g4: THREE.Group, place: SeatPlace): MeetingSeatProp
   // the lid leans away from the sitter; its screen faces back toward the seat (-z of the laptop)
   screen.position.set(0, 0.17, -0.014); screen.rotation.y = Math.PI; lid.add(screen);
   return { place, chair, ring, glow, screen };
+}
+
+/** Doors slide open while someone is at them (agent positions on floor 4, world-group coordinates). */
+export function stepDoors(rooms: MeetingRoomProp[], at: THREE.Vector3[], dt: number) {
+  for (const { door } of rooms) {
+    const near = at.some((p) => Math.abs(p.y - F4) < 1 && Math.abs(p.x - door.x) < DOOR_HALF + 0.9 && Math.abs(p.z - ROOM_FRONT_Z) < 1.6);
+    door.open += ((near ? 1 : 0) - door.open) * Math.min(1, dt * 7);
+    door.leaf.position.x = -DOOR_SLIDE * door.open;
+  }
 }
 
 /** Advance the flying cards (arc from the leader's seat to the new member's). */

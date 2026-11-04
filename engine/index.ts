@@ -32,7 +32,7 @@ import { buildDesk, type Desk } from "./world/props/desk";
 import { buildIslandAndFloor1Shell, buildFloor1Props } from "./world/floor1";
 import { buildFloor2Props, buildFloor2Shell, LIQUID_BASE, LIQUID_FULL } from "./world/floor2";
 import { buildFloor3 } from "./world/floor3";
-import { buildFloor4, flyCard, MEETING_IDLE, stepCards } from "./world/floor4";
+import { buildFloor4, flyCard, MEETING_IDLE, stepCards, stepDoors } from "./world/floor4";
 import { drawMeetingScreen, type MeetingScreenInfo } from "./displays/meeting";
 import { MEETING_ROOMS, SEATS_PER_ROOM } from "@/lib/meeting";
 import { avatarColor } from "@/lib/palette";
@@ -406,7 +406,7 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
     g2.visible = f !== "1";
     g3.visible = f === "all" || f === "3" || f === "4";
     g4.visible = (f === "all" || f === "4") && !meetingHidden;
-    SEC.liftTop.visible = !g4.visible; // with floor 4 on show the tube goes on up
+    for (const o of SEC.liftTop) o.visible = !g4.visible; // with floor 4 on show the tube goes on up
     const lf = f === "all" ? (meetingHidden ? 3 : 4) : Number(f);
     for (const r of b.roomLabels) r.o.visible = r.floor === lf;
     // The taller building needs a wider shadow box; three floors keep the prototype's.
@@ -872,6 +872,7 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
       stepTalk(ri, here, s, t);
     });
     stepCards(F4P.cards, dt);
+    stepDoors(F4P.rooms, [...agents.values()].map((rt) => rt.root.position), dt);
     if (meetingDirty && g4.visible) refreshMeetings();
     const H = SEC.holo;
     H.model.rotation.y += dt * (redOn ? 0.9 : 0.25);
