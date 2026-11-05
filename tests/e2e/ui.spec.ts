@@ -162,3 +162,32 @@ test("floor switcher fits at 360 px", async ({ page }) => {
   }
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(360);
 });
+
+// Kick from the roster (prd.md §7.10), live through the bridge: only an idle or offline agent can be kicked, it leaves
+// the roster, idle updates keep it out, and its next task brings it back.
+test("kick from the roster (live)", async ({ page, request }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await blockExternal(page);
+  await page.goto("/");
+  await expect(page.locator('[data-hq-ui="top"] [data-mode]')).toHaveAttribute("data-mode", "live", { timeout: 15_000 });
+  const id = `kick-e2e-${Date.now()}`;
+  const send = (data: object) => request.post("/api/event", { data });
+  await send({ id, name: "Tendang", role: "Tester", status: "working", task: "Kerja dulu" });
+  const card = page.locator(`.agent[data-id="${id}"]`);
+  const button = card.getByRole("button", { name: "Keluarkan Tendang" });
+  await expect(button).toBeDisabled();
+  await send({ id, status: "idle" });
+  await expect(button).toBeEnabled();
+  await button.click();
+  await expect(card).toHaveCount(0);
+  await expect(page.locator('[data-hq-ui="toast"]')).toHaveText("Tendang dikeluarkan lewat Airlock. Kembali saat mulai kerja.");
+  await send({ id, status: "idle", task: "Masih santai" });
+  await page.waitForTimeout(500);
+  await expect(card).toHaveCount(0);
+  await send({ id, status: "working", task: "Balik kerja" });
+  await expect(card).toContainText("Tendang");
+  await expect(card).toContainText("Balik kerja");
+  await send({ type: "remove", id });
+  expect(errors).toEqual([]);
+});

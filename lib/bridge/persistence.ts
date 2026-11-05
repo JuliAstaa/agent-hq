@@ -12,6 +12,13 @@ export interface Removal {
   mark: number;
 }
 
+/** A kicked agent (prd.md §7.10): when, and the record and own identity it had, restored when it comes back. */
+export interface Kicked {
+  at: number;
+  agent: BridgeEvent;
+  source: Identity | null;
+}
+
 export interface BridgeSnapshot {
   version: 1;
   agents: BridgeEvent[];
@@ -19,6 +26,8 @@ export interface BridgeSnapshot {
   lastSeen: [string, number][];
   sourceIdentity: [string, Identity][];
   removals: [string, Removal][];
+  /** Optional: snapshots written before kicks existed have none. */
+  kicked?: [string, Kicked][];
 }
 
 /** HQ_STATE_FILE=0 disables persistence. Explicit paths also allow isolated restart tests. */
@@ -63,6 +72,10 @@ export function loadSnapshot(file: string | null): BridgeSnapshot | null {
       lastSeen: raw.lastSeen.filter((p): p is [string, number] => pair(p) && finite(p[1])),
       sourceIdentity: raw.sourceIdentity.filter((p): p is [string, Identity] => pair(p) && record(p[1])).map(([id, v]) => [id, cleanRecord(v) as Identity]),
       removals: raw.removals.filter((p): p is [string, Removal] => pair(p) && record(p[1]) && finite(p[1].at) && finite(p[1].mark)),
+      kicked: (Array.isArray(raw.kicked) ? raw.kicked : [])
+        .filter((p): p is [string, Record<string, unknown>] => Array.isArray(p) && p.length === 2 && typeof p[0] === "string" && !!p[0]
+          && !ids.has(p[0]) && record(p[1]) && finite(p[1].at) && record(p[1].agent) && p[1].agent.id === p[0])
+        .map(([id, k]) => [id, { at: k.at as number, agent: cleanRecord(k.agent as Record<string, unknown>), source: record(k.source) ? (cleanRecord(k.source) as Identity) : null }]),
     };
   } catch (e) {
     // Do not log parsed text (it may contain secrets). Missing data on first start is normal.
@@ -78,6 +91,7 @@ export function saveSnapshot(file: string, snapshot: BridgeSnapshot): void {
     agents: snapshot.agents.map(cleanRecord),
     recent: snapshot.recent.slice(-80).map(cleanRecord),
     sourceIdentity: snapshot.sourceIdentity.map(([id, identity]) => [id, cleanRecord(identity)]),
+    kicked: (snapshot.kicked ?? []).map(([id, k]) => [id, { at: k.at, agent: cleanRecord(k.agent), source: k.source ? cleanRecord(k.source) : null }]),
   };
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   try {

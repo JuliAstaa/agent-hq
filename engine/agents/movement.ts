@@ -266,10 +266,11 @@ export function releasePlaces(m: Mover) {
 }
 
 export function floorOf(m: { root: THREE.Object3D } | null): number {
-  if (!m) return 2;
-  const y = m.root.position.y;
-  return y > 14 ? 4 : y > 8.4 ? 3 : y > 2.8 ? 2 : 1;
+  return m ? floorAtY(m.root.position.y) : 2;
 }
+
+/** Floor number at height `y` (world group coordinates). */
+export const floorAtY = (y: number): number => (y > 14 ? 4 : y > 8.4 ? 3 : y > 2.8 ? 2 : 1);
 
 /** Roster location chip. `team`: the meeting's team name (Agent.meeting.team), for "rapat <team>". */
 export function locText(m: Mover | null, team?: string): { where: string; what: string } {

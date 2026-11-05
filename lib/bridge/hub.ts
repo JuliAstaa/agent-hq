@@ -1,14 +1,16 @@
 // Event hub (port of the state half of references/server.js), with restart snapshots on disk.
 // Lives on globalThis so it survives `next dev` reloads and is shared by every route bundle.
 // Plus agent renames (not in the prototype): identity overrides by id, see ./overrides.ts.
+// Plus kicks (prd.md §7.10): a kicked agent's events are held back in publish() until it shows activity again.
 
 import { normalizeServerStats, serverPoint, trimHistory, type ServerPoint } from "../server";
 import { redact, trunc } from "./redact";
 import { IDENTITY_FIELDS, loadOverrides, mergeOverride, namesFile, saveOverrides, type Identity, type Override } from "./overrides";
-import { loadSnapshot, saveSnapshot, stateFile, type Removal } from "./persistence";
+import { loadSnapshot, saveSnapshot, stateFile, type Kicked, type Removal } from "./persistence";
 import { emptyMeetingState, planMeetings, type AgentMeeting, type MeetingState } from "../meeting";
 import { normStatus } from "../events";
 import { readDiscussion, type DiscussionSummary } from "../discussions";
+import { canKick, KICK_TTL_MS, kickRefusal, wakesUp } from "../kick";
 
 export type BridgeEvent = Record<string, unknown>;
 export type Send = (ev: BridgeEvent) => void;
@@ -67,6 +69,8 @@ interface Hub {
   removeTimers: Map<string, ReturnType<typeof setTimeout>>;
   /** Removal deadlines survive restarts without giving completed sessions a new grace period. */
   removals: Map<string, Removal>;
+  /** id -> kicked agent (prd.md §7.10): kick time and the record it had, restored when it comes back. */
+  kicked: Map<string, Kicked>;
   persistenceFile: string | null;
   persistenceWarned: boolean;
   subs: Set<Send>;
@@ -90,6 +94,7 @@ function createHub(): Hub {
     lastSeen: new Map(saved?.lastSeen),
     removeTimers: new Map(),
     removals: new Map(saved?.removals),
+    kicked: new Map(saved?.kicked),
     persistenceFile: file,
     persistenceWarned: false,
     subs: new Set(),
@@ -116,6 +121,7 @@ hub.meetingSeats ??= new Map();
 hub.meetingDeskless ??= new Set();
 hub.meetingKnown ??= new Set();
 hub.removals ??= new Map();
+hub.kicked ??= new Map();
 if (hub.persistenceFile === undefined) hub.persistenceFile = stateFile();
 
 /** Synchronous, atomic checkpoint: even a forced process restart keeps the last accepted agent event. */
@@ -129,6 +135,7 @@ function persistHub(): void {
       lastSeen: [...hub.lastSeen],
       sourceIdentity: [...hub.sourceIdentity],
       removals: [...hub.removals],
+      kicked: [...hub.kicked],
     });
     hub.persistenceWarned = false;
   } catch {
@@ -186,14 +193,19 @@ export function remember(ev: BridgeEvent): void {
     if (!hub.agents.has(id)) hub.agents.set(id, { id, ...(ev.name ? { name: ev.name } : {}) });
     return;
   }
-  const next: BridgeEvent = { ...(hub.agents.get(id) || { id }) };
+  hub.agents.set(id, mergeAgent(hub.agents.get(id) || { id }, ev, type));
+}
+
+/** `prev` with the agent fields of `ev` applied (an agent's snapshot record). */
+function mergeAgent(prev: BridgeEvent, ev: BridgeEvent, type: string): BridgeEvent {
+  const next: BridgeEvent = { ...prev };
   for (const k of AGENT_KEYS) if (ev[k] !== undefined) next[k] = ev[k];
   if (ev.tokens_delta !== undefined) next.tokens = (Number(next.tokens) || 0) + Number(ev.tokens_delta);
   if (type === "task_done") {
     next.status = ev.status || "idle";
     next.progress = 1;
   }
-  hub.agents.set(id, next);
+  return next;
 }
 
 export function broadcast(ev: BridgeEvent): void {
@@ -225,6 +237,7 @@ function applyIdentity(ev: BridgeEvent): void {
 
 export function publish(ev: BridgeEvent): void {
   ev.ts = ev.ts || new Date().toISOString();
+  if (kickGate(ev)) return;
   // Meeting group (prd.md §7.9): a free label from any source, so it is redacted and cut like a name.
   if (typeof ev.group === "string") ev.group = trunc(redact(ev.group), 40);
   applyIdentity(ev);
@@ -233,6 +246,73 @@ export function publish(ev: BridgeEvent): void {
   // Live server metrics and schedule commands are unrelated to agent restart state.
   if (!["server_stats", "schedule", "cron_command", "meeting_state"].includes(String(ev.type || "").toLowerCase())) persistHub();
   broadcast(ev);
+}
+
+/* ---------------- kick (prd.md §7.10) ---------------- */
+
+/** Event types that never describe an agent. */
+const NOT_AGENT = new Set(["meeting_state", "schedule", "cron_command", "server_stats"]);
+/** Event types that name an agent only when they carry an id. */
+const LINKED = new Set(["log", "finding", "alert", "metric"]);
+/** Fields a returning agent's event takes from its kept record when it does not send them itself. */
+const RETURN_FIELDS = ["parent", "group", "tokens", "cost"];
+
+/**
+ * Events of kicked agents. Returns true to drop `ev`. Activity (lib/kick.ts) brings the agent back: its kept record
+ * returns to the snapshot, and the event carries the identity, team and tokens viewers no longer have. A remove, or
+ * a kick older than KICK_TTL_MS, ends the kick. Anything else only updates the kept record; a metric keeps its value
+ * but loses the agent link (it would add the agent again).
+ */
+function kickGate(ev: BridgeEvent): boolean {
+  if (!hub.kicked.size) return false;
+  const type = String(ev.type || "agent_update").toLowerCase();
+  if (NOT_AGENT.has(type) || (LINKED.has(type) && ev.id == null && ev.agent_id == null && ev.agent == null)) return false;
+  const id = idOf(ev);
+  const k = hub.kicked.get(id);
+  if (!k) return false;
+  if (type === "remove" || Date.now() - k.at > KICK_TTL_MS) {
+    hub.kicked.delete(id);
+    return false;
+  }
+  if (wakesUp(type, normStatus(ev.status ?? ev.state))) {
+    hub.kicked.delete(id);
+    hub.agents.set(id, { ...k.agent });
+    if (k.source) {
+      hub.sourceIdentity.set(id, { ...k.source });
+      for (const f of IDENTITY_FIELDS) if (ev[f] === undefined && k.source[f] !== undefined) ev[f] = k.source[f];
+    }
+    for (const f of RETURN_FIELDS) if (ev[f] === undefined && k.agent[f] !== undefined) ev[f] = k.agent[f];
+    return false;
+  }
+  if (type === "metric") {
+    for (const f of ["id", "agent_id", "agentId", "agent"]) delete ev[f];
+    return false;
+  }
+  if (type === "agent_update" || type === "task_done") k.agent = mergeAgent(k.agent, ev, type);
+  return true;
+}
+
+/** Known to the bridge: in the office, or kicked and waiting to come back. */
+export const agentKnown = (id: string): boolean => hub.agents.has(id) || hub.kicked.has(id);
+
+/**
+ * Handle {"type":"kick", "id"|"match"}. Only an idle or offline agent can be kicked (409 otherwise). Broadcasts
+ * {"type":"remove", "reason":"kick"}, so viewers launch it from the Airlock, and keeps its record for its return.
+ */
+export function kickAgent(ev: BridgeEvent): { status: number; body: Record<string, unknown> } {
+  const found = findAgent(ev.id, ev.match, "kick");
+  if (!("id" in found)) return { status: found.status, body: { ok: false, error: found.error, ...(found.candidates ? { candidates: found.candidates } : {}) } };
+  const id = found.id;
+  const a = hub.agents.get(id)!;
+  const status = normStatus(a.status ?? a.state) ?? "idle";
+  const name = identityOf(id).name;
+  if (!canKick(status)) return { status: 409, body: { ok: false, id, status, error: kickRefusal(name, status) } };
+  const kept: Kicked = { at: Date.now(), agent: { ...a }, source: hub.sourceIdentity.get(id) ?? null };
+  publish({ type: "remove", id, reason: "kick" });
+  for (const [k, v] of hub.kicked) if (kept.at - v.at > KICK_TTL_MS) hub.kicked.delete(k);
+  hub.kicked.set(id, kept);
+  persistHub();
+  return { status: 202, body: { ok: true, kicked: true, id, name, matchedBy: found.matchedBy } };
 }
 
 /** Mirror the client's pure planner so a manual meeting cannot claim an occupied automatic room. */
@@ -291,13 +371,13 @@ const notFound = (what: string): Found => ({
  * name (case-insensitive), then an id or session prefix ("ab12" matches "cc-ab12cd34"). A prefix shared by a
  * session and its subagents resolves to the main session; any other tie is ambiguous (409).
  */
-export function findAgent(id: unknown, match: unknown): Found {
+export function findAgent(id: unknown, match: unknown, what = "rename"): Found {
   if (id != null && id !== "") {
     const s = String(id);
     return hub.agents.has(s) ? { id: s, matchedBy: "id" } : notFound(`dengan id "${s}"`);
   }
   const m = typeof match === "string" || typeof match === "number" ? String(match).trim() : "";
-  if (!m) return { status: 400, error: 'rename butuh "id" atau "match"' };
+  if (!m) return { status: 400, error: `${what} butuh "id" atau "match"` };
   if (hub.agents.has(m)) return { id: m, matchedBy: "id" };
   const ids = [...hub.agents.keys()];
   const lower = m.toLowerCase();
@@ -383,6 +463,7 @@ export function resetHub(): void {
   hub.lastSeen.clear();
   hub.removeTimers.clear();
   hub.removals.clear();
+  hub.kicked.clear();
   hub.subs.clear();
   hub.sourceIdentity.clear();
   for (const wake of hub.cron.waiters) wake();
@@ -393,6 +474,11 @@ export function resetHub(): void {
 
 // Restore timers once per process, never once per route bundle/HMR. Expired agents must not enter snapshots.
 let expired = false;
+for (const [id, k] of hub.kicked) {
+  if (Date.now() - k.at <= KICK_TTL_MS) continue;
+  hub.kicked.delete(id);
+  expired = true;
+}
 for (const [id, removal] of hub.removals) {
   if (hub.removeTimers.has(id)) continue;
   if ((hub.lastSeen.get(id) || 0) > removal.mark + 50) {

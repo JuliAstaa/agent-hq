@@ -7,6 +7,7 @@ import { ago, fmtNum, fmtTime } from "@/lib/format";
 import { avatarColor, deskLessColor } from "@/lib/palette";
 import { MEETING_ROOMS } from "@/lib/meeting";
 import { renameAgent, type RenamePatch } from "@/lib/rename";
+import { canKick, kickAgent } from "@/lib/kick";
 import { hqStore, type Agent } from "@/lib/store";
 import { DEPTS, type Dept } from "@/lib/teams";
 import { Button, OFF, PILL, cn } from "./ui";
@@ -102,6 +103,15 @@ function AgentCard({ a, selected, now, onOpenChat, openingChatId }: {
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [editing, setEditing] = useState(false);
+  const [kicking, setKicking] = useState(false);
+  const kickable = canKick(a.status);
+  const kick = async () => {
+    setKicking(true);
+    const res = await kickAgent(hqStore, a.id);
+    // On success the card leaves the roster; keep the button busy until then.
+    if (!res.ok) setKicking(false);
+    hqStore.getState().showToast(res.ok ? `${a.name} dikeluarkan lewat Airlock. Kembali saat mulai kerja.` : res.error);
+  };
   useEffect(() => {
     if (selected) ref.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [selected]);
@@ -156,7 +166,21 @@ function AgentCard({ a, selected, now, onOpenChat, openingChatId }: {
       <div className="text-[11.5px] opacity-60 font-mono">
         {fmtNum(a.tokens)} token{a.cost != null ? " · $" + a.cost.toFixed(3) : ""} · {ago(a.updatedAt, now)}
       </div>
-      <div className="mt-2 flex justify-end">
+      {/* Kick on the left, chat on the right: the middle stays free, so a click there still selects the card. */}
+      <div className="mt-2 flex justify-between gap-[6px]">
+        <Button
+          size="log"
+          className={OFF}
+          aria-label={`Keluarkan ${a.name}`}
+          disabled={!kickable || kicking}
+          title={kickable ? "Antar agen ini ke Airlock dan lempar ke luar angkasa. Ia kembali sendiri saat mulai kerja." : "Hanya agen Santai atau Offline yang bisa dikeluarkan"}
+          onClick={(e) => {
+            e.stopPropagation();
+            void kick();
+          }}
+        >
+          {kicking ? "Mengeluarkan..." : "Keluarkan"}
+        </Button>
         <Button
           size="log"
           className={OFF}

@@ -3,7 +3,7 @@ import * as THREE from "three";
 import { describe, expect, it } from "vitest";
 import { ADJ, N, shortest } from "@/engine/nav/graph";
 import {
-  createBoardSlots, createDeskSlots, createSeats, createSpots, DOOR_HALF, ROOM_FRONT_Z, ROOM_RIGHT_X, ROOM_WALLS, ROOM_XS,
+  AIRLOCK, AIRLOCK_NODE, createAirlockSpots, createBoardSlots, createDeskSlots, createSeats, createSpots, DOOR_HALF, ROOM_FRONT_Z, ROOM_RIGHT_X, ROOM_WALLS, ROOM_XS,
   stationPlace, STATION_LAYOUT, TABLE_HALF_X, TABLE_HALF_Z, TABLE_Z, type Place,
 } from "@/engine/nav/places";
 import { atPlace, route } from "@/engine/nav/router";
@@ -217,5 +217,61 @@ describe("sliding doors (deviation 23)", () => {
     agent.set(ROOM_XS[1], F4 - 5.6, ROOM_FRONT_Z);
     stepDoors([room], [agent], 0.05);
     expect(room.door.open).toBeLessThan(0.05);
+  });
+});
+
+describe("Airlock (prd.md §7.10)", () => {
+  const airlock = createAirlockSpots();
+
+  it("three standing spots inside, facing the camera, reached through the inner door from node AL", () => {
+    expect(airlock).toHaveLength(3);
+    expect(ADJ[AIRLOCK_NODE]).toEqual(["M2"]);
+    expect(N[AIRLOCK_NODE].x).toBeLessThan(AIRLOCK.x0);
+    for (const s of airlock) {
+      expect(s.kind).toBe("airlock");
+      expect(s.floor).toBe(4);
+      expect(s.via[0]).toMatchObject({ x: AIRLOCK.x0 + 0.6, z: AIRLOCK.doorZ });
+      expect(s.final.x).toBeGreaterThan(AIRLOCK.x0);
+      expect(s.final.x).toBeLessThan(AIRLOCK.x1);
+      expect(s.final.z).toBeGreaterThan(AIRLOCK.z0);
+      expect(s.final.z).toBeLessThan(AIRLOCK.z1);
+    }
+  });
+
+  it("every desk, station, spot, board and seat has a route to every Airlock spot", () => {
+    for (const p of [...others, ...seats]) {
+      for (const s of airlock) expect(route(atPlace(p), s).at(-1)!.p.equals(s.final)).toBe(true);
+    }
+  });
+
+  it("no route to the Airlock crosses the lift tube, a glass wall, or the Airlock's own walls", () => {
+    const pad = 0.25;
+    const { x0, x1, z0, z1, doorZ, doorHalf } = AIRLOCK;
+    const inLift = (x: number, z: number) => Math.hypot(x - 6.8, z - 4.8) < 0.95 + 0.2; // glass tube radius 0.95
+    const inRoomGlass = (x: number, z: number) =>
+      (Math.abs(z - ROOM_FRONT_Z) < pad && x > -12.6 && x < ROOM_RIGHT_X + pad && !ROOM_XS.some((cx) => Math.abs(x - cx) < DOOR_HALF - 0.1)) ||
+      (z < ROOM_FRONT_Z + pad && [...ROOM_WALLS, ROOM_RIGHT_X].some((wx) => Math.abs(x - wx) < pad));
+    const inAirlockWall = (x: number, z: number) =>
+      (Math.abs(x - x0) < pad && z > z0 - pad && z < z1 + pad && Math.abs(z - doorZ) > doorHalf - 0.1) ||
+      (x > x0 - pad && x < x1 + pad && (Math.abs(z - z0) < pad || Math.abs(z - z1) < pad)) ||
+      (Math.abs(x - x1) < pad && z > z0 && z < z1);
+    const bad: string[] = [];
+    for (const p of [...others, ...seats]) {
+      for (const s of airlock) {
+        const r = route(atPlace(p), s);
+        for (let i = 1; i < r.length; i++) {
+          const a = r[i - 1].p, b = r[i].p;
+          if (Math.abs(a.y - F4) > 0.3 || Math.abs(b.y - F4) > 0.3) continue;
+          for (let k = 0; k <= 80; k++) {
+            const x = a.x + ((b.x - a.x) * k) / 80, z = a.z + ((b.z - a.z) * k) / 80;
+            // the lift: only its own exit segment (Lift4 -> X4) starts inside the tube
+            const lift = inLift(x, z) && !(r[i - 1].ref.t === "node" && (r[i - 1].ref as { id: string }).id === "Lift4");
+            const what = lift ? "lift" : inRoomGlass(x, z) ? "glass" : inAirlockWall(x, z) ? "airlock wall" : "";
+            if (what && bad.length < 10) bad.push(`${what}: ${p.final.toArray()} -> ${s.final.toArray()} at (${x.toFixed(2)}, ${z.toFixed(2)})`);
+          }
+        }
+      }
+    }
+    expect(bad).toEqual([]);
   });
 });

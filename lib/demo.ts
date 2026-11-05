@@ -75,6 +75,8 @@ export function createDemo(store: HQStore): Demo {
     const d = pick(DEMO);
     const a = S().agents.get(d.id);
     if (!a) {
+      // Kicked (prd.md §7.10): now and then it takes a new task and comes back to the office.
+      if (Math.random() < 0.3) apply({ id: d.id, name: d.name, role: d.role, status: "working", task: pick(d.tasks), progress: 0.05 });
       timer = setTimeout(tick, 1500);
       return;
     }

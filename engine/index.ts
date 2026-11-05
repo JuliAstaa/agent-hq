@@ -12,6 +12,7 @@ import { truncate } from "@/lib/format";
 import { ACT_LABEL, F2, F3, F4, INK, VIEW_ALL_3, VIEWS } from "./constants";
 import { animateAgent, type AgentRuntime, type AnimCtx } from "./agents/animate";
 import { buildAvatar } from "./agents/avatar";
+import { createEjector } from "./agents/eject";
 import { allowedQuirks, CHAT_REPLIES, chatLine, newFun, say, startQuirk, tickFun, type ChatSlots, type FunInfo, type Quirk } from "./agents/fun";
 import { floorOf, locText, newMovement, pickSpot, placeAt, releasePlaces, workTarget, type NavCtx } from "./agents/movement";
 import { drawArcade, drawBoard, drawEmptyDesk, drawPlate, drawScreen, drawTaskBoard, drawTV, drawWhiteboard, newWhiteboardEgg } from "./displays/office";
@@ -24,7 +25,7 @@ import { createFx } from "./fx";
 import { createSkyEvents, type SkyEventKind } from "./skyEvents";
 import { planMeteors, planPortal, type NdcRect, type PlaceCtx, type SkyZone } from "./skyPlacement";
 import { SFX_EVENT } from "@/lib/audio";
-import { createBoardSlots, createDeskSlots, createSeats, createSpots, type Place, type SeatPlace } from "./nav/places";
+import { createAirlockSpots, createBoardSlots, createDeskSlots, createSeats, createSpots, type Place, type SeatPlace } from "./nav/places";
 import { loadFonts, resolveFonts } from "./scene/fonts";
 import { createKit, createMaterials, V } from "./scene/kit";
 import { buildSky, makeSkyTexture } from "./scene/sky";
@@ -33,6 +34,7 @@ import { buildIslandAndFloor1Shell, buildFloor1Props } from "./world/floor1";
 import { buildFloor2Props, buildFloor2Shell, LIQUID_BASE, LIQUID_FULL } from "./world/floor2";
 import { buildFloor3 } from "./world/floor3";
 import { buildFloor4, flyCard, MEETING_IDLE, stepCards, stepDoors } from "./world/floor4";
+import { buildAirlock } from "./world/airlock";
 import { drawMeetingScreen, type MeetingScreenInfo } from "./displays/meeting";
 import { MEETING_ROOMS, SEATS_PER_ROOM } from "@/lib/meeting";
 import { DISCUSSION_LABEL, discussionActive, MEETING_OPEN_EVENT } from "@/lib/discussions";
@@ -67,6 +69,8 @@ export interface Engine {
     hideMeetingFloor: (hidden: boolean) => void;
     /** Whiteboard easter egg: write it now if someone is at the board, else at the next whiteboard session. */
     whiteboardEgg: () => void;
+    /** Kicked agents on their way out (prd.md §7.10): phase, seconds in it, floor, and the Airlock doors (0..1). */
+    ejects: () => { id: string; phase: string; t: number; floor: number; door: number; hatch: number }[];
     /** Open a chat balloon on agent `id` (random line for its context when `text` is omitted). */
     say: (id: string, text?: string) => boolean;
     /** Start a random action on agent `id` (any allowed one when `kind` is omitted). */
@@ -143,6 +147,7 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
   const seats = createSeats();
   const F4P = buildFloor4(b, g4, tentacles, fonts, seats);
   const seatProps = F4P.rooms.flatMap((r) => r.seats); // index = SeatPlace.index
+  const airlock = buildAirlock(b, g4, fonts); // kicked agents leave through it (prd.md §7.10)
   let meetingHidden = false; // tests only, see Engine.debug
   // The siren light stays in every pass (only its intensity changes per pass) so the light count, and
   // with it the compiled shader programs, never flips between passes.
@@ -234,6 +239,20 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
   });
   const agents = new Map<string, AgentRuntime>();
   let simTime = 0;
+  // Kicked agents (prd.md §7.10): their runtimes leave `agents` and walk to the Airlock, then out into space.
+  const ejector = createEjector({
+    world, kit, M, camera, airlock, spots: createAirlockSpots(),
+    smoke: fx.smoke,
+    sfx: (detail) => stage.dispatchEvent(new CustomEvent(SFX_EVENT, { bubbles: true, detail })),
+    dispose: (obj, rt) => {
+      world.remove(obj);
+      if (rt) {
+        rt.av.el.remove();
+        rt.av.chatLabel.element.remove();
+      }
+      disposeSubtree(obj);
+    },
+  });
 
   /* ---------------- agents ---------------- */
   const dirty = new Set<string>();
@@ -335,6 +354,21 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
     if (rt.desk) resetDesk(rt.desk);
     seatKeys.delete(id);
     agents.delete(id);
+  }
+
+  /** Kicked: free the desk and places like removeRuntime, then hand the avatar to the ejector (no dispose yet). */
+  function kickRuntime(id: string) {
+    const rt = agents.get(id);
+    if (!rt) return;
+    releasePlaces(rt);
+    if (rt.home.kind === "seat" && rt.home.occ === id) rt.home.occ = null;
+    if (rt.fun?.chat) chatSlots.open = Math.max(0, chatSlots.open - 1);
+    rt.fun = undefined;
+    if (rt.desk) resetDesk(rt.desk);
+    rt.desk = null;
+    seatKeys.delete(id);
+    agents.delete(id);
+    ejector.start(rt, meetingHidden);
   }
 
   function updateBubble(rt: AgentRuntime, a: Agent, selectedId: string | null) {
@@ -481,10 +515,14 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
   const onSignal = (s: Signal) => {
     switch (s.type) {
       case "add":
+        ejector.cancel(s.id); // back before its launch (prd.md §7.10)
         addRuntime(s.id);
         break;
       case "remove":
         removeRuntime(s.id);
+        break;
+      case "kick":
+        kickRuntime(s.id);
         break;
       case "squash": {
         const rt = agents.get(s.id);
@@ -673,6 +711,7 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
     refreshSchedule();
     refreshServer();
     F4P.sign.draw();
+    airlock.sign.draw();
     refreshMeetings();
   };
   loadFonts(fonts).then(() => {
@@ -891,6 +930,7 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
       stepTalk(ri, here, s, t);
     });
     stepCards(F4P.cards, dt);
+    ejector.update(dt, t, { floorMode: s.floorMode, meetingHidden });
     stepDoors(F4P.rooms, [...agents.values()].map((rt) => rt.root.position), dt);
     if (meetingDirty && g4.visible) refreshMeetings();
     const H = SEC.holo;
@@ -1031,6 +1071,7 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
     const last = floors[floors.length - 1];
     agentBand.clear();
     for (const rt of agents.values()) agentBand.set(rt.root, floorBand(rt.root.position.y));
+    for (const o of ejector.objects()) agentBand.set(o, floorBand(o.position.y));
     passVis.length = 0;
     for (const o of scene.children) if (o !== world && !(o as THREE.Light).isLight) passVis.push([o, o.visible]);
     for (const o of world.children) passVis.push([o, o.visible]);
@@ -1147,6 +1188,7 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
         SEC.liftLabel2.element.textContent = hidden ? "LIFT KE LT.3" : "LIFT KE LT.3 & 4";
         applyFloor(S().floorMode, false);
       },
+      ejects: () => ejector.state(),
       whiteboardEgg: () => {
         if (p2.wb.wasOn) p2.wb.egg = newWhiteboardEgg(0);
         else p2.wb.forceEgg = true;

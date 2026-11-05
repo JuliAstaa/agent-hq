@@ -13,6 +13,7 @@ import { inferDept, type Dept } from "./teams";
 import { emptyMeetingState, MEETING_LOG_ID, planMeetings, sameMeeting, sameRooms, type AgentMeeting, type MeetingRoom } from "./meeting";
 import { avatarColor } from "./palette";
 import { truncate } from "./format";
+import { wakesUp } from "./kick";
 import type { DiscussionSummary } from "./discussions";
 
 export type FloorMode = "all" | "1" | "2" | "3" | "4";
@@ -84,6 +85,8 @@ export interface Finding {
 export type Signal =
   | { type: "add"; id: string }
   | { type: "remove"; id: string }
+  /** Kicked (prd.md §7.10): the engine walks the avatar to the Airlock and launches it (instead of `remove`). */
+  | { type: "kick"; id: string }
   | { type: "squash"; id: string }
   | { type: "confetti"; id: string }
   | { type: "place"; id: string }
@@ -158,6 +161,8 @@ export function createHQStore(): HQStore {
   let toastSeq = 0;
   let serverAlarm = newServerAlarm();
   let meetingFull: string[] = [];
+  /** Agents kicked out of the office (lib/kick.ts): their events are ignored until one shows activity again. */
+  const kicked = new Set<string>();
 
   const emit = (s: Signal) => pending.push(s);
   const flush = () => {
@@ -229,13 +234,24 @@ export function createHQStore(): HQStore {
       return null;
     };
 
-    const removeInto = (d: Draft, id: string) => {
+    const removeInto = (d: Draft, id: string, kick = false) => {
       if (!d.agents.has(id)) return;
       d.agents.delete(id);
       d.touched.delete(id);
       d.pendingDesk.delete(id);
       if (d.selectedId === id) d.selectedId = null;
-      emit({ type: "remove", id });
+      emit({ type: kick ? "kick" : "remove", id });
+    };
+
+    /**
+     * Events of a kicked agent: activity brings it back (true = it is back), anything else is dropped (null).
+     * The live bridge filters these already; this covers demo mode. A snapshot is the bridge's truth.
+     */
+    const kickGate = (p: AgentPatch): boolean | null => {
+      if (!kicked.has(p.id)) return false;
+      if (!p.snap && !wakesUp(p.type, p.status)) return null;
+      kicked.delete(p.id);
+      return !p.snap;
     };
 
     /**
@@ -375,6 +391,9 @@ export function createHQStore(): HQStore {
         emit({ type: "server" });
         return;
       }
+      const agentPatch = e.kind === "agent" || e.kind === "alert" || e.kind === "finding" ? e.agent : null;
+      const back = agentPatch ? kickGate(agentPatch) : false;
+      if (back === null) return;
       const d = draft();
       if (e.kind === "cron_command") {
         const c = e.cmd;
@@ -412,10 +431,16 @@ export function createHQStore(): HQStore {
         emit({ type: "finding" });
         if (e.agent) applyAgent(d, e.agent);
       } else if (e.kind === "remove") {
-        removeInto(d, e.id);
+        const kick = e.kicked && d.agents.has(e.id);
+        if (kick) {
+          logInto(d, { id: e.id, level: "info", message: "Dikeluarkan lewat Airlock" });
+          kicked.add(e.id);
+        } else kicked.delete(e.id);
+        removeInto(d, e.id, kick);
       } else {
         applyAgent(d, e.agent);
       }
+      if (back && agentPatch) logInto(d, { id: agentPatch.id, level: "info", message: "Kembali ke kantor" });
       planInto(d, e.kind === "agent" && e.agent.quiet);
       commit(d);
     };
@@ -452,6 +477,7 @@ export function createHQStore(): HQStore {
 
       clearAgents: () => {
         set({ discussions: [] });
+        kicked.clear();
         const d = draft();
         for (const id of [...d.agents.keys()]) removeInto(d, id);
         d.stats = { done: 0, errors: 0 };

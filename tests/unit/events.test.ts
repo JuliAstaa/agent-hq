@@ -107,7 +107,11 @@ describe("log, task_done, remove, snapshot (§7.2)", () => {
     expect(agentOf({ type: "task_done", id: "coder-1", task: "T" })).toMatchObject({ type: "task_done", id: "coder-1", task: "T", status: null });
   });
   it("remove", () => {
-    expect(one({ type: "remove", id: "coder-1" })).toEqual({ kind: "remove", id: "coder-1" });
+    expect(one({ type: "remove", id: "coder-1" })).toEqual({ kind: "remove", id: "coder-1", kicked: false });
+  });
+  it("remove with reason kick (prd.md §7.10); a kick command is not an agent event", () => {
+    expect(one({ type: "remove", id: "coder-1", reason: "kick" })).toEqual({ kind: "remove", id: "coder-1", kicked: true });
+    expect(normalizeEvent({ type: "kick", id: "coder-1" })).toEqual([]);
   });
   it("snapshot -> quiet agent updates", () => {
     const out = normalizeEvent({ type: "snapshot", agents: [{ id: "a", status: "idle" }, { id: "b", name: "B", type: "log" }] }, NOW);

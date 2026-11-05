@@ -223,6 +223,54 @@ test.describe("visual parity with references/agent-hq.html", () => {
     expect(errors).toEqual([]);
   });
 
+  // Kick (prd.md §7.10): an idle agent at the floor-2 window is led by the escort drone to the Airlock on floor 4,
+  // waits behind the closed inner door, and is blown out of the hatch into space. Screenshots for manual review.
+  test("kick: escort to the Airlock and launch into space (manual review)", async ({ browser }) => {
+    const errors: string[] = [];
+    const next = await browser.newPage();
+    await open(next, "next", errors);
+    await emptyBuilding(next, "next");
+    await next.addStyleTag({ content: "[data-hq-ui]{display:none!important}" });
+    await next.evaluate(() => {
+      const hq = (window as any).agentHQ;
+      hq.applyEvent({ id: "zorp", name: "Zorp", role: "Researcher", status: "idle", task: "Menunggu prompt berikutnya" });
+      hq.placeAt("zorp", "winA");
+    });
+    await advance(next, 1);
+    await next.evaluate(() => (window as any).agentHQ.applyEvent({ type: "remove", id: "zorp", reason: "kick" }));
+    const ejects = () => next.evaluate(() => (window as any).agentHQ.engine.debug.ejects() as { id: string; phase: string; t: number; floor: number; door: number; hatch: number }[]);
+    expect(await next.evaluate(() => (window as any).agentHQ.store.getState().agents.has("zorp"))).toBe(false);
+    await advance(next, 1.2);
+    expect((await ejects()).map((e) => [e.id, e.phase, e.floor])).toEqual([["zorp", "walk", 2]]);
+    save("kick-1-escort-semua.png", await next.screenshot());
+    await showView(next, "4");
+    const until = async (ok: (e: { phase: string; t: number; hatch: number }) => boolean, max = 30) => {
+      for (let i = 0; i < max * 4; i++) {
+        const [e] = await ejects();
+        if (!e || ok(e)) return e;
+        await advance(next, 0.25);
+      }
+      throw new Error("kick sequence stalled: " + JSON.stringify(await ejects()));
+    };
+    await until((e) => e.phase === "wait" && e.t > 0.5);
+    const inside = (await ejects())[0];
+    expect(inside.floor).toBe(4);
+    expect(inside.door).toBeLessThan(0.5);
+    save("kick-2-airlock-lt4.png", await next.screenshot());
+    await until((e) => e.phase === "launch" && e.hatch > 0.8);
+    save("kick-3-hatch-lt4.png", await next.screenshot());
+    await until((e) => e.phase === "fly" && e.t > 0.5);
+    save("kick-4-space-lt4.png", await next.screenshot());
+    await until((e) => e.phase === "fly" && e.t > 1.6);
+    save("kick-5-space-lt4.png", await next.screenshot());
+    for (let i = 0; i < 40 && (await ejects()).length; i++) await advance(next, 0.25);
+    expect(await ejects()).toEqual([]);
+    // it comes back on its next task, with a fresh avatar at its desk
+    await next.evaluate(() => (window as any).agentHQ.applyEvent({ id: "zorp", name: "Zorp", status: "working", task: "Benchmark latency" }));
+    expect(await next.evaluate(() => (window as any).agentHQ.store.getState().agents.get("zorp")?.status)).toBe("working");
+    expect(errors).toEqual([]);
+  });
+
   test("2D UI: Semua and one selected agent (manual review)", async ({ browser }) => {
     const errors: string[] = [];
     const proto = await browser.newPage();

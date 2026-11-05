@@ -215,7 +215,7 @@ export function buildFloor4(b: Build, g4: THREE.Group, tentacles: THREE.Group[],
   sg.position.set(-12.55, F4 + 2.7, 4.6); sg.rotation.y = Math.PI / 2; g4.add(sg);
   boxAt(g4, 0.08, 0.92, 2.72, -12.6, F4 + 2.24, 4.6, M.dark, 0.03);
   alienPlant(b, tentacles, g4, -12.0, F4, 7.3, 0.8);
-  alienPlant(b, tentacles, g4, 12.2, F4, 7.3, 0.8);
+  alienPlant(b, tentacles, g4, 10.2, F4, 7.8, 0.8); // in front of the Airlock's door end: its glass and the lift stay clear (prd.md §7.10)
   ROOM_XS.forEach((cx, i) => roomLabel(b, g4, MEETING_ROOMS[i].toUpperCase(), cx, F4 + 0.2, 1.8, 4));
   roomLabel(b, g4, "LIFT", LIFT_X, F4 + 0.2, LIFT_Z + 1.6, 4);
 

@@ -50,7 +50,12 @@ export interface SeatPlace extends PlaceBase {
   /** roomIndex * SEATS_PER_ROOM + seat. */
   index: number;
 }
-export type Place = SpotPlace | DeskPlace | StationPlace | BoardPlace | SeatPlace;
+/** A standing spot inside the Airlock (prd.md §7.10). Only kicked agents go there (engine/agents/eject.ts). */
+export interface AirlockPlace extends PlaceBase {
+  kind: "airlock";
+  index: number;
+}
+export type Place = SpotPlace | DeskPlace | StationPlace | BoardPlace | SeatPlace | AirlockPlace;
 
 const PI = Math.PI;
 type XZ = [number, number];
@@ -208,4 +213,26 @@ export function createSeats(): SeatPlace[] {
     });
   });
   return out;
+}
+
+/* ---------------- floor 4: Airlock (prd.md §7.10) ---------------- */
+
+/**
+ * The Airlock in the front right corner of the meeting floor: the inner door on the corridor side (x0), the hatch
+ * to space on the building edge (x1), the back wall (z0) and a clear glass front (z1) so the camera sees inside.
+ * Both doors sit at `doorZ`. Kicked agents are walked in through the inner door and launched out of the hatch.
+ */
+export const AIRLOCK = { x0: 9.3, x1: 12.9, z0: 3.4, z1: 6.6, doorZ: 5.0, doorHalf: 0.7, hatchHalf: 0.8 } as const;
+/** Corridor node just outside the inner door (linked to M2). */
+export const AIRLOCK_NODE = "AL";
+/** Three standing spots side by side, facing the camera (a fourth kicked agent shares a spot). */
+const AIRLOCK_SPOTS_Z = [4.2, 5.0, 5.8];
+export const AIRLOCK_FACE = 0.55;
+
+export function createAirlockSpots(): AirlockPlace[] {
+  return AIRLOCK_SPOTS_Z.map((z, index) => ({
+    kind: "airlock", index, room: "Airlock", floor: 4, hub: AIRLOCK_NODE,
+    via: [new THREE.Vector3(AIRLOCK.x0 + 0.6, F4, AIRLOCK.doorZ)],
+    final: new THREE.Vector3(11.0, F4, z), face: AIRLOCK_FACE, occ: null,
+  }));
 }

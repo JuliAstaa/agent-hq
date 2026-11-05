@@ -41,10 +41,15 @@ export function eventUrlFor(streamUrl: string | null, base: string): string | nu
   return u.toString();
 }
 
+/** Event endpoint of the live bridge, or null in demo mode / without one (also used by lib/kick.ts). */
+export function liveEventUrl(st: { conn: { mode: string } }): string | null {
+  const base = typeof location === "undefined" ? "http://localhost/" : location.href;
+  return st.conn.mode === "live" ? eventUrlFor(liveUrlSource(), base) : null;
+}
+
 export async function renameAgent(store: StoreLike, id: string, patch: RenamePatch): Promise<RenameResult> {
   const st = store.getState();
-  const base = typeof location === "undefined" ? "http://localhost/" : location.href;
-  const url = st.conn.mode === "live" ? eventUrlFor(liveUrlSource(), base) : null;
+  const url = liveEventUrl(st);
   if (!url) {
     // Demo / no bridge: only this screen. A reset has nothing to go back to here, so it is skipped.
     const ev: Record<string, unknown> = { type: "agent_update", id };

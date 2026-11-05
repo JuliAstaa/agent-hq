@@ -239,3 +239,66 @@ describe("demo simulator", () => {
     vi.useRealTimers();
   });
 });
+
+describe("kick (prd.md §7.10)", () => {
+  it("a kick removes the agent with a kick signal (the engine launches it) and a log line", () => {
+    apply({ id: "a", name: "Zorp", status: "idle" });
+    S().select("a");
+    apply({ type: "remove", id: "a", reason: "kick" });
+    expect(S().agents.has("a")).toBe(false);
+    expect(S().selectedId).toBeNull();
+    expect(signals.at(-1)).toEqual({ type: "kick", id: "a" });
+    expect(signals.some((s) => s.type === "remove")).toBe(false);
+    expect(logMsgs().at(-1)).toBe("info|Zorp|Dikeluarkan lewat Airlock");
+  });
+
+  it("demo: idle updates and logs of a kicked agent are ignored; activity brings it back with a log line", () => {
+    apply({ id: "a", name: "Zorp", status: "idle" });
+    apply({ type: "remove", id: "a", reason: "kick" });
+    const before = S().logs.length;
+    apply({ id: "a", group: null });
+    apply({ id: "a", status: "idle", task: "santai" });
+    apply({ type: "log", id: "a", message: "halo" });
+    expect(S().agents.has("a")).toBe(false);
+    expect(S().logs).toHaveLength(before);
+    signals = [];
+    apply({ id: "a", name: "Zorp", status: "working", task: "Benchmark" });
+    expect(agent("a")).toMatchObject({ status: "working", task: "Benchmark" });
+    expect(signals[0]).toEqual({ type: "add", id: "a" });
+    expect(logMsgs().at(-1)).toBe("info|Zorp|Kembali ke kantor");
+    apply({ id: "a", status: "idle" });
+    expect(agent("a").status).toBe("idle"); // back to normal
+  });
+
+  it("a snapshot is the bridge's truth: it shows a kicked agent again; a reset forgets kicks", () => {
+    apply({ id: "a", status: "idle" });
+    apply({ type: "remove", id: "a", reason: "kick" });
+    apply({ type: "snapshot", agents: [{ id: "a", status: "idle" }] });
+    expect(S().agents.has("a")).toBe(true);
+    apply({ type: "remove", id: "a", reason: "kick" });
+    S().clearAgents();
+    apply({ id: "a", status: "idle" });
+    expect(S().agents.has("a")).toBe(true);
+  });
+
+  it("a plain remove of a kicked agent ends the kick", () => {
+    apply({ id: "a", status: "idle" });
+    apply({ type: "remove", id: "a", reason: "kick" });
+    apply({ type: "remove", id: "a" });
+    apply({ id: "a", status: "idle" });
+    expect(S().agents.has("a")).toBe(true);
+  });
+
+  it("demo: a kicked demo agent comes back with a new task", () => {
+    vi.useFakeTimers();
+    const demo = createDemo(store);
+    demo.start();
+    apply({ type: "remove", id: "plonk", reason: "kick" });
+    expect(S().agents.has("plonk")).toBe(false);
+    for (let s = 0; s < 600 && !S().agents.has("plonk"); s++) vi.advanceTimersByTime(1000);
+    expect(agent("plonk")).toMatchObject({ name: "Plonk", status: "working" });
+    expect(S().logs.some((l) => l.id === "plonk" && l.message === "Kembali ke kantor")).toBe(true);
+    demo.stop();
+    vi.useRealTimers();
+  });
+});

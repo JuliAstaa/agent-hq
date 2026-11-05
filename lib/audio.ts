@@ -11,7 +11,7 @@ export const BGM_URL = process.env.NEXT_PUBLIC_HQ_BGM || "/audio/agent-hq.mp3";
 /** DOM event the engine dispatches (bubbling) to play an effect: detail = { kind, pan?, intensity? }. */
 export const SFX_EVENT = "hq:sfx";
 
-export type SfxKind = "portal-open" | "portal-close" | "ship-pass" | "meteor";
+export type SfxKind = "portal-open" | "portal-close" | "ship-pass" | "meteor" | "airlock-alarm" | "airlock" | "twinkle";
 export interface SfxDetail {
   kind: SfxKind;
   /** Stereo position, -1 (left) .. 1 (right). */
@@ -325,6 +325,69 @@ const SYNTH: Record<SfxKind, (c: AudioContext, out: GainNode, pan: AudioParam | 
       s.stop(t + d + 0.1);
     }
     return d + 0.1;
+  },
+  // Airlock (prd.md §7.10): two-tone warning beeps while a kicked agent waits inside.
+  "airlock-alarm": (c, out) => {
+    const t = c.currentTime;
+    const o = c.createOscillator(), g = c.createGain();
+    o.type = "square";
+    g.gain.setValueAtTime(0, t);
+    for (let k = 0; k < 4; k++) {
+      const at = t + k * 0.3;
+      o.frequency.setValueAtTime(k % 2 ? 660 : 880, at);
+      g.gain.setValueAtTime(0.07, at);
+      g.gain.setValueAtTime(0, at + 0.2);
+    }
+    const lp = c.createBiquadFilter();
+    lp.type = "lowpass";
+    lp.frequency.value = 2200;
+    o.connect(lp).connect(g).connect(out);
+    o.start(t);
+    o.stop(t + 1.25);
+    return 1.25;
+  },
+  // The hatch blows open: a rushing hiss of air, and the agent's falling "wheee" as it tumbles away.
+  airlock: (c, out, pan) => {
+    const t = c.currentTime, d = 2.4;
+    const n = noiseSource(c), bp = c.createBiquadFilter(), ng = c.createGain();
+    bp.type = "bandpass";
+    bp.Q.value = 0.8;
+    bp.frequency.setValueAtTime(5000, t);
+    bp.frequency.exponentialRampToValueAtTime(400, t + d);
+    ng.gain.setValueAtTime(0.0001, t); // silent until the hatch opens
+    env(ng, t + 0.45, 0.3, 0.06, d);
+    n.connect(bp).connect(ng).connect(out);
+    const o = c.createOscillator(), og = c.createGain(), vib = c.createOscillator(), vg = c.createGain();
+    o.type = "triangle";
+    o.frequency.setValueAtTime(900, t + 0.6);
+    o.frequency.exponentialRampToValueAtTime(260, t + d);
+    vib.frequency.value = 11;
+    vg.gain.value = 30;
+    vib.connect(vg).connect(o.frequency);
+    og.gain.setValueAtTime(0.0001, t);
+    env(og, t + 0.6, 0.09, 0.15, d);
+    o.connect(og).connect(out);
+    drift(pan, t, d, 0.4);
+    for (const s of [n, o, vib]) {
+      s.start(t);
+      s.stop(t + d + 0.1);
+    }
+    return d + 0.1;
+  },
+  // A tiny sparkle where the agent disappears.
+  twinkle: (c, out) => {
+    const t = c.currentTime;
+    [1568, 2093, 2637].forEach((f, k) => {
+      const o = c.createOscillator(), g = c.createGain();
+      o.type = "sine";
+      o.frequency.value = f;
+      g.gain.setValueAtTime(0.0001, t);
+      env(g, t + k * 0.07, 0.06, 0.01, 0.35 + k * 0.07);
+      o.connect(g).connect(out);
+      o.start(t);
+      o.stop(t + 0.6);
+    });
+    return 0.6;
   },
 };
 

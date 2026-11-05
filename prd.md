@@ -123,6 +123,7 @@ All events are JSON objects. `id` identifies the agent. Unknown fields are ignor
 { "type": "remove", "id": "coder-1" }
 { "type": "snapshot", "agents": [ { ...agent_update fields } ] }
 ```
+A `remove` with `"reason": "kick"` comes from the bridge after a kick (§7.10).
 
 ### 7.3 Security events
 ```json
@@ -240,6 +241,22 @@ Idle members without an active subagent do their idle activities as usual. Offli
 
 **Later (not in M8):** `group` in `rename` (§7.4) and in the Hermes "Sesi baru" form; clicking a room screen; nesting subagents under their parent in the roster (M2).
 
+### 7.10 Kick an agent out (Airlock)
+```json
+{ "type": "kick", "id": "cc-ab12cd34" }
+{ "type": "kick", "match": "property-web#ab12" }
+```
+Requested by the user 2026-11-05. Sends an agent that is not working out of the office; it comes back by itself.
+
+- **Who.** Only an agent whose status is `idle` (Santai) or `offline`, for example a Hermes agent whose session was deleted outside the panel. `working`, `thinking`, `waiting` and `error` are refused with `409` (`"<name> berstatus <label>. Hanya agen Santai atau Offline yang bisa dikeluarkan."`). `id` must match exactly; `match` works like rename (§7.4: id, displayed name, id or session prefix). Unknown: `404`; neither given: `400`. Answer `202` `{ ok, kicked: true, id, name, matchedBy }`; in an array, results are listed under `kicks`. `HQ_TOKEN` applies as for every `/event`.
+- **Broadcast.** The bridge publishes `{ "type": "remove", "id": ..., "reason": "kick" }`. Viewers drop the agent from the roster at once (log line `Dikeluarkan lewat Airlock`); older clients just see a remove. The bridge keeps the agent's last record and its own identity (`lib/bridge/hub.ts` `hub.kicked`, saved in the restart snapshot).
+- **Held back.** `publish()` filters every event of a kicked agent, so no path (hooks, `/event`, Hermes chat) can bypass it. Events that show no activity (status `idle` or `offline`, `task_done`, token counts, logs, idle prompts, session starts) are not broadcast and do not add the agent back; agent updates still refresh the kept record (tokens). A `metric` keeps its value but loses the agent link.
+- **Coming back.** A status of `thinking`, `working`, `waiting` or `error`, or a `finding` or `alert`, ends the kick: the kept record returns to the snapshot and the event goes out with the name, role, team, `parent`, `group`, tokens and cost the agent had (renames still apply). Viewers add it as a new agent (log line `Kembali ke kantor`). A `remove` (for example 5 minutes after `SessionEnd`, or deleting the Hermes session) also ends the kick; so does age: a kick older than 7 days is forgotten.
+- **Roster.** Every card has **Keluarkan** next to **Buka chat**, enabled only for Santai and Offline (tooltip otherwise: `Hanya agen Santai atau Offline yang bisa dikeluarkan`). No confirmation dialog: a kick is not permanent. Toast `<name> dikeluarkan lewat Airlock. Kembali saat mulai kerja.`; errors (409, `HQ_TOKEN`, a bridge without kicks such as `examples/server.js`) are shown as a toast. Demo mode kicks on that screen only; a kicked demo agent comes back with a new task after a while.
+- **Airlock (floor 4).** A small metal room in the corridor's front right corner (x 9.3 to 12.9, z 3.4 to 6.6): a sliding inner door from the corridor (node `AL`, next to `M2`), a clear glass front so the camera sees inside, sign `AIRLOCK / PINTU KE LUAR ANGKASA` on the back wall, three standing rings, a beacon, and a hatch on the building edge that swings out to space. The corridor plant on that side moved to the front edge, clear of the glass and the lift.
+- **Sequence** (`engine/agents/eject.ts`). The engine takes over the kicked avatar (its desk, station or seat is freed at once): a small escort drone with a tractor beam leads it along the normal routes to the Airlock (bubble `· diantar ke Airlock`), head down. Inside, the inner door shuts, the beacon and floor lights flash red and an alarm beeps; the agent panics. Then the hatch bursts open, the air rushes out, and the agent is pulled through, tumbling up and away into space while it shrinks, and twinkles out. The drone flies off. Sounds: `airlock-alarm`, `airlock`, `twinkle` (Web Audio, `lib/audio.ts`). Several kicked agents share the Airlock and leave together once the door is shut. If the agent comes back while still flying, it gets a new avatar at its desk.
+- **Views.** Best seen in Semua and Lt.4; in Lt.1 to Lt.3 the agent disappears from view when it goes above the shown floor, like any agent. Without the meeting floor (`engine.debug.hideMeetingFloor`, visual parity tests) a kicked agent vanishes in a puff.
+
 ## 8. Claude Code integration
 
 ### 8.1 Mechanism
@@ -332,9 +349,10 @@ Stations face the back wall so the camera sees agents and their monitors over th
 |---|---|
 | Meeting A, B, C | Side by side along the back wall, enclosed like ordinary office meeting rooms: frosted glass walls 2.6 high on the corridor, between the rooms and on Meeting C's open side (dense film with three etched lines near the top), in slim light frames at the floor, the top, the corners and the doors only; the panes hide the outlines of what is behind them; a sliding frosted door in the middle of each front wall opens while an agent is at it (every route in and out goes through it). Seated agents stay visible from the camera over the frosted part. Table with five seats and laptops (head seat at the back facing the camera, two per side), room screen on the back wall, accent strip in the team color, rug per room |
 | Corridor | In front of the rooms, from the lift. Sign `MEETING` on the left wall, alien plants |
+| Airlock (§7.10) | Front right corner: metal room with a sliding inner door from the corridor, clear glass front, sign `AIRLOCK`, beacon, hatch to space on the building edge. Kicked agents leave the office through it |
 | Lift | Top stop of the glass tube. Pink rings only at floor level: the ring at the top of the floor-3 tube is hidden while floor 4 is shown, so none floats between the floors |
 
-Labels: `MEETING A`, `MEETING B`, `MEETING C`, `LIFT`.
+Labels: `MEETING A`, `MEETING B`, `MEETING C`, `LIFT`, `AIRLOCK`.
 
 ## 10. Agent behavior
 
@@ -505,6 +523,14 @@ Decisions:
 - [x] Floor 2 "Ruang Rapat" renamed "Ruang Kreatif" (label and roster).
 - [x] Demo: Glimbo delegates, Plonk and Vexa share `Rilis v2.3`.
 - [x] Tests (`tests/unit/meeting.test.ts`, `tests/unit/meeting-nav.test.ts`, parity and Hermes integration, `tests/e2e/visual.spec.ts` "meeting floor", `tests/e2e/ui.spec.ts`): normalization and hooks (`parent`, `group`, snapshot); store (team key, meeting start and end, room order, head seat, idle leader stays, idle group member leaves, rooms full, more than five members, desk-less subagent, seat freed on remove, meeting before station); nav (every desk, station and spot to every seat and back through the lift, no wall crossing); parity ignores `parent` and `group`; visual: the four prototype views with floor 4 hidden, a new Lt.4 baseline, a meeting placed via `window.agentHQ` for manual review; the floor switcher fits at 360 px; dispose frees floor 4.
+
+### M9. Kick (§7.10)
+- [x] Rules shared by bridge and store (`lib/kick.ts`): who may be kicked, what brings an agent back.
+- [x] Bridge: `{"type":"kick"}` on `/event`, filter in `publish()`, kept record restored on return, kicks in the restart snapshot, Hermes chat treats a kicked agent as known (`agentKnown`).
+- [x] Store: `remove` with `reason: "kick"` emits the `kick` signal; demo-mode filter; demo agents come back.
+- [x] Engine: Airlock on floor 4 (`engine/world/airlock.ts`), node `AL`, escort drone, launch and flight (`engine/agents/eject.ts`), sounds.
+- [x] Roster button **Keluarkan** (`components/AgentCard.tsx`).
+- [x] Tests: `tests/unit/kick.test.ts` (rules, bridge filter and return, route, client), `tests/unit/store.test.ts`, `tests/unit/meeting-nav.test.ts` (routes to the Airlock without crossing walls), `tests/unit/persistence.test.ts` (restart), `tests/e2e/visual.spec.ts` "kick" (manual review screenshots), `tests/e2e/ui.spec.ts` "kick from the roster".
 
 ### M5. Polish
 - [ ] Follow-cam toggle for the selected agent.

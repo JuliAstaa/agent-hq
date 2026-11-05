@@ -105,7 +105,8 @@ export type HQEvent =
   | { kind: "metric"; name: string; value: number; login: boolean }
   | { kind: "alert"; agentId: string | null; sev: Severity; text: string; ip: string; replay: boolean; agent: AgentPatch | null }
   | { kind: "finding"; agentId: string | null; sev: Severity; title: string; node: AttackNode; agent: AgentPatch | null }
-  | { kind: "remove"; id: string }
+  /** `kicked`: the agent was kicked (reason "kick", prd.md §7.10): the office launches it from the Airlock. */
+  | { kind: "remove"; id: string; kicked: boolean }
   | { kind: "agent"; agent: AgentPatch }
   /** Scheduled jobs snapshot (Hermes cron). Never an agent. */
   | { kind: "schedule"; cron: Omit<CronState, "receivedAt">; ageMs: number }
@@ -218,6 +219,8 @@ export function normalizeEvent(input: unknown, now = Date.now()): HQEvent[] {
       agent: agentId == null ? null : agentPatch(ev, type, id, now),
     }];
   }
-  if (type === "remove") return [{ kind: "remove", id }];
+  if (type === "remove") return [{ kind: "remove", id, kicked: ev.reason === "kick" }];
+  // A kick command is answered by the bridge with a remove (reason "kick"); it never describes an agent.
+  if (type === "kick") return [];
   return [{ kind: "agent", agent: agentPatch(ev, type, id, now) }];
 }

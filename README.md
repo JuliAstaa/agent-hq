@@ -20,6 +20,7 @@ Spesifikasi lengkap ada di `prd.md`. README ini panduan pakainya.
 10. [Masalah umum](#10-masalah-umum)
 11. [Untuk developer](#11-untuk-developer)
 12. [Musik, efek suara, dan event langit](#12-musik-efek-suara-dan-event-langit)
+13. [Mengeluarkan agen (kick)](#13-mengeluarkan-agen-kick)
 
 ## 1. Menjalankan
 
@@ -317,7 +318,7 @@ Semua URL tersedia dalam dua bentuk: dengan awalan `/api` dan tanpa (sama sepert
 
 | Endpoint | Fungsi |
 |---|---|
-| `POST /api/event` atau `/event` | kirim event (bagian 7) dan rename (bagian 3) |
+| `POST /api/event` atau `/event` | kirim event (bagian 7), rename (bagian 3), dan kick (bagian 13) |
 | `POST /api/hook` atau `/hook` | dipakai hooks Claude Code |
 | `GET /api/stream` atau `/stream` | aliran data (SSE) untuk halaman kantor |
 | `GET /api/agents` atau `/agents` | daftar agen |
@@ -434,3 +435,28 @@ agentHQ.engine.debug.skyZones("portal")      // dari sudut kamera sekarang, zona
 
 Desain portal, pesawat, dan meteor ada di `engine/skyEvents.ts`, aturan penempatannya di
 `engine/skyPlacement.ts`, suara dan kontrolnya di `lib/audio.ts` dan `components/AudioControl.tsx`.
+
+## 13. Mengeluarkan agen (kick)
+
+Agen yang sedang **Santai** atau **Offline** bisa dikeluarkan dari kantor, misalnya agen Hermes yang sesinya sudah
+dihapus. Klik **Keluarkan** di kartu Daftar Agen, tanpa dialog konfirmasi. Tombolnya mati untuk agen yang sedang
+Kerja, Mikir, Butuh kamu, atau Error, dan bridge juga menolaknya.
+
+Agen langsung hilang dari Daftar Agen. Di kantor, drone pengantar menuntunnya ke **Airlock** di pojok depan kanan
+Lt.4. Setelah pintu dalam tertutup, alarm berbunyi, pintu luar terbuka, dan agen terlempar ke luar angkasa. Paling
+jelas dilihat di tampilan Semua atau Lt.4.
+
+Agen kembali sendiri begitu ada aktivitas lagi (status Mikir, Kerja, Butuh kamu, atau Error, juga temuan atau alert),
+lengkap dengan nama, peran, tim, dan token terakhirnya. Event santai, offline, hitungan token, dan log tidak
+memunculkannya. Kick tetap berlaku setelah server di-restart, dan berakhir saat agen dihapus (`remove`) atau setelah
+7 hari.
+
+```bash
+curl -s -X POST http://127.0.0.1:8787/event -H 'content-type: application/json' \
+  -d '{"type":"kick","match":"property-web#ab12"}'
+```
+
+- Balasan `202` berisi `"kicked": true`. `409` kalau agen sedang bekerja, `404` kalau tidak ditemukan.
+- Kalau bridge memakai `HQ_TOKEN`, tombol di kartu ditolak, jadi pakai curl dengan token.
+- Di mode demo, kick hanya berlaku di layar itu; agen demo kembali sendiri dengan tugas baru.
+- Belum tersedia di `examples/server.js`.

@@ -19,7 +19,7 @@ import { sseFrames } from "../sse";
 import { DEPTS, normalizeTeam } from "../teams";
 import { authorized } from "./auth";
 import { crossSite } from "./cron";
-import { hub, publish, renameAgent } from "./hub";
+import { agentKnown, hub, publish, renameAgent } from "./hub";
 import { MAX_IDENTITY_LEN, saveOverrides } from "./overrides";
 import { redact, trunc } from "./redact";
 import {
@@ -334,7 +334,7 @@ function showAgent(sessionId: string, title: string, who?: ChatAgentInput): { id
   const id = hermesAgentId(sessionId);
   const ev: Record<string, unknown> = { type: "agent_update", id, status: "idle", task: trunc(`Sesi chat: ${displayTitle(title) || "baru"}`, 140) };
   if (who) Object.assign(ev, { name: who.name, role: who.role, team: who.team });
-  else if (!hub.agents.has(id)) Object.assign(ev, DEFAULT_CHAT_AGENT);
+  else if (!agentKnown(id)) Object.assign(ev, DEFAULT_CHAT_AGENT);
   publish(ev);
   if (!who) return { id, error: "" };
   const r = renameAgent({ type: "rename", id, name: who.name, role: who.role, team: who.team === "office" ? null : who.team });
@@ -344,14 +344,14 @@ function showAgent(sessionId: string, title: string, who?: ChatAgentInput): { id
 /** The open session's character leaves the office. */
 function hideAgent(ctx: ChatRuntime = chat.current): void {
   const id = ctx.view.agentId;
-  if (id && hub.agents.has(id)) publish({ type: "remove", id });
+  if (id && agentKnown(id)) publish({ type: "remove", id });
 }
 
 /** Status of the open session's character (Agent HQ shows the chat even without the Hermes hook). */
 function agentSays(fields: Record<string, unknown>, ctx: ChatRuntime = chat.current): void {
   const id = ctx.view.agentId;
   if (!id) return;
-  publish({ type: "agent_update", id, ...(hub.agents.has(id) ? {} : DEFAULT_CHAT_AGENT), ...fields });
+  publish({ type: "agent_update", id, ...(agentKnown(id) ? {} : DEFAULT_CHAT_AGENT), ...fields });
 }
 
 /**
@@ -532,7 +532,7 @@ function switchTo(s: { id: string; title: string }, items: ChatItem[], opts: { w
   const cached = chat.sessions.get(s.id);
   if (cached) {
     chat.current = cached;
-    if (cached.view.phase === "idle" && !hub.agents.has(hermesAgentId(s.id))) showAgent(s.id, cached.view.title);
+    if (cached.view.phase === "idle" && !agentKnown(hermesAgentId(s.id))) showAgent(s.id, cached.view.title);
     emitSnapshot();
     return;
   }
@@ -675,7 +675,7 @@ function followSession(v: unknown, ctx: ChatRuntime = chat.current): void {
   chat.sessions.delete(prev);
   chat.sessions.set(next, ctx);
   hideAgent(ctx);
-  publish({ type: "agent_update", id: to, ...(hub.agents.has(to) ? {} : DEFAULT_CHAT_AGENT), status: was?.status ?? "working", task: was?.task ?? "" });
+  publish({ type: "agent_update", id: to, ...(agentKnown(to) ? {} : DEFAULT_CHAT_AGENT), status: was?.status ?? "working", task: was?.task ?? "" });
   setState({ sessionId: next, agentId: to }, ctx);
 }
 
@@ -992,7 +992,7 @@ export async function meetingSession(id: string): Promise<ChatRuntime> {
   if (!isObj(s) || s.source !== "api_server") throw new HermesError("Peserta harus sesi Hermes API server", 409);
   const ctx = newRuntime();
   const aid = hermesAgentId(id);
-  if (!hub.agents.has(aid)) showAgent(id, str(s.title));
+  if (!agentKnown(aid)) showAgent(id, str(s.title));
   ctx.view = { ...emptyChatView(), sessionId: id, title: str(s.title), agentId: aid, model: chat.prefs.get(id)?.model ?? null, items: await loadHistory(id) };
   // A simultaneous request may have finished loading this session while the history was fetched.
   const existing = chat.sessions.get(id);
@@ -1086,7 +1086,7 @@ export async function deleteSession(sessionId: unknown): Promise<Reply> {
       chat.view.model = model;
       chat.resumed = Promise.resolve();
       emitSnapshot();
-    } else if (hub.agents.has(agentId)) publish({ type: "remove", id: agentId });
+    } else if (agentKnown(agentId)) publish({ type: "remove", id: agentId });
     chat.sessions.delete(id);
     if (hub.overrides.delete(agentId)) {
       try {

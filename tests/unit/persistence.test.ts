@@ -56,6 +56,36 @@ describe("bridge restart snapshots", () => {
     expect(h.hub.recent.at(-1)).toMatchObject({ type: "alert" });
   });
 
+  it("keeps a kicked agent out after a restart; activity brings it back with its name and tokens (prd.md §7.10)", async () => {
+    let h = await restart();
+    h.publish({ id: "a", name: "A", role: "Coder", status: "idle", tokens: 100 });
+    expect(h.kickAgent({ type: "kick", id: "a" }).status).toBe(202);
+    h = await restart();
+    expect(h.hub.agents.has("a")).toBe(false);
+    expect(h.hub.kicked.get("a")).toMatchObject({ agent: { id: "a", tokens: 100 }, source: { name: "A", role: "Coder" } });
+    const sent: Record<string, unknown>[] = [];
+    h.hub.subs.add((ev) => sent.push(ev));
+    h.publish({ id: "a", status: "idle" });
+    expect(sent).toEqual([]);
+    h.publish({ id: "a", status: "working" });
+    expect(sent[0]).toMatchObject({ id: "a", name: "A", role: "Coder", tokens: 100, status: "working" });
+    h = await restart();
+    expect(h.hub.kicked.size).toBe(0);
+    expect(h.hub.agents.get("a")).toMatchObject({ name: "A", status: "working" });
+  });
+
+  it("drops kicks older than a week when it starts", async () => {
+    const h0 = await restart();
+    h0.publish({ id: "a", status: "idle" });
+    h0.kickAgent({ type: "kick", id: "a" });
+    const raw = JSON.parse(fs.readFileSync(file, "utf8"));
+    raw.kicked[0][1].at = Date.now() - 8 * 24 * 3600 * 1000;
+    fs.writeFileSync(file, JSON.stringify(raw));
+    const h = await restart();
+    expect(h.hub.kicked.size).toBe(0);
+    expect(loadSnapshot(file)?.kicked).toEqual([]);
+  });
+
   it("keeps rename overrides and the original identity when a rename is cleared after restart", async () => {
     let h = await restart();
     h.publish({ id: "a", name: "Asli", role: "Coder", status: "idle" });
