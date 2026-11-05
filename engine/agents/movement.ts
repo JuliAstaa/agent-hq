@@ -1,5 +1,5 @@
 // Where an agent goes and how it walks there (prd.md §10.1, §10.3).
-// Port of pickSpot/reserve/placeAt/workTarget/goTo/startActivity/arrive/updateNav/floorOf/locText.
+// Port of pickSpot/reserve/placeAt/workTarget/goTo/startActivity/arrive/updateNav/locText (floorOf is zoneOf since deviation 29).
 // Works on a plain Object3D + movement state, so it can be unit-tested without WebGL.
 
 import type * as THREE from "three";
@@ -8,6 +8,8 @@ import { lerpAngle, pick, rand } from "../scene/kit";
 import { atPlace, route, type Ref, type Waypoint } from "../nav/router";
 import type { BoardPlace, DeskPlace, Place, SeatPlace, SpotPlace, StationPlace } from "../nav/places";
 import { DEPTS, type Dept } from "@/lib/teams";
+import { ZONE_LABEL, type ZoneId } from "@/lib/zones";
+import { zoneAt } from "../layout";
 import type { Status } from "@/lib/events";
 
 /** Task pickup at the board (deviation 14): the card leaves the board at GRAB, the agent heads off at DONE. */
@@ -146,8 +148,8 @@ export function goTo(ctx: NavCtx, m: Mover, dest: Place, urgent = false) {
   const where =
     dest.kind === "board" ? "ambil tugas di papan" :
     dest.kind === "desk" ? (mv.carrying ? "bawa tugas ke meja" : "balik ke meja") :
-    dest.kind === "station" || dest.kind === "seat" ? `${mv.carrying ? "bawa tugas " : ""}ke ${dest.room} (Lt.${dest.floor})` :
-    `jalan ke ${dest.room} (Lt.${dest.floor})`;
+    dest.kind === "station" || dest.kind === "seat" ? `${mv.carrying ? "bawa tugas " : ""}ke ${dest.room}` :
+    `jalan ke ${dest.room}`;
   ctx.log(m.id, urgent ? `Buru-buru ${where}` : `Jalan santai, ${where.replace("jalan ke ", "ke ")}`);
   ctx.changed(m);
 }
@@ -259,33 +261,34 @@ export function updateNav(ctx: NavCtx, m: Mover, a: NavAgent, dt: number) {
 /** Release every place this agent holds (called when the agent is removed). */
 export function releasePlaces(m: Mover) {
   // Fix B1 (approved 2026-11-03): the prototype's removeAgent() only freed spots, so a removed agent kept its
-  // floor-3 station reserved forever. An agent only ever holds its current destination (reserve() releases the
+  // team station reserved forever. An agent only ever holds its current destination (reserve() releases the
   // previous one), including while still walking there, so freeing every non-desk destination is enough.
   const d = m.mv.dest;
   if (d.kind !== "desk" && d.occ === m.id) d.occ = null;
 }
 
-export function floorOf(m: { root: THREE.Object3D } | null): number {
-  return m ? floorAtY(m.root.position.y) : 2;
+/** Area the agent is in (single-floor layout, deviation 29; was floorOf). */
+export function zoneOf(m: { root: THREE.Object3D } | null): ZoneId {
+  if (!m) return "kantor";
+  return zoneAt(m.root.position.x, m.root.position.z);
 }
 
-/** Floor number at height `y` (world group coordinates). */
-export const floorAtY = (y: number): number => (y > 14 ? 4 : y > 8.4 ? 3 : y > 2.8 ? 2 : 1);
-
-/** Roster location chip. `team`: the meeting's team name (Agent.meeting.team), for "rapat <team>". */
+/** Roster location chip. `team`: the meeting's team name (Agent.meeting.team), for "rapat <team>". The room name
+ *  says where; the area is added where the room name alone does not ("Meja kerja · Kantor"), and stands alone while
+ *  walking. */
 export function locText(m: Mover | null, team?: string): { where: string; what: string } {
   if (!m) return { where: "Tanpa meja", what: "" };
   const mv = m.mv;
-  const fl = `Lt.${floorOf(m)}`;
+  const area = ZONE_LABEL[zoneOf(m)];
   if (mv.mode === "desk") {
-    if (mv.dest.kind === "seat") return { where: `${mv.dest.room} · ${fl}`, what: team ? `rapat ${team}` : "rapat" };
-    return mv.dest.kind === "station" ? { where: `${mv.dest.room} · ${fl}`, what: DEPTS[mv.dest.dept].label } : { where: `Meja kerja · ${fl}`, what: "" };
+    if (mv.dest.kind === "seat") return { where: mv.dest.room, what: team ? `rapat ${team}` : "rapat" };
+    return mv.dest.kind === "station" ? { where: mv.dest.room, what: DEPTS[mv.dest.dept].label } : { where: `Meja kerja · ${area}`, what: "" };
   }
-  if (mv.mode === "fetch") return { where: `Papan Tugas · ${fl}`, what: "ambil tugas" };
+  if (mv.mode === "fetch") return { where: `Papan Tugas · ${area}`, what: "ambil tugas" };
   if (mv.mode === "walk") {
-    if (mv.dest.kind === "board") return { where: fl, what: "jalan ke Papan Tugas" };
-    if (mv.carrying) return { where: fl, what: mv.dest.kind === "station" || mv.dest.kind === "seat" ? `bawa tugas ke ${mv.dest.room}` : "bawa tugas ke meja" };
-    return { where: fl, what: mv.dest.kind === "desk" ? "jalan balik ke meja" : `jalan ke ${mv.dest.room}` };
+    if (mv.dest.kind === "board") return { where: area, what: "jalan ke Papan Tugas" };
+    if (mv.carrying) return { where: area, what: mv.dest.kind === "station" || mv.dest.kind === "seat" ? `bawa tugas ke ${mv.dest.room}` : "bawa tugas ke meja" };
+    return { where: area, what: mv.dest.kind === "desk" ? "jalan balik ke meja" : `jalan ke ${mv.dest.room}` };
   }
-  return { where: `${mv.dest.room} · ${fl}`, what: (mv.activity && ACT_LABEL[mv.activity]) || "santai" };
+  return { where: `${mv.dest.room} · ${area}`, what: (mv.activity && ACT_LABEL[mv.activity]) || "santai" };
 }

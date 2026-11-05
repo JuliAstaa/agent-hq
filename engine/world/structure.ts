@@ -3,10 +3,11 @@
 import * as THREE from "three";
 import { CSS2DObject } from "three/addons/renderers/CSS2DRenderer.js";
 import { canvasTex, mesh, noLine, rbox, V, type Kit, type Materials } from "../scene/kit";
+import type { ZoneId } from "@/lib/zones";
 
 export interface RoomLabel {
   o: CSS2DObject;
-  floor: number;
+  zone: ZoneId;
 }
 
 export interface Build {
@@ -17,14 +18,14 @@ export interface Build {
   looseTextures: THREE.Texture[];
 }
 
-export function roomLabel(b: Build, parent: THREE.Object3D, text: string, x: number, y: number, z: number, floor: number) {
+export function roomLabel(b: Build, parent: THREE.Object3D, text: string, x: number, y: number, z: number, zone: ZoneId) {
   const el = document.createElement("div");
   el.className = "room";
   el.textContent = text;
   const o = new CSS2DObject(el);
   o.position.set(x, y, z);
   parent.add(o);
-  b.roomLabels.push({ o, floor });
+  b.roomLabels.push({ o, zone });
   return o;
 }
 

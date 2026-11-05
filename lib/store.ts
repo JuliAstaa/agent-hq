@@ -15,11 +15,13 @@ import { avatarColor } from "./palette";
 import { truncate } from "./format";
 import { wakesUp } from "./kick";
 import type { DiscussionSummary } from "./discussions";
+import type { FloorMode } from "./zones";
 
-export type FloorMode = "all" | "1" | "2" | "3" | "4";
+/** Area view (single-floor layout, deviation 29): "all" or an area. Kept under its old name. */
+export type { FloorMode };
 export type ConnMode = "demo" | "live" | "down";
 
-export const DESK_SLOTS = 9; // 3 x 3 desks on floor 2 (deviation 17; the prototype had 12)
+export const DESK_SLOTS = 9; // 3 x 3 desks in the office (deviation 17; the prototype had 12)
 export const MAX_LOG_LINES = 220;
 export const MAX_AGENT_EVENTS = 60;
 export const MAX_CRON_CMDS = 12;
@@ -43,7 +45,7 @@ export interface Agent {
   progress: number | null;
   updatedAt: number;
   events: AgentEvent[];
-  /** Desk index 0..8; null = no desk: a subagent seated on the meeting floor, or roster only (no avatar). */
+  /** Desk index 0..8; null = no desk: a subagent seated in a meeting room, or roster only (no avatar). */
   slot: number | null;
   /** Delegating agent (prd.md §7.9). */
   parent: string | null;
@@ -255,7 +257,7 @@ export function createHQStore(): HQStore {
     };
 
     /**
-     * Meeting floor (prd.md §7.9): recompute teams, rooms and seats after every agent change. A new subagent takes a
+     * Meeting rooms (prd.md §7.9): recompute teams, rooms and seats after every agent change. A new subagent takes a
      * desk only when it gets no seat. In a snapshot (quiet) members are placed at their seats right away.
      */
     const planInto = (d: Draft, quiet: boolean) => {
@@ -290,7 +292,7 @@ export function createHQStore(): HQStore {
       const id = p.id;
       const isNew = !d.agents.has(id);
       if (isNew) {
-        // A subagent waits for the meeting plan (planInto): a seat on the meeting floor, else a desk.
+        // A subagent waits for the meeting plan (planInto): a meeting seat, else a desk.
         const sub = !!p.parent;
         const slot = sub ? null : freeSlot(d);
         d.agents.set(id, {

@@ -38,13 +38,13 @@ test("2D UI wiring", async ({ page }) => {
   await expect(pill).toHaveText("Mode demo");
   await expect(page.locator(".agent")).toHaveCount(DEMO.length);
   await expect(page.locator('[data-hq-ui="roster"] header')).toContainText(String(DEMO.length));
-  await expect(page.locator('[data-hq-ui="log"]')).toContainText("Mode demo aktif. Klik agen untuk zoom, pilih lantai di atas.");
+  await expect(page.locator('[data-hq-ui="log"]')).toContainText("Mode demo aktif. Klik agen untuk zoom, pilih area di atas.");
 
-  // Floor switcher drives the store (and the engine).
-  await page.getByRole("button", { name: "Lt.3 Security" }).click();
-  expect(await page.evaluate(() => (window as any).agentHQ.store.getState().floorMode)).toBe("3");
-  await page.getByRole("button", { name: "Lt.4 Meeting" }).click(); // meeting floor (prd.md §7.9)
-  expect(await page.evaluate(() => (window as any).agentHQ.store.getState().floorMode)).toBe("4");
+  // Area switcher drives the store (and the engine). Single-floor layout, deviation 29.
+  await page.getByRole("button", { name: "Security", exact: true }).click();
+  expect(await page.evaluate(() => (window as any).agentHQ.store.getState().floorMode)).toBe("security");
+  await page.getByRole("button", { name: "Meeting", exact: true }).click(); // meeting rooms (prd.md §7.9)
+  expect(await page.evaluate(() => (window as any).agentHQ.store.getState().floorMode)).toBe("meeting");
   await page.getByRole("button", { name: "⌂" }).click();
   expect(await page.evaluate(() => (window as any).agentHQ.store.getState().floorMode)).toBe("all");
 
@@ -83,7 +83,7 @@ test("2D UI wiring", async ({ page }) => {
   expect(errors).toEqual([]);
 });
 
-// Server panel (plan-m1.md deviation 21): a click on the server room opens it in the Lt.2 view while samples come in.
+// Server panel (plan-m1.md deviation 21): a click on the server room opens it while samples come in.
 test("server room click opens the Server panel", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
@@ -102,15 +102,12 @@ test("server room click opens the Server panel", async ({ page }) => {
     uptime_s: 86400, app_rss: 200 * 1024 ** 2,
   }));
   await page.waitForFunction(() => !!(window as any).agentHQ?.store.getState().server, null, { timeout: 20_000 });
-  await page.evaluate(() => (window as any).agentHQ.setFloor("2"));
+  await page.evaluate(() => (window as any).agentHQ.setFloor("server"));
   await page.waitForFunction(() => (window as any).agentHQ.controls.enabled, null, { timeout: 60_000 }); // camera fly done
-  // Look at the server room and find the front of the left rack (x 5.9, z -6.9, 1.2 deep) on screen.
+  // Find the front of the CPU rack (deviation 29: x 19.4, back tier y 2.4, z -16.4, 1.2 deep) on screen.
   const rack = await page.evaluate(() => {
-    const { camera, controls } = (window as any).agentHQ;
-    controls.target.set(6.9, 8.0, -6.2);
-    camera.position.set(12.4, 10.2, 2.3);
-    controls.update();
-    const v = camera.position.clone().set(5.9, 5.6 + 1.6, -6.3).project(camera);
+    const { camera } = (window as any).agentHQ;
+    const v = camera.position.clone().set(19.4, 2.4 + 1.6, -15.75).project(camera);
     return { x: ((v.x + 1) / 2) * window.innerWidth, y: ((1 - v.y) / 2) * window.innerHeight };
   });
   const canvas = page.locator(".hq-stage canvas").first();
@@ -147,13 +144,13 @@ test("server room click opens the Server panel", async ({ page }) => {
   expect(errors).toEqual([]);
 });
 
-// Meeting floor (prd.md §7.9): five floor buttons still fit on a 360 px wide phone, without sideways scrolling.
+// Area switcher (deviation 29): six buttons still fit on a 360 px wide phone, without sideways scrolling.
 test("floor switcher fits at 360 px", async ({ page }) => {
   await page.setViewportSize({ width: 360, height: 740 });
   await blockExternal(page);
   await page.goto("/");
   const buttons = page.locator("button[data-f]");
-  await expect(buttons).toHaveCount(5);
+  await expect(buttons).toHaveCount(6);
   await expect(buttons.first()).toBeVisible();
   for (const b of await buttons.all()) {
     const box = (await b.boundingBox())!;

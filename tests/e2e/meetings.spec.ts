@@ -41,12 +41,13 @@ test("monitor opens a discussion, create two real agents, see their shared chat,
   page.on("pageerror", (e) => errors.push(e.message));
   await blockExternal(page); await page.goto(base);
   await page.waitForFunction(() => !!window.agentHQ);
-  await page.getByRole("button", { name: "Lt.4 Meeting", exact: true }).click();
+  await page.getByRole("button", { name: "Meeting", exact: true }).click();
   await page.waitForFunction(() => !!window.agentHQ?.controls.enabled);
   const screen = await page.evaluate(() => {
     const { camera, controls } = window.agentHQ!;
-    controls.target.set(-8.5, 19.4, -7.4); camera.position.set(-7.5, 21.4, 7.5); controls.update(); camera.updateMatrixWorld(true);
-    const point = camera.position.clone().set(-8.5, 19.7, -7.41).project(camera);
+    // Meeting A's screen on the back wall of the back tier (deviation 29): x 1.0, y 2.4 + 2.9, z -19.61.
+    controls.target.set(1.0, 5.0, -19.6); camera.position.set(2.0, 7.0, -5.7); controls.update(); camera.updateMatrixWorld(true);
+    const point = camera.position.clone().set(1.0, 5.3, -19.61).project(camera);
     return { x: (point.x + 1) * innerWidth / 2, y: (1 - point.y) * innerHeight / 2 };
   });
   await page.mouse.move(screen.x, screen.y);
@@ -94,7 +95,7 @@ test("monitor opens a discussion, create two real agents, see their shared chat,
   expect(calls).toHaveLength(3);
   expect(calls[1].body).toMatchObject({ message: expect.stringContaining(`Pendapat ${fake.sessions[0].id}`) });
   await page.reload();
-  await page.getByRole("button", { name: "Lt.4 Meeting", exact: true }).click();
+  await page.getByRole("button", { name: "Meeting", exact: true }).click();
   await page.getByRole("navigation", { name: "Buka ruang meeting" }).getByRole("button", { name: "Meeting A", exact: true }).click();
   await expect(panel.getByText("Kesimpulan · Arsitek rapat", { exact: true })).toBeVisible();
   await panel.getByRole("button", { name: "Rapat baru", exact: true }).click();
@@ -140,7 +141,7 @@ test("manual meeting agents remain seated across speaking turns instead of visit
   });
   for (const status of ["idle", "thinking", "working", "idle", "thinking", "working"]) {
     await page.evaluate((status) => window.agentHQ!.applyEvent({ id: "nav-speaker", status }), status);
-    await expect.poll(() => page.evaluate(() => window.agentHQ!.store.getState().agents.get("nav-speaker")?.loc?.where)).toBe("Meeting C · Lt.4");
+    await expect.poll(() => page.evaluate(() => window.agentHQ!.store.getState().agents.get("nav-speaker")?.loc?.where)).toBe("Meeting C");
     // Give the animation loop time to observe each status, including the idle -> thinking transition.
     await page.waitForTimeout(300);
     expect(await page.evaluate(() => window.agentHQ!.store.getState().logs.some((l) => l.id === "nav-speaker" && l.message.includes("ambil tugas di papan")))).toBe(false);

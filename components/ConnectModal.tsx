@@ -17,7 +17,7 @@ const FORMAT = `{ "type": "agent_update",
 { "type": "snapshot", "agents": [ ...agent_update tanpa type... ] }
 { "type": "remove", "id": "coder-1" }
 
-// Lt.3 Security (opsional "team": "red" | "report" | "blue")
+// Security dan Ruang Server (opsional "team": "red" | "report" | "blue" | "ops")
 { "type": "finding", "id": "rexx", "severity": "high",
   "title": "SQL injection di /login" }
 { "type": "alert", "id": "sentra", "severity": "high",
@@ -25,7 +25,7 @@ const FORMAT = `{ "type": "agent_update",
 { "type": "metric", "name": "failed_logins", "value": 37 }
 
 Agen berstatus idle akan jalan sendiri ke area santai
-(Lt.1 / Lt.2) dan balik ke meja saat status berubah.`;
+(Santai / Kantor) dan balik ke meja saat status berubah.`;
 
 export default function ConnectModal({
   open,

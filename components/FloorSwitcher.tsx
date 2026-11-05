@@ -2,15 +2,11 @@
 
 import { useStore } from "zustand";
 import { hqStore, type FloorMode } from "@/lib/store";
+import { ZONE_LABEL, ZONES } from "@/lib/zones";
 import { Button, CARD, cn } from "./ui";
 
-const FLOORS: [FloorMode, string][] = [
-  ["all", "Semua"],
-  ["4", "Lt.4 Meeting"],
-  ["3", "Lt.3 Security"],
-  ["2", "Lt.2 Kantor"],
-  ["1", "Lt.1 Santai"],
-];
+// Area views of the single-floor office (deviation 29), front tier to back tier. Were floor buttons (Lt.1 - Lt.4).
+const FLOORS: [FloorMode, string][] = [["all", "Semua"], ...ZONES.map((z): [FloorMode, string] => [z, ZONE_LABEL[z]])];
 
 export default function FloorSwitcher() {
   const floorMode = useStore(hqStore, (s) => s.floorMode);

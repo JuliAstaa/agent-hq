@@ -1,6 +1,6 @@
 // Kick an agent out of the office (prd.md §7.10). Rules shared by the bridge (lib/bridge/hub.ts) and the client
 // store, plus the roster action. Only an agent that is not working can be kicked: idle (Santai) or offline, for
-// example a Hermes agent whose session was deleted. The office walks it to the Airlock on floor 4 and launches it
+// example a Hermes agent whose session was deleted. The office walks it to the Airlock (front tier) and launches it
 // into space. It comes back by itself once it shows activity again; idle updates, token counts and logs keep it out.
 
 import { STATUS, type Status } from "./events";

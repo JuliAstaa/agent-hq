@@ -1,29 +1,34 @@
 // Team (department) keywords and inference, ported from references/agent-hq.html (prd.md §10.2).
 // Shared by the client store and tests. No DOM, no three.js.
 
-export type Dept = "red" | "report" | "blue";
+export type Dept = "red" | "report" | "blue" | "ops";
 
-export const DEPT_KEYS = ["red", "blue", "report"] as const satisfies readonly Dept[];
+export const DEPT_KEYS = ["red", "blue", "report", "ops"] as const satisfies readonly Dept[];
 
 export const DEPTS: Record<Dept, { label: string; room: string; color: string }> = {
   red: { label: "Red Team", room: "Red Team Lab", color: "#ff4f5e" },
   report: { label: "Laporan VA", room: "Ruang Laporan", color: "#ffd23f" },
   blue: { label: "Blue Team", room: "SOC Blue Team", color: "#59c3ff" },
+  // Server room stations (deviation 29). Not in the prototype.
+  ops: { label: "DevOps", room: "Ruang Server", color: "#3fe0c5" },
 };
 
 export const DEPT_RX: Record<Dept, RegExp> = {
   red: /pentest|penetration|red ?team|exploit|recon|nmap|sqlmap|burp|payload|privesc|privilege escalation|\bxss\b|sql ?injection|\bsqli\b|\bidor\b|enumera|metasploit|subdomain|port ?scan|scan port|uji penetrasi|\buji\b[^.]{0,20}brute/i,
   blue: /brute ?force|\bsiem\b|\bsoc\b|blue ?team|deteksi|detect|fail2ban|\bids\b|\bwaf\b|threat hunt|incident|insiden|login gagal|failed login|wazuh|suricata|blokir ip|block ip/i,
   report: /\blaporan\b|\breport(ing)?\b|vulnerability assessment|\bva\b|cvss|temuan|executive summary|remediasi|remediation|\bpoc\b/i,
+  // Checked last: security keywords win ("nginx" alone is not enough, log hunting is SOC work).
+  ops: /dev ?ops|\bsre\b|docker|kubectl|kubernetes|\bk8s\b|\bhelm\b|terraform|ansible|systemctl|rolling deploy|deploy ke|deploy to|rollout|worker_processes|sertifikat tls|tls cert|ruang server|server room|infrastruktur|infrastructure/i,
 };
 
-// Insertion order matters: matches Object.keys(DEPT_RX) in the prototype (red, blue, report).
-const DEPT_RX_ORDER: Dept[] = ["red", "blue", "report"];
+// Insertion order matters: matches Object.keys(DEPT_RX) in the prototype (red, blue, report), then ops (deviation 29).
+const DEPT_RX_ORDER: Dept[] = ["red", "blue", "report", "ops"];
 
 export const TEAM_ALIAS: Record<string, Dept | null> = {
   red: "red", redteam: "red", red_team: "red", pentest: "red", offensive: "red",
   report: "report", reporting: "report", laporan: "report", va: "report",
   blue: "blue", blueteam: "blue", blue_team: "blue", soc: "blue", defense: "blue",
+  ops: "ops", devops: "ops", dev_ops: "ops", sre: "ops", infra: "ops", server: "ops",
   office: null, kantor: null, none: null,
 };
 

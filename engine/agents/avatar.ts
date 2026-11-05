@@ -50,8 +50,6 @@ export interface Avatar {
   smokeT: number;
   /** Spawn pop-in progress 0..1; undefined once done. */
   spawn?: number;
-  /** Floor number currently shown in the bubble badge. */
-  badgeFloor?: number;
   /** Chat balloon above the status bubble (fun.ts). `chatEl` holds the text; `chatOn` mirrors its shown state. */
   chatLabel: CSS2DObject;
   chatEl: HTMLDivElement;
@@ -195,7 +193,7 @@ export function buildAvatar(kit: Kit, M: Materials, id: string, onClick: () => v
   // bubble (static markup; agent strings are set with textContent)
   const el = document.createElement("div");
   el.className = "bubble";
-  el.innerHTML = '<span class="ic"></span><span class="fl">Lt.1</span><span class="tx"><span class="nm"></span> <span class="tt"></span></span>';
+  el.innerHTML = '<span class="ic"></span><span class="tx"><span class="nm"></span> <span class="tt"></span></span>';
   el.style.pointerEvents = "auto";
   el.style.cursor = "pointer";
   el.addEventListener("click", onClick);

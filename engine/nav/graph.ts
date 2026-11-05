@@ -1,9 +1,10 @@
-// Waypoint graph per floor plus vertical links (stairs F1->F2, lift F2->F3->F4) and Dijkstra (prd.md §10.3).
-// Pure module data: node vectors are never mutated.
+// Waypoint graph of the terraced single-floor office (deviation 29) and Dijkstra (prd.md §10.3).
+// Each tier has a street along it; stairs climb the risers between the tiers; the office keeps its walkway grid
+// (deviation 18). Pure module data: node vectors are never mutated.
 
 import * as THREE from "three";
-import { F2, F3, F4 } from "../constants";
-import { AIRLOCK, AIRLOCK_NODE, BOARD_X, CORRIDOR_Z, DESK_GAPS, DESK_ROWS, DESK_XS, officeNode, ROOM_XS, roomNode } from "./places";
+import { STAIRS, STAIR_DEPTH, STREET_B, STREET_F, STREET_M, T0, T1, T2 } from "../layout";
+import { AIRLOCK, AIRLOCK_NODE, BOARD_X, DESK_GAPS, DESK_ROWS, DESK_XS, OFFICE_RIGHT_X, officeNode, ROOM_XS, roomNode, SERVER_DOOR_X } from "./places";
 
 export const N: Record<string, THREE.Vector3> = {};
 export const ADJ: Record<string, string[]> = {};
@@ -16,58 +17,73 @@ function link(a: string, b: string) {
   ADJ[a].push(b);
   ADJ[b].push(a);
 }
+/** Link a row of nodes in order of x. */
+function chain(ids: string[]) {
+  const s = [...ids].sort((p, q) => N[p].x - N[q].x);
+  for (let i = 1; i < s.length; i++) link(s[i - 1], s[i]);
+}
 
-node("H1", 1.0, 0, 2.6); node("LH", -4.6, 0, -1.2); node("PH", 1.0, 0, -1.6); node("GH", 7.2, 0, -1.6); node("NH", -7.4, 0, 2.2);
-node("L1a", 8.4, 0, 7.4); node("Land1", 11.25, 0, 7.4); node("SB", 11.25, 0.15, 6.7); node("ST", 11.25, F2 + 0.15, -0.3);
-node("Top2", 11.25, F2, -1.4); node("HL", 7.2, F2, 0.0);
-node("K1", 3.6, F2, -6.6); node("K2", 3.6, F2, -3.0); node("K3", 3.6, F2, 0.6); node("K4", 3.6, F2, 4.0);
-node("Kf1", -4.4, F2, 4.0); node("Kf2", -9.0, F2, 4.0);
-node("Lift2a", 5.4, F2, 4.0); node("Lift2", 6.8, F2, 4.8); node("Lift3", 6.8, F3, 4.8); node("X3", 5.4, F3, 4.0);
-node("RPH", 0, F3, 2.2); node("RH", -4.9, F3, 2.2); node("BH", 8.3, F3, 2.4);
-// Floor 4 meeting rooms (prd.md §7.9): the lift continues up; a corridor runs past the three room entrances.
-node("Lift4", 6.8, F4, 4.8); node("X4", 5.4, F4, 4.0);
-ROOM_XS.forEach((x, i) => node(roomNode(i), x, F4, CORRIDOR_Z));
-// Airlock (prd.md §7.10): from the corridor in front of Meeting C straight to its inner door (clear of the lift).
-node(AIRLOCK_NODE, ROOM_XS[2], F4, AIRLOCK.doorZ);
-(
-  [
-    ["H1", "LH"], ["H1", "PH"], ["H1", "GH"], ["H1", "NH"], ["H1", "L1a"], ["LH", "PH"], ["LH", "NH"], ["PH", "GH"],
-    ["L1a", "Land1"], ["Land1", "SB"], ["SB", "ST"], ["ST", "Top2"], ["Top2", "HL"], ["HL", "K3"],
-    ["K1", "K2"], ["K2", "K3"], ["K3", "K4"],
-    ["K4", "Lift2a"], ["HL", "Lift2a"], ["Lift2a", "Lift2"], ["Lift2", "Lift3"], ["Lift3", "X3"], ["X3", "BH"], ["X3", "RPH"], ["RPH", "RH"],
-    ["Lift3", "Lift4"], ["Lift4", "X4"], ["X4", "M1"], ["X4", "M2"], ["M0", "M1"], ["M1", "M2"], ["M2", AIRLOCK_NODE],
-  ] as const
-).forEach(([a, b]) => link(a, b));
+/* Front tier (Santai): the street in front of the lounge, pantry and game room; hubs of the rooms on it. */
+const front: [string, number][] = [["NH", -22.4], ["LH", -20.2], ["FA:s", -14.6], ["PH", -8.6], ["H1", 4.4], ["GH", 10.2], ["TE", 24.0]];
+for (const [id, x] of front) node(id, x, T0, STREET_F);
+chain(front.map(([id]) => id));
+// Airlock (prd.md §7.10): from the Teras hub across the deck to just outside its inner door.
+node(AIRLOCK_NODE, AIRLOCK.x0 - 1.0, T0, AIRLOCK.doorZ);
+link("TE", AIRLOCK_NODE);
 
-/* Floor-2 office grid (deviation 18). Each aisle is a row of nodes from the left wall walkway (back and middle aisles
-   only: the partition at z 4.4 closes it off at the front) through every desk column and desk gap to the K column on
-   the right; the front aisle also threads the meeting-room and reading-corner hubs (Kf2, Kf1). Cross links run
-   through the desk gaps (between all aisles) and along the left walkway (back aisle to the front of the board). */
-{
-  const [A, B, C] = DESK_ROWS.map((r) => r.aisle);
-  const right: Record<number, string> = { [A]: "K2", [B]: "K3", [C]: "K4" };
-  for (const z of [A, B, C]) {
-    const pts: [number, string][] = [];
-    const xs = [...DESK_XS, ...DESK_GAPS, ...(z === C ? [] : [BOARD_X])];
-    for (const x of xs) {
-      node(officeNode(z, x), x, F2, z);
-      pts.push([x, officeNode(z, x)]);
-    }
-    if (z === C) pts.push([N.Kf2.x, "Kf2"], [N.Kf1.x, "Kf1"]);
-    pts.push([N[right[z]].x, right[z]]);
-    pts.sort((p, q) => p[0] - q[0]);
-    for (let i = 1; i < pts.length; i++) link(pts[i - 1][1], pts[i][1]);
+/* Middle tier (Kantor). Office grid (deviation 18): each aisle is a row of nodes from the left wall walkway (BOARD_X,
+   back and middle aisles) through every desk column and desk gap to the right-hand walkway (K2, K3, K4). The front
+   aisle is the street of the middle tier: it runs on past Ruang Kreatif, Pojok Baca and the garden. */
+const [A, B, C] = DESK_ROWS.map((r) => r.aisle);
+const right: Record<number, string> = { [A]: "K2", [B]: "K3", [C]: "K4" };
+for (const z of [A, B, C]) node(right[z], OFFICE_RIGHT_X, T1, z);
+const mid: [string, number][] = [["MK", -7.6], ["MB", -1.2], ["SB:m", 4.4], ["MT", 13.0], ["SC:m", 23.2]];
+for (const [id, x] of mid) node(id, x, T1, STREET_M);
+for (const z of [A, B, C]) {
+  const ids: string[] = [];
+  for (const x of [...DESK_XS, ...DESK_GAPS, ...(z === C ? [] : [BOARD_X])]) {
+    node(officeNode(z, x), x, T1, z);
+    ids.push(officeNode(z, x));
   }
-  for (const x of DESK_GAPS) {
-    link(officeNode(A, x), officeNode(B, x));
-    link(officeNode(B, x), officeNode(C, x));
-  }
-  link(officeNode(A, BOARD_X), officeNode(B, BOARD_X));
-  // In front of the task board: the left walkway continues to z 3.4 (clear of the front desk at x -10.95 and of the
-  // meeting-room partition at z 4.4), then meets the front aisle at the first desk column.
-  node("BoardFront", BOARD_X, F2, 3.4);
-  link(officeNode(B, BOARD_X), "BoardFront");
-  link("BoardFront", officeNode(C, DESK_XS[0]));
+  ids.push(right[z]);
+  if (z === C) ids.push(...mid.map(([id]) => id));
+  chain(ids);
+}
+link("K2", "K3");
+link("K3", "K4");
+for (const x of DESK_GAPS) {
+  link(officeNode(A, x), officeNode(B, x));
+  link(officeNode(B, x), officeNode(C, x));
+}
+link(officeNode(A, BOARD_X), officeNode(B, BOARD_X));
+// In front of the task board: the left walkway continues to the street, then meets the front aisle at the first desk
+// column.
+node("BoardFront", BOARD_X, T1, STREET_M);
+link(officeNode(B, BOARD_X), "BoardFront");
+link("BoardFront", officeNode(C, DESK_XS[0]));
+
+/* Back tier: one street past the Security rooms, the three meeting room doors and the server room door. */
+const back: [string, number][] = [["RH", -20.7], ["RPH", -15.8], ["SA:s", -11.8], ["BH", -7.5], ...ROOM_XS.map((x, i): [string, number] => [roomNode(i), x]), ["SB:s", 4.4], ["SD", SERVER_DOOR_X]];
+for (const [id, x] of back) node(id, x, T2, STREET_B);
+chain(back.map(([id]) => id));
+
+/* Stairs: bottom (on the lower tier, just in front of the first step) and top (just over the riser), each linked to
+   the street or walkway it serves. */
+const stairEnds: Record<string, [string, string]> = {
+  SA: ["K2", "SA:s"],
+  SB: ["SB:m", "SB:s"],
+  SC: ["SC:m", "SD"],
+  FA: ["FA:s", officeNode(C, DESK_XS[2])],
+  FB: ["H1", "SB:m"],
+};
+for (const s of STAIRS) {
+  const lo = `${s.id}:0`, hi = `${s.id}:1`;
+  node(lo, s.x, s.lo, s.riserZ + STAIR_DEPTH + 0.3);
+  node(hi, s.x, s.hi, s.riserZ - 0.1);
+  link(lo, hi);
+  const [below, above] = stairEnds[s.id];
+  link(below, lo);
+  link(hi, above);
 }
 
 /** Dijkstra shortest path between two node ids. Unreachable -> [a]. */

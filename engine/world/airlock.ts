@@ -1,9 +1,11 @@
-// Airlock on the meeting floor (prd.md §7.10): a small metal room in the corridor's front right corner. Kicked agents
-// come in through a sliding inner door on the corridor side; a hatch on the building edge swings out to space.
+// Airlock (prd.md §7.10): a small metal room in the front right corner of the Santai tier, between the vending
+// machines and the Teras. Kicked agents come in through a sliding inner door on its left side; a hatch on the
+// island's right edge swings out to space.
 // Clear glass at the front so the camera sees inside; a beacon and floor lights turn red while a launch runs.
 
 import * as THREE from "three";
-import { F4, INK } from "../constants";
+import { INK } from "../constants";
+import { T0 } from "../layout";
 import type { Fonts } from "../scene/fonts";
 import { boxAt, canvasTex, mesh, noLine, rbox, thin, type CanvasTex } from "../scene/kit";
 import { AIRLOCK, createAirlockSpots } from "../nav/places";
@@ -43,7 +45,7 @@ function hazard(): CanvasTex {
   return t;
 }
 
-export function buildAirlock(b: Build, g4: THREE.Group, fonts: Fonts): AirlockProp {
+export function buildAirlock(b: Build, g: THREE.Group, fonts: Fonts): AirlockProp {
   const { M } = b;
   const { toon, flat } = b.kit;
   const { x0, x1, z0, z1, doorZ, doorHalf, hatchHalf } = AIRLOCK;
@@ -73,11 +75,11 @@ export function buildAirlock(b: Build, g4: THREE.Group, fonts: Fonts): AirlockPr
     c.setLineDash([]);
   }
   const fl = mesh(new THREE.PlaneGeometry(w, d), noLine(toon("#ffffff", { map: ft.tex })), false, true);
-  fl.rotation.x = -Math.PI / 2; fl.position.set(cx, F4 + 0.016, (z0 + z1) / 2); g4.add(fl);
+  fl.rotation.x = -Math.PI / 2; fl.position.set(cx, T0 + 0.016, (z0 + z1) / 2); g.add(fl);
 
   // back wall with the sign on its inner face
-  boxAt(g4, w + 0.2, BACK_H, 0.22, cx, F4, z0, wallM, 0.05);
-  boxAt(g4, w + 0.34, 0.14, 0.36, cx, F4 + BACK_H, z0, M.dark, 0.04);
+  boxAt(g, w + 0.2, BACK_H, 0.22, cx, T0, z0, wallM, 0.05);
+  boxAt(g, w + 0.34, 0.14, 0.36, cx, T0 + BACK_H, z0, M.dark, 0.04);
   const sign = canvasTex(360, 100) as AirlockProp["sign"];
   sign.draw = () => {
     const c = sign.ctx;
@@ -88,17 +90,17 @@ export function buildAirlock(b: Build, g4: THREE.Group, fonts: Fonts): AirlockPr
     sign.tex.needsUpdate = true;
   };
   const sg = mesh(new THREE.PlaneGeometry(2.3, 0.64), noLine(flat("#ffffff", { map: sign.tex })), false, false);
-  sg.position.set(cx - 0.2, F4 + 2.75, z0 + 0.12); g4.add(sg);
-  boxAt(g4, 2.42, 0.76, 0.06, cx - 0.2, F4 + 2.37, z0 + 0.09, M.dark, 0.02, false);
+  sg.position.set(cx - 0.2, T0 + 2.75, z0 + 0.12); g.add(sg);
+  boxAt(g, 2.42, 0.76, 0.06, cx - 0.2, T0 + 2.37, z0 + 0.09, M.dark, 0.02, false);
 
   // inner wall on the corridor side, with the sliding door
   const seg = (x: number, a0: number, a1: number, y0: number, h: number) => {
-    if (a1 - a0 > 0.01) boxAt(g4, 0.2, h, a1 - a0, x, y0, (a0 + a1) / 2, wallM, 0.04);
+    if (a1 - a0 > 0.01) boxAt(g, 0.2, h, a1 - a0, x, y0, (a0 + a1) / 2, wallM, 0.04);
   };
-  seg(x0, z0, doorZ - doorHalf, F4, WALL_H);
-  seg(x0, doorZ + doorHalf, z1, F4, WALL_H);
-  seg(x0, doorZ - doorHalf, doorZ + doorHalf, F4 + DOOR_H, WALL_H - DOOR_H);
-  const door = new THREE.Group(); door.position.set(x0 + 0.14, F4, doorZ); g4.add(door);
+  seg(x0, z0, doorZ - doorHalf, T0, WALL_H);
+  seg(x0, doorZ + doorHalf, z1, T0, WALL_H);
+  seg(x0, doorZ - doorHalf, doorZ + doorHalf, T0 + DOOR_H, WALL_H - DOOR_H);
+  const door = new THREE.Group(); door.position.set(x0 + 0.14, T0, doorZ); g.add(door);
   const leaf = new THREE.Group(); door.add(leaf);
   leaf.add(mesh(rbox(0.07, DOOR_H - 0.05, doorHalf * 2, 0.02), plateM).translateY(0.02 + (DOOR_H - 0.05) / 2));
   leaf.add(mesh(new THREE.BoxGeometry(0.08, 0.14, doorHalf * 2 - 0.1), noLine(flat("#ff6fd8")), false, false).translateY(1.2));
@@ -106,20 +108,20 @@ export function buildAirlock(b: Build, g4: THREE.Group, fonts: Fonts): AirlockPr
   // clear glass front in a slim frame
   const glassM = noLine(toon("#bfe9ff", { transparent: true, opacity: 0.2, depthWrite: false, side: THREE.DoubleSide }));
   const glass = mesh(new THREE.BoxGeometry(w, WALL_H - 0.12, 0.04), glassM, false, false);
-  glass.position.set(cx, F4 + 0.07 + (WALL_H - 0.12) / 2, z1); g4.add(glass);
+  glass.position.set(cx, T0 + 0.07 + (WALL_H - 0.12) / 2, z1); g.add(glass);
   const frameM = thin(toon("#f3efe6"), 0.55);
-  for (const y of [F4, F4 + WALL_H - 0.06]) boxAt(g4, w, 0.07, 0.1, cx, y, z1, frameM, 0.02, false);
-  for (const x of [x0, x1]) boxAt(g4, 0.1, WALL_H, 0.1, x, F4, z1, frameM, 0.02, false);
+  for (const y of [T0, T0 + WALL_H - 0.06]) boxAt(g, w, 0.07, 0.1, cx, y, z1, frameM, 0.02, false);
+  for (const x of [x0, x1]) boxAt(g, 0.1, WALL_H, 0.1, x, T0, z1, frameM, 0.02, false);
 
   // outer wall on the building edge, with a hazard frame and the hatch (hinged on its front side, swings out)
   const hz = hazard();
   const hazM = toon("#ffffff", { map: hz.tex });
-  seg(x1, z0, doorZ - hatchHalf - 0.12, F4, WALL_H);
-  seg(x1, doorZ + hatchHalf + 0.12, z1, F4, WALL_H);
-  seg(x1, doorZ - hatchHalf - 0.12, doorZ + hatchHalf + 0.12, F4 + HATCH_H + 0.12, WALL_H - HATCH_H - 0.12);
-  for (const s of [-1, 1]) boxAt(g4, 0.3, HATCH_H + 0.12, 0.12, x1, F4, doorZ + s * (hatchHalf + 0.06), hazM, 0.02);
-  boxAt(g4, 0.3, 0.12, hatchHalf * 2 + 0.24, x1, F4 + HATCH_H, doorZ, hazM, 0.02);
-  const hatch = new THREE.Group(); hatch.position.set(x1 + 0.12, F4, doorZ + hatchHalf); g4.add(hatch);
+  seg(x1, z0, doorZ - hatchHalf - 0.12, T0, WALL_H);
+  seg(x1, doorZ + hatchHalf + 0.12, z1, T0, WALL_H);
+  seg(x1, doorZ - hatchHalf - 0.12, doorZ + hatchHalf + 0.12, T0 + HATCH_H + 0.12, WALL_H - HATCH_H - 0.12);
+  for (const s of [-1, 1]) boxAt(g, 0.3, HATCH_H + 0.12, 0.12, x1, T0, doorZ + s * (hatchHalf + 0.06), hazM, 0.02);
+  boxAt(g, 0.3, 0.12, hatchHalf * 2 + 0.24, x1, T0 + HATCH_H, doorZ, hazM, 0.02);
+  const hatch = new THREE.Group(); hatch.position.set(x1 + 0.12, T0, doorZ + hatchHalf); g.add(hatch);
   const hl = new THREE.Group(); hatch.add(hl);
   const slab = mesh(rbox(0.16, HATCH_H - 0.04, hatchHalf * 2 - 0.04, 0.05), plateM);
   slab.position.set(0, 0.02 + (HATCH_H - 0.04) / 2, -hatchHalf); hl.add(slab);
@@ -134,7 +136,7 @@ export function buildAirlock(b: Build, g4: THREE.Group, fonts: Fonts): AirlockPr
   }
 
   // beacon above the hatch end of the back wall
-  const bc = new THREE.Group(); bc.position.set(x1 - 0.55, F4 + BACK_H + 0.07, z0); g4.add(bc);
+  const bc = new THREE.Group(); bc.position.set(x1 - 0.55, T0 + BACK_H + 0.07, z0); g.add(bc);
   boxAt(bc, 0.44, 0.1, 0.44, 0, 0, 0, M.dark, 0.03);
   const dome = mesh(new THREE.SphereGeometry(0.2, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2), toon("#7a2030")) as ToonMesh;
   dome.position.y = 0.1; bc.add(dome);
@@ -149,11 +151,11 @@ export function buildAirlock(b: Build, g4: THREE.Group, fonts: Fonts): AirlockPr
   // floor light strips along the back wall and the glass
   const lights = [z0 + 0.17, z1 - 0.1].map((z) => {
     const m = mesh(rbox(w - 0.3, 0.05, 0.08, 0.02), noLine(flat(REST)), false, false) as BasicMesh;
-    m.position.set(cx, F4 + 0.04, z); g4.add(m);
+    m.position.set(cx, T0 + 0.04, z); g.add(m);
     return m;
   });
 
-  roomLabel(b, g4, "AIRLOCK", cx, F4 + 0.2, z1 + 0.9, 4);
+  roomLabel(b, g, "AIRLOCK", cx, T0 + 0.2, z1 + 0.5, "santai");
   return { door: { leaf, open: 0 }, hatch: { leaf: hl, open: 0 }, beacon: { dome, beams }, lights, sign };
 }
 

@@ -79,10 +79,10 @@ export interface ChatSession {
   phase?: ChatPhase;
 }
 
-/** Teams a chat agent can start in ("office" = no team, its desk on floor 2). */
-export type ChatTeam = "office" | "red" | "report" | "blue";
-export const CHAT_TEAMS: ChatTeam[] = ["office", "red", "report", "blue"];
-export const CHAT_TEAM_LABEL: Record<ChatTeam, string> = { office: "Kantor (tanpa tim)", red: "Red Team", report: "Laporan VA", blue: "Blue Team" };
+/** Teams a chat agent can start in ("office" = no team, its desk in the office). */
+export type ChatTeam = "office" | "red" | "report" | "blue" | "ops";
+export const CHAT_TEAMS: ChatTeam[] = ["office", "red", "report", "blue", "ops"];
+export const CHAT_TEAM_LABEL: Record<ChatTeam, string> = { office: "Kantor (tanpa tim)", red: "Red Team", report: "Laporan VA", blue: "Blue Team", ops: "DevOps" };
 
 /** Who the office character of a new session is (POST {"action":"new","agent"}). */
 export interface ChatAgentInput {

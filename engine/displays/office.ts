@@ -1,4 +1,4 @@
-// Canvas displays on floors 1-2: desk monitors, name plates, TV, arcade, whiteboard, mission board.
+// Canvas displays of the Santai and Kantor tiers: desk monitors, name plates, TV, arcade, whiteboard, mission board.
 // Ported 1:1 from references/agent-hq.html; fonts come from the resolved next/font families.
 
 import { STATUS } from "@/lib/events";
@@ -10,14 +10,23 @@ import { locText } from "../agents/movement";
 import type { AgentRuntime } from "../agents/animate";
 import type { Fonts } from "../scene/fonts";
 import { pick, rand, type CanvasTex } from "../scene/kit";
-import type { Floor2Props } from "../world/floor2";
+import type { KantorProps } from "../world/kantor";
 import type { Desk } from "../world/props/desk";
 
-/** Where an agent works away from its desk: a floor-3 station or a floor-4 meeting seat (prd.md §7.9). */
+/** Where an agent works away from its desk: a team station (Security or the server room) or a meeting seat
+ *  (prd.md §7.9). Labels were "DI LT.3" / "DI LT.4" while those were floors (deviation 29). */
 function awayRoom(mv: AgentRuntime["mv"]): { label: string; color: string; room: string } | null {
-  if (mv.dest.kind === "station") return { label: "DI LT.3", color: DEPTS[mv.dest.dept].color, room: mv.dest.room };
-  if (mv.dest.kind === "seat") return { label: "DI LT.4", color: "#ff6fd8", room: mv.dest.room };
+  if (mv.dest.kind === "station") return { label: mv.dest.dept === "ops" ? "DI SERVER" : "DI SECURITY", color: DEPTS[mv.dest.dept].color, room: mv.dest.room };
+  if (mv.dest.kind === "seat") return { label: "DI MEETING", color: "#ff6fd8", room: mv.dest.room };
   return null;
+}
+
+/** Bungee label centered at (x, y), shrunk to fit `maxW`. */
+function fitLabel(ctx: CanvasRenderingContext2D, F: Fonts, text: string, x: number, y: number, size: number, maxW: number) {
+  ctx.font = `${size}px ${F.bungee}`;
+  const w = ctx.measureText(text).width;
+  if (w > maxW) ctx.font = `${Math.floor((size * maxW) / w)}px ${F.bungee}`;
+  ctx.fillText(text, x, y);
 }
 
 export function drawScreen(F: Fonts, rt: AgentRuntime, a: Agent, t: number) {
@@ -29,7 +38,7 @@ export function drawScreen(F: Fonts, rt: AgentRuntime, a: Agent, t: number) {
   ctx.fillRect(0, 0, W, H);
   ctx.textAlign = "left";
   if (st === "working" && away && there) {
-    ctx.fillStyle = there.color; ctx.font = `40px ${F.bungee}`; ctx.textAlign = "center"; ctx.fillText(there.label, W / 2, 80);
+    ctx.fillStyle = there.color; ctx.textAlign = "center"; fitLabel(ctx, F, there.label, W / 2, 80, 40, W - 20);
     ctx.font = `600 20px ${F.fredoka}`; ctx.fillStyle = "#fff6e3"; ctx.fillText(there.room, W / 2, 118);
   } else if (st === "working" && !away) {
     const off = (t * 40) % 18;
@@ -55,7 +64,7 @@ export function drawScreen(F: Fonts, rt: AgentRuntime, a: Agent, t: number) {
     ctx.font = `600 20px ${F.fredoka}`; ctx.fillText("butuh input", W / 2, 135);
   } else if (st !== "offline") {
     if (away && there) {
-      ctx.fillStyle = there.color; ctx.font = `44px ${F.bungee}`; ctx.textAlign = "center"; ctx.fillText(there.label, W / 2, 80);
+      ctx.fillStyle = there.color; ctx.textAlign = "center"; fitLabel(ctx, F, there.label, W / 2, 80, 44, W - 20);
       ctx.font = `600 20px ${F.fredoka}`; ctx.fillStyle = "#fff6e3"; ctx.fillText(there.room, W / 2, 118);
     } else if (away && (mv.fetching || mv.carrying)) {
       ctx.fillStyle = "#ffd23f"; ctx.font = `34px ${F.bungee}`; ctx.textAlign = "center"; ctx.fillText("TUGAS BARU", W / 2, 82 + Math.sin(t * 4) * 3);
@@ -76,7 +85,7 @@ export function drawScreen(F: Fonts, rt: AgentRuntime, a: Agent, t: number) {
   tex.needsUpdate = true;
 }
 
-/** Unassigned desk: dark monitor with STANDBY (same style as empty floor-3 stations) and a blank name plate.
+/** Unassigned desk: dark monitor with STANDBY (same style as empty team stations) and a blank name plate.
  *  Text is drawn only once fonts are ready; before that both stay blank. */
 export function drawEmptyDesk(F: Fonts | null, d: Desk) {
   const s = d.scr;
@@ -174,7 +183,7 @@ export interface WhiteboardEgg {
 export const newWhiteboardEgg = (wait = Math.floor(rand(12, 35))): WhiteboardEgg => ({ wait, i: -1, x: 0, y: 0, color: pick(MARKERS) });
 
 /** One letter per tick, slightly tilted and bouncy like handwriting. Returns true while writing. */
-function writeEgg(w: Floor2Props["wb"], F: Fonts): boolean {
+function writeEgg(w: KantorProps["wb"], F: Fonts): boolean {
   const e = w.egg!, c = w.ctx, size = 34;
   c.font = `600 ${size}px ${F.fredoka}`;
   if (e.i < 0) {
@@ -202,7 +211,7 @@ function writeEgg(w: Floor2Props["wb"], F: Fonts): boolean {
 }
 
 /** Scribbles while an agent is at the whiteboard. `F` is null until fonts are ready (no text before that). */
-export function drawWhiteboard(w: Floor2Props["wb"], on: boolean, F: Fonts | null = null) {
+export function drawWhiteboard(w: KantorProps["wb"], on: boolean, F: Fonts | null = null) {
   if (!on) {
     w.wasOn = false;
     return;

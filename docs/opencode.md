@@ -74,7 +74,7 @@ Untuk nama tetap (misalnya `opencode web` yang jalan sebagai service), tulis di 
 | Yang terjadi di OpenCode | Yang kamu lihat |
 |---|---|
 | Prompt pertama di sesi baru | Karakter masuk ("Sesi baru di <folder> · <provider>/<model>") |
-| Prompt masuk | Karakter mikir; kalau sedang santai, kartu tugas muncul di Papan Tugas (Lt.2) |
+| Prompt masuk | Karakter mikir; kalau sedang santai, kartu tugas muncul di Papan Tugas (Kantor) |
 | Tool jalan | Kerja, bubble `$ npm test`, `Baca cart.ts`, `Edit cart.ts`, `Cari "TODO"`, `Search: ...` |
 | Tool gagal | Baris log kuning, misalnya `Bash gagal: ...` |
 | OpenCode minta izin | Melambai, status oranye "Butuh kamu" |
@@ -84,7 +84,7 @@ Untuk nama tetap (misalnya `opencode web` yang jalan sebagai service), tulis di 
 | Kamu menekan Esc, atau giliran berhenti karena izin ditolak | Santai, "Menunggu prompt berikutnya", tanpa confetti |
 | Error dari provider (API error) | Error: merah dan berasap |
 | Provider sibuk, OpenCode mencoba lagi | Baris log `Coba lagi (1): ...` |
-| Subagen (`task`, misalnya `@explore`) | Sesi naik ke ruang meeting Lt.4 bersama subagennya, bernama sesuai agennya |
+| Subagen (`task`, misalnya `@explore`) | Sesi naik ke ruang meeting bersama subagennya, bernama sesuai agennya |
 | Subagen selesai | Subagen pergi sekitar 45 detik kemudian |
 | OpenCode ditutup, atau sesi dihapus | Offline, hilang setelah 5 menit |
 
@@ -111,8 +111,8 @@ HQ_TEAM=red
 | `HQ_TOKEN` | kosong | isi kalau Agent HQ dijalankan dengan `HQ_TOKEN` |
 | `HQ_NAME` | `<folder>#xxxx` | nama karakter (huruf Latin; nama lain lewat ✎) |
 | `HQ_ROLE` | `OpenCode · <folder>` | peran di kartu agen |
-| `HQ_TEAM` | kosong | `red`, `report`, `blue`: agen pindah ke ruangannya di Lt.3 |
-| `HQ_GROUP` | kosong | sesi dengan grup yang sama rapat bersama di Lt.4 Meeting |
+| `HQ_TEAM` | kosong | `red`, `report`, `blue`, `ops`: agen pindah ke ruangannya (Security, atau Ruang Server untuk `ops`) |
+| `HQ_GROUP` | kosong | sesi dengan grup yang sama rapat bersama di ruang Meeting |
 | `HQ_TIMEOUT` | `1.5` | batas tunggu kirim ke Agent HQ, dalam detik |
 | `HQ_DISABLE` | mati | `1` mematikan plugin tanpa menghapusnya |
 | `HQ_ENV_FILE` | `agent-hq.env` di samping plugin | file pengaturan lain |

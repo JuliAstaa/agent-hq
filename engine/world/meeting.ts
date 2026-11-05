@@ -1,15 +1,14 @@
-// Floor 4 "Meeting" (prd.md §7.9): three enclosed meeting rooms side by side along the back wall (frosted glass walls
-// 2.6 high in slim frames, a sliding frosted door each; table, five seats with laptops, team screen, accent strip),
-// a corridor from the lift, and the lift tube continuing up from floor 3. Not in the prototype.
+// Back tier, middle: "Meeting" (prd.md §7.9, deviation 29): three enclosed meeting rooms side by side along the back
+// wall (frosted glass walls 2.6 high in slim frames, a sliding frosted door each; table, five seats with laptops, team
+// screen, accent strip), opening onto the back street. Not in the prototype. Was floor 4 until the single-floor layout;
+// the rooms are 6.8 wide now (8.4 before) and room A got a glass wall of its own on the Security side.
 
 import * as THREE from "three";
-import { F3, F4 } from "../constants";
+import { T2, X_SEC_END, X_SERVER, Z_BACK } from "../layout";
 import type { Fonts } from "../scene/fonts";
 import { boxAt, canvasTex, cyl, mesh, noLine, rbox, thin, type CanvasTex } from "../scene/kit";
-import { DOOR_HALF, ROOM_FRONT_Z, ROOM_RIGHT_X, ROOM_WALLS, ROOM_XS, TABLE_HALF_X, TABLE_HALF_Z, TABLE_Z, type SeatPlace } from "../nav/places";
+import { DOOR_HALF, ROOM_BACK_Z, ROOM_FRONT_Z, ROOM_LEFT_X, ROOM_RIGHT_X, ROOM_WALLS, ROOM_XS, TABLE_HALF_X, TABLE_HALF_Z, TABLE_Z, type SeatPlace } from "../nav/places";
 import { MEETING_ROOMS, SEATS_PER_ROOM } from "@/lib/meeting";
-import { alienPlant } from "./props/alienPlant";
-import { LIFT_GAP, LIFT_X, LIFT_Z } from "./floor3";
 import { makeWall, roomLabel, type Build } from "./structure";
 
 type BasicMesh = THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;
@@ -44,7 +43,7 @@ export interface FlyCard {
   t: number;
 }
 
-export interface Floor4 {
+export interface MeetingFloor {
   rooms: MeetingRoomProp[];
   sign: CanvasTex & { draw: () => void };
   cards: FlyCard[];
@@ -59,54 +58,22 @@ const WALL_H = 2.6, DOOR_H = 2.25, PANE = 0.05;
 /** How far the door leaf slides to open (its width plus a little). */
 const DOOR_SLIDE = DOOR_HALF * 2 + 0.05;
 
-export function buildFloor4(b: Build, g4: THREE.Group, tentacles: THREE.Group[], fonts: Fonts, seats: SeatPlace[]): Floor4 {
+export function buildMeeting(b: Build, g4: THREE.Group, fonts: Fonts, seats: SeatPlace[]): MeetingFloor {
   const { M } = b;
   const { toon, flat } = b.kit;
 
-  // slab with the lift hole (same cut as floor 3)
-  for (const [x0, x1, z0, z1] of [[-13, 5.8, -8, 8.4], [7.8, 13, -8, 8.4], [5.8, 7.8, -8, 3.8], [5.8, 7.8, 5.8, 8.4]]) {
-    boxAt(g4, x1 - x0, 0.4, z1 - z0, (x0 + x1) / 2, F4 - 0.4, (z0 + z1) / 2, M.slab, 0.04, false);
-  }
-  // Floor 3 had an open roof: its walls stop at F3 + 4.4. Fill the gap up to this slab in the floor-3 colors.
-  {
-    const y0 = F3 + 4.58, h = F4 - 0.4 - y0;
-    makeWall(b, g4, "x", -7.8, -13, -4, y0, h, [], M.redWall, 0.4, false);
-    makeWall(b, g4, "x", -7.8, -4, 4, y0, h, [], M.repWall, 0.4, false);
-    makeWall(b, g4, "x", -7.8, 4, 13, y0, h, [], M.socWall, 0.4, false);
-    makeWall(b, g4, "z", -12.8, -8, 8.4, y0, h, [], M.redWall, 0.4, false);
-  }
-  // carpet
-  const V2 = (x: number, y: number) => new THREE.Vector2(x, y);
-  const sh = new THREE.Shape([V2(-12.6, 7.6), V2(13, 7.6), V2(13, -8.4), V2(-12.6, -8.4)]);
-  sh.holes.push(new THREE.Path([V2(5.8, -3.8), V2(5.8, -5.8), V2(7.8, -5.8), V2(7.8, -3.8)]));
-  const tile = canvasTex(128, 128);
-  {
-    const c = tile.ctx;
-    c.fillStyle = "#2f5d66"; c.fillRect(0, 0, 128, 128);
-    c.fillStyle = "#356872"; c.fillRect(0, 0, 64, 64); c.fillRect(64, 64, 64, 64);
-    c.strokeStyle = "rgba(190,255,240,.14)"; c.lineWidth = 2; c.strokeRect(1, 1, 126, 126);
-  }
-  tile.tex.wrapS = tile.tex.wrapT = THREE.RepeatWrapping;
-  tile.tex.repeat.set(0.25, 0.25);
-  const fl = mesh(new THREE.ShapeGeometry(sh), noLine(toon("#ffffff", { map: tile.tex })), false, true);
-  fl.rotation.x = -Math.PI / 2; fl.position.y = F4 + 0.006; g4.add(fl);
   const rug = (x0: number, x1: number, z0: number, z1: number, c: string) => {
     const m = mesh(new THREE.PlaneGeometry(x1 - x0, z1 - z0), noLine(toon(c)), false, true);
-    m.rotation.x = -Math.PI / 2; m.position.set((x0 + x1) / 2, F4 + 0.012, (z0 + z1) / 2); g4.add(m);
+    m.rotation.x = -Math.PI / 2; m.position.set((x0 + x1) / 2, T2 + 0.012, (z0 + z1) / 2); g4.add(m);
   };
 
-  // walls: one color per room on the back wall, the left wall in room A's color with a window
+  // back wall: one color per room (Security's wall ends at X_SEC_END, the server room's starts at X_SERVER)
   const roomWall = [toon("#f4bfd6"), toon("#bfe6d3"), toon("#ffd8a8")];
-  const edges = [-13, ...ROOM_WALLS, 13];
-  roomWall.forEach((mat, i) => makeWall(b, g4, "x", -7.8, edges[i], edges[i + 1], F4, 4.4, [], mat));
-  makeWall(b, g4, "z", -12.8, -8, 8.4, F4, 4.4, [{ a0: -6.2, a1: -2.6, y0: F4 + 1.3, y1: F4 + 3.3 }], roomWall[0]);
-  boxAt(g4, 26.4, 0.18, 0.56, 0, F4 + 4.4, -7.8, M.trim, 0.04);
-  boxAt(g4, 0.56, 0.18, 16.4, -12.8, F4 + 4.4, 0.2, M.trim, 0.04);
-  boxAt(g4, 26, 0.25, 0.48, 0, F4, -7.8, M.dark, 0.04);
-  boxAt(g4, 0.48, 0.25, 16, -12.8, F4, 0.2, M.dark, 0.04);
-  rug(-12.4, -4.5, -7.4, 0.8, "#6b4a8f");
-  rug(-3.9, 3.9, -7.4, 0.8, "#2f7a63");
-  rug(4.5, 12.8, -7.4, 0.8, "#9a5a3a");
+  const edges = [X_SEC_END, ...ROOM_WALLS, X_SERVER];
+  roomWall.forEach((mat, i) => makeWall(b, g4, "x", Z_BACK, edges[i], edges[i + 1], T2, 4.4, [], mat));
+  boxAt(g4, X_SERVER - X_SEC_END, 0.18, 0.56, (X_SEC_END + X_SERVER) / 2, T2 + 4.4, Z_BACK, M.trim, 0.04);
+  boxAt(g4, X_SERVER - X_SEC_END, 0.25, 0.48, (X_SEC_END + X_SERVER) / 2, T2, Z_BACK, M.dark, 0.04);
+  ROOM_XS.forEach((cx, i) => rug(cx - 3.1, cx + 3.1, ROOM_BACK_Z + 0.2, ROOM_FRONT_Z - 0.2, ["#6b4a8f", "#2f7a63", "#9a5a3a"][i]));
 
   // Enclosed rooms like an ordinary office: frosted glass walls 2.6 high in slim frames (no frame grid, no clear glass
   // above, so the team screens on the back wall stay in view). The film is dense, with three etched lines near the top.
@@ -151,58 +118,48 @@ export function buildFloor4(b: Build, g4: THREE.Group, tentacles: THREE.Group[],
   const glassWall = (axis: "x" | "z", c: number, a0: number, a1: number, gap?: [number, number]) => {
     const spans: [number, number][] = gap ? [[a0, gap[0]], [gap[1], a1]] : [[a0, a1]];
     for (const [s0, s1] of spans) {
-      pane(axis, c, s0, s1, F4 + 0.07, WALL_H - 0.1, frostM);
-      bar(axis, c, s0, s1, F4, 0.07); // floor channel (none across the door)
+      pane(axis, c, s0, s1, T2 + 0.07, WALL_H - 0.1, frostM);
+      bar(axis, c, s0, s1, T2, 0.07); // floor channel (none across the door)
     }
     if (gap) {
-      pane(axis, c, gap[0], gap[1], F4 + DOOR_H + 0.05, WALL_H - DOOR_H - 0.08, plainM); // above the door
-      bar(axis, c, gap[0], gap[1], F4 + DOOR_H, 0.06); // door head
+      pane(axis, c, gap[0], gap[1], T2 + DOOR_H + 0.05, WALL_H - DOOR_H - 0.08, plainM); // above the door
+      bar(axis, c, gap[0], gap[1], T2 + DOOR_H, 0.06); // door head
     }
-    bar(axis, c, a0, a1, F4 + WALL_H - 0.04, 0.06); // top cap
+    bar(axis, c, a0, a1, T2 + WALL_H - 0.04, 0.06); // top cap
     for (const a of [a0, a1, ...(gap ?? [])]) post(axis === "x" ? a : c, axis === "x" ? c : a, WALL_H);
   };
-  const BACK = -7.6;
-  const fronts = [-12.6, ...ROOM_WALLS, ROOM_RIGHT_X];
+  const BACK = ROOM_BACK_Z;
+  const fronts = [ROOM_LEFT_X, ...ROOM_WALLS, ROOM_RIGHT_X];
   ROOM_XS.forEach((cx, i) => glassWall("x", ROOM_FRONT_Z, fronts[i], fronts[i + 1], [cx - DOOR_HALF, cx + DOOR_HALF]));
-  for (const x of [...ROOM_WALLS, ROOM_RIGHT_X]) glassWall("z", x, BACK, ROOM_FRONT_Z);
-  for (const [x, z, h] of posts.values()) boxAt(g4, 0.09, h, 0.09, x, F4, z, frameM, 0.02, false);
+  for (const x of fronts) glassWall("z", x, BACK, ROOM_FRONT_Z);
+  for (const [x, z, h] of posts.values()) boxAt(g4, 0.09, h, 0.09, x, T2, z, frameM, 0.02, false);
 
   // rooms: table, seats, laptops, screen, strip
   const rooms: MeetingRoomProp[] = ROOM_XS.map((cx, ri) => {
     const tableTop = toon(["#d9a066", "#c98a4b", "#e0b07a"][ri]);
-    boxAt(g4, TABLE_HALF_X * 2, 0.14, TABLE_HALF_Z * 2, cx, F4 + 0.95, TABLE_Z, tableTop, 0.07);
-    for (const dz of [-0.95, 0.95]) cyl(g4, 0.12, 0.32, 0.95, cx, F4, TABLE_Z + dz, M.dark, 14);
+    boxAt(g4, TABLE_HALF_X * 2, 0.14, TABLE_HALF_Z * 2, cx, T2 + 0.95, TABLE_Z, tableTop, 0.07);
+    for (const dz of [-0.95, 0.95]) cyl(g4, 0.12, 0.32, 0.95, cx, T2, TABLE_Z + dz, M.dark, 14);
     // team screen above the head seat
-    boxAt(g4, 4.9, 2.3, 0.16, cx, F4 + 1.75, -7.5, M.dark, 0.06);
+    boxAt(g4, 4.9, 2.3, 0.16, cx, T2 + 1.75, Z_BACK + 0.3, M.dark, 0.06);
     const screen = canvasTex(MEETING_SCREEN_W, MEETING_SCREEN_H);
     const sc = mesh(new THREE.PlaneGeometry(4.6, 2.0), noLine(flat("#ffffff", { map: screen.tex })), false, false);
-    sc.position.set(cx, F4 + 2.9, -7.41); g4.add(sc);
+    sc.position.set(cx, T2 + 2.9, Z_BACK + 0.39); g4.add(sc);
     const strip = mesh(rbox(4.6, 0.12, 0.06, 0.02), flat(MEETING_IDLE)) as BasicMesh;
-    strip.position.set(cx, F4 + 1.62, -7.42); g4.add(strip);
+    strip.position.set(cx, T2 + 1.62, Z_BACK + 0.38); g4.add(strip);
     const roomSeats = seats.filter((s) => s.roomIndex === ri).sort((p, q) => p.seat - q.seat).map((place) => buildSeat(b, g4, place));
     // sliding door: a frosted leaf on the corridor side of the front wall, slides left over the glass to open
-    const door = new THREE.Group(); door.position.set(cx, F4, ROOM_FRONT_Z + 0.1); g4.add(door);
+    const door = new THREE.Group(); door.position.set(cx, T2, ROOM_FRONT_Z + 0.1); g4.add(door);
     const leaf = new THREE.Group(); door.add(leaf);
     const lh = DOOR_H - 0.06;
     const lp = mesh(new THREE.BoxGeometry(DOOR_HALF * 2, lh, 0.04), plainM, false, false);
     lp.position.y = 0.03 + lh / 2; leaf.add(lp);
     for (const sx of [-DOOR_HALF, DOOR_HALF]) boxAt(leaf, 0.06, lh, 0.07, sx, 0.03, 0, frameM, 0.02, false);
     boxAt(leaf, 0.05, 0.7, 0.1, DOOR_HALF - 0.2, 0.75, 0.04, M.dark, 0.02, false); // pull handle
-    return { screen, screenMesh: sc, strip, seats: roomSeats, center: new THREE.Vector3(cx, F4 + 1.1, TABLE_Z), door: { leaf, open: 0, x: cx } };
+    return { screen, screenMesh: sc, strip, seats: roomSeats, center: new THREE.Vector3(cx, T2 + 1.1, TABLE_Z), door: { leaf, open: 0, x: cx } };
   });
 
-  // lift: the glass tube from floor 3 continues up to a lid above this floor
-  const glassM = thin(toon("#bfe9ff", { transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false }), 0.7);
-  const tube = mesh(new THREE.CylinderGeometry(0.95, 0.95, 5.6, 32, 1, true, LIFT_GAP + 0.7, Math.PI * 2 - 1.4), glassM, false, false);
-  tube.position.set(LIFT_X, F4, LIFT_Z); g4.add(tube);
-  cyl(g4, 1.12, 1.12, 0.14, LIFT_X, F4 + 2.8, LIFT_Z, M.dark, 32);
-  for (const y of [F4 + 0.05]) { // rings only at floor level (none floating under the lid)
-    const r = mesh(new THREE.TorusGeometry(0.97, 0.05, 8, 40), noLine(flat("#ff6fd8")), false, false);
-    r.rotation.x = Math.PI / 2; r.position.set(LIFT_X, y, LIFT_Z); g4.add(r);
-  }
-
-  // corridor: sign on the left wall, plants, labels
-  const sign = canvasTex(360, 110) as Floor4["sign"];
+  // sign on a post at the left end of the street, beside the stairs from the office
+  const sign = canvasTex(360, 110) as MeetingFloor["sign"];
   sign.draw = () => {
     const c = sign.ctx;
     c.fillStyle = "#1b1530"; c.fillRect(0, 0, 360, 110);
@@ -211,13 +168,14 @@ export function buildFloor4(b: Build, g4: THREE.Group, tentacles: THREE.Group[],
     c.fillStyle = "#7fe3d0"; c.font = `30px ${fonts.bungee}`; c.fillText("RUANG TIM", 180, 94);
     sign.tex.needsUpdate = true;
   };
-  const sg = mesh(new THREE.PlaneGeometry(2.6, 0.8), noLine(flat("#ffffff", { map: sign.tex })), false, false);
-  sg.position.set(-12.55, F4 + 2.7, 4.6); sg.rotation.y = Math.PI / 2; g4.add(sg);
-  boxAt(g4, 0.08, 0.92, 2.72, -12.6, F4 + 2.24, 4.6, M.dark, 0.03);
-  alienPlant(b, tentacles, g4, -12.0, F4, 7.3, 0.8);
-  alienPlant(b, tentacles, g4, 10.2, F4, 7.8, 0.8); // in front of the Airlock's door end: its glass and the lift stay clear (prd.md §7.10)
-  ROOM_XS.forEach((cx, i) => roomLabel(b, g4, MEETING_ROOMS[i].toUpperCase(), cx, F4 + 0.2, 1.8, 4));
-  roomLabel(b, g4, "LIFT", LIFT_X, F4 + 0.2, LIFT_Z + 1.6, 4);
+  {
+    const SX = ROOM_LEFT_X + 0.6, SZ = -8.75;
+    cyl(g4, 0.05, 0.05, 2.0, SX, T2, SZ, M.dark, 8);
+    boxAt(g4, 2.08, 0.72, 0.08, SX, T2 + 1.95, SZ - 0.05, M.dark, 0.03);
+    const sg = mesh(new THREE.PlaneGeometry(1.96, 0.6), noLine(flat("#ffffff", { map: sign.tex })), false, false);
+    sg.position.set(SX, T2 + 2.31, SZ); g4.add(sg);
+  }
+  ROOM_XS.forEach((cx, i) => roomLabel(b, g4, MEETING_ROOMS[i].toUpperCase(), cx, T2 + 0.2, ROOM_FRONT_Z + 0.8, "meeting"));
 
   // flying task cards (pool)
   const cards: FlyCard[] = [0, 1, 2].map(() => {
@@ -243,7 +201,7 @@ function buildSeat(b: Build, g4: THREE.Group, place: SeatPlace): MeetingSeatProp
   glow.rotation.x = -Math.PI / 2; glow.position.y = 0.012; chair.add(glow);
   // laptop: 0.75 in front of the seat, on the table, screen facing the sitter
   const f = new THREE.Vector3(Math.sin(place.face), 0, Math.cos(place.face));
-  const lap = new THREE.Group(); lap.position.copy(place.final).addScaledVector(f, 0.75); lap.position.y = F4 + 1.09; lap.rotation.y = place.face; g4.add(lap);
+  const lap = new THREE.Group(); lap.position.copy(place.final).addScaledVector(f, 0.75); lap.position.y = T2 + 1.09; lap.rotation.y = place.face; g4.add(lap);
   lap.add(mesh(rbox(0.52, 0.03, 0.36, 0.01), M.steel));
   const lid = new THREE.Group(); lid.position.set(0, 0.015, 0.17); lid.rotation.x = 0.35; lap.add(lid);
   lid.add(mesh(rbox(0.52, 0.34, 0.025, 0.01), M.dark).translateY(0.17));
@@ -253,10 +211,10 @@ function buildSeat(b: Build, g4: THREE.Group, place: SeatPlace): MeetingSeatProp
   return { place, chair, ring, glow, screen };
 }
 
-/** Doors slide open while someone is at them (agent positions on floor 4, world-group coordinates). */
+/** Doors slide open while someone is at them (agent positions on the back tier, world-group coordinates). */
 export function stepDoors(rooms: MeetingRoomProp[], at: THREE.Vector3[], dt: number) {
   for (const { door } of rooms) {
-    const near = at.some((p) => Math.abs(p.y - F4) < 1 && Math.abs(p.x - door.x) < DOOR_HALF + 0.9 && Math.abs(p.z - ROOM_FRONT_Z) < 1.6);
+    const near = at.some((p) => Math.abs(p.y - T2) < 1 && Math.abs(p.x - door.x) < DOOR_HALF + 0.9 && Math.abs(p.z - ROOM_FRONT_Z) < 1.6);
     door.open += ((near ? 1 : 0) - door.open) * Math.min(1, dt * 7);
     door.leaf.position.x = -DOOR_SLIDE * door.open;
   }
@@ -278,8 +236,8 @@ export function stepCards(cards: FlyCard[], dt: number) {
 export function flyCard(cards: FlyCard[], from: THREE.Vector3, to: THREE.Vector3, color: string) {
   const c = cards.find((k) => k.t >= 1);
   if (!c) return;
-  c.from.copy(from).setY(F4 + 1.2);
-  c.to.copy(to).setY(F4 + 1.2);
+  c.from.copy(from).setY(T2 + 1.2);
+  c.to.copy(to).setY(T2 + 1.2);
   c.t = 0;
   c.m.material.color.set(color);
   c.m.position.copy(c.from);

@@ -315,7 +315,7 @@ Di Hermes, nama tool-nya diberi awalan server, misalnya `mcp_agent_hq_hq_status`
 | `hq_status` | status, task, progres | bubble dan kartu agen |
 | `hq_log` | satu baris catatan (info, warn, error) | Log Aktivitas |
 | `hq_done` | pekerjaan selesai | confetti (MCP saja) atau baris log (dengan hook, karena hook sudah memicu confetti) |
-| `hq_finding` | temuan keamanan | Red Team Lab (node merah) dan papan Laporan VA, Lt.3 |
+| `hq_finding` | temuan keamanan | Red Team Lab (node merah) dan papan Laporan VA (area Security) |
 | `hq_alert` | alert keamanan | SOC Blue Team: sirene, ruangan berkedip merah |
 | `hq_metric` | login gagal per menit | grafik SOC |
 
@@ -333,7 +333,7 @@ kamu kantongi izin tertulisnya.
 
 | Yang terjadi di Hermes | Yang kamu lihat |
 |---|---|
-| Prompt masuk (CLI atau chat gateway) | Karakter mikir. Kalau sedang santai, kartu tugas muncul di Papan Tugas (Lt.2) dan karakter mengambilnya |
+| Prompt masuk (CLI atau chat gateway) | Karakter mikir. Kalau sedang santai, kartu tugas muncul di Papan Tugas (Kantor) dan karakter mengambilnya |
 | Tool jalan | Karakter kerja, bubble menampilkan aksinya: `$ npm test`, `Baca app.py`, `Edit cart.py`, `Search: ...` |
 | Tool gagal (exit code bukan 0, atau error) | Baris log kuning, misalnya `Bash gagal: exit code 1` |
 | Hermes minta izin menjalankan perintah berbahaya | Melambai, status oranye "Butuh kamu" |
@@ -357,14 +357,14 @@ tampil dengan namanya sendiri.
 
 ## 10. Papan Jadwal (cron Hermes)
 
-Jadwal cron Hermes tampil di **PAPAN JADWAL**, papan gelap di dinding belakang Lt.2, di kanan jam dinding. Papan
+Jadwal cron Hermes tampil di **PAPAN JADWAL**, papan gelap di dinding kiri Kantor, di belakang baris meja paling belakang. Papan
 ini muncul begitu reporter jadwal (`hq_cron.py`) tersambung, dan tersembunyi kalau tidak ada reporter.
 
 - **Isi papan:** maksimal 5 jadwal, masing-masing dengan titik warna status, nama, jadwalnya (`0 9 * * *`,
   `every 30m`), dan hitung mundur ke jalan berikutnya. Jadwal yang sedang jalan berkedip hijau, dan lonceng di
   atas papan berbunyi. Pojok kanan atas menunjukkan `AKTIF` (scheduler Hermes jalan), `SCHEDULER MATI` (gateway
   mati, jadwal agen tidak akan jalan), atau `TERPUTUS` (tidak ada kabar dari reporter selama 90 detik).
-- **Panel kontrol:** klik papannya di tampilan Lt.2 Kantor, atau tombol **Jadwal** di kanan atas. Tiap jadwal
+- **Panel kontrol:** klik papannya di kantor, atau tombol **Jadwal** di kanan atas. Tiap jadwal
   punya tombol:
   - **Jalankan sekarang** (`hermes cron run <id>`): mulai di tick berikutnya, paling lama 1 menit. Perlu dua kali
     klik, karena setiap jalan memakai token model.
@@ -493,7 +493,7 @@ Hermes (hanya provider yang sudah login) dan disimpan sementara selama 1 menit. 
 **Terakhir dijawab** menunjukkan model yang benar-benar menjawab. Hermes versi lama tanpa route itu menampilkan
 "Daftar model" kosong; pakai `hermes model` di SSH.
 
-**Riset di ruang meeting.** Peserta rapat Lt.4 menggunakan sesi Hermes yang sama dengan kemampuan tool,
+**Riset di ruang meeting.** Peserta rapat di ruang meeting menggunakan sesi Hermes yang sama dengan kemampuan tool,
 skill, memori, dan riwayat sesi yang tersedia. Mereka boleh mencari informasi di web/browser, membaca atau
 mencari file, serta memakai konektor dan inspeksi terminal tanpa perubahan keadaan untuk mendukung goal.
 Temuan serta URL/path sumber diteruskan ke peserta berikutnya; panel menampilkan **Tool Hermes** dengan
@@ -544,8 +544,8 @@ dari shell hanya sampai ke sesi CLI, tidak ke gateway dan tidak ke server MCP. J
 | `HQ_TOKEN` | kosong | isi kalau Agent HQ dijalankan dengan `HQ_TOKEN` |
 | `HQ_NAME` | `<folder>#xxxx` | nama karakter (huruf Latin; nama lain lewat ✎) |
 | `HQ_ROLE` | `Hermes · <folder>` | peran di kartu agen |
-| `HQ_TEAM` | kosong | `red`, `report`, `blue`: agen pindah ke ruangannya di Lt.3 |
-| `HQ_GROUP` | kosong | grup kerja: sesi dengan grup yang sama rapat bersama di Lt.4 Meeting (subagen ikut otomatis, tanpa variabel ini) |
+| `HQ_TEAM` | kosong | `red`, `report`, `blue`, `ops`: agen pindah ke ruangannya (Security, atau Ruang Server untuk `ops`) |
+| `HQ_GROUP` | kosong | grup kerja: sesi dengan grup yang sama rapat bersama di ruang Meeting (subagen ikut otomatis, tanpa variabel ini) |
 | `HQ_TIMEOUT` | `1.5` | batas tunggu kirim ke Agent HQ, dalam detik |
 | `HQ_ANNOUNCE` | mati | khusus MCP tanpa hook: karakter muncul begitu Hermes menyala |
 | `HQ_DISABLE` | mati | `1` mematikan hook, MCP, dan reporter jadwal tanpa mengubah `config.yaml` |

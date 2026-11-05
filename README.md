@@ -66,7 +66,7 @@ Panduan lengkap per agen (pasang, cek, masalah umum):
 | OpenCode | `docs/opencode.md` | salin `examples/opencode/agent-hq.js` ke `~/.config/opencode/plugins/` |
 | Hermes Agent | `docs/hermes.md` | `python3 examples/hermes/install.py` |
 
-Semuanya tampil dengan cara yang sama: status, bubble aksi, Papan Tugas, confetti, subagen di Lt.4 Meeting,
+Semuanya tampil dengan cara yang sama: status, bubble aksi, Papan Tugas, confetti, subagen di ruang Meeting,
 dan rename.
 
 Claude Code mengirim aktivitasnya lewat **hooks** ke `http://127.0.0.1:8787/api/hook`. Contoh setting-nya ada
@@ -98,11 +98,11 @@ HQ_NAME=Glimbo HQ_ROLE=Coder  claude    # sesi coding biasa
 claude                                  # tanpa nama: tampil sebagai "<folder>#<4 huruf session>"
 ```
 
-`HQ_TEAM` bisa `red`, `report`, `blue`, atau dikosongkan. Kalau dikosongkan, tim ditebak dari isi prompt dan
+`HQ_TEAM` bisa `red`, `report`, `blue`, `ops`, atau dikosongkan. Kalau dikosongkan, tim ditebak dari isi prompt dan
 perintah (lihat [bagian 4](#4-membaca-tampilan)).
 
-**Kerja bareng di Lt.4 Meeting.** Sesi yang mendelegasikan tugas ke subagen otomatis rapat bersama subagennya di
-lantai 4, tanpa setting apa pun. Sesi yang terpisah (misalnya dua repo untuk satu fitur) bisa dikumpulkan dengan
+**Kerja bareng di ruang Meeting.** Sesi yang mendelegasikan tugas ke subagen otomatis rapat bersama subagennya di
+ruang meeting, tanpa setting apa pun. Sesi yang terpisah (misalnya dua repo untuk satu fitur) bisa dikumpulkan dengan
 grup yang sama:
 
 ```bash
@@ -117,11 +117,11 @@ Supaya `HQ_GROUP` terkirim, setting hook harus memuat header `X-HQ-Group` (sudah
 
 | Yang dilakukan Claude Code | Yang kamu lihat |
 |---|---|
-| Kamu kirim prompt | Kartu tugas muncul di Papan Tugas (Lt.2); karakter lari mengambilnya, lalu membawanya ke meja (atau ke ruangan timnya di Lt.3) |
+| Kamu kirim prompt | Kartu tugas muncul di Papan Tugas (Kantor); karakter lari mengambilnya, lalu membawanya ke meja (atau ke ruangan timnya di Security / Ruang Server) |
 | Claude memakai tool (Bash, Edit, Read, ...) | Karakter kerja; bubble menampilkan aksinya, misalnya `$ npm test` atau `Edit auth.go` |
 | Claude minta izin | Karakter melambai, status oranye "Butuh kamu" |
 | Claude selesai | Confetti, lalu karakter jalan ke area santai |
-| Subagen dimulai | Karakter sesi naik ke ruang meeting kosong di Lt.4; subagen langsung muncul di kursi mejanya, lalu pergi sekitar 45 detik setelah selesai |
+| Subagen dimulai | Karakter sesi naik ke ruang meeting kosong; subagen langsung muncul di kursi mejanya, lalu pergi sekitar 45 detik setelah selesai |
 | Sesi ditutup | Karakter offline, hilang setelah 5 menit |
 
 Kalau Agent HQ mati, Claude Code tetap jalan normal: hook-nya cuma menunggu maksimal 3 detik dan kegagalannya
@@ -170,30 +170,33 @@ curl -s -X POST http://127.0.0.1:8787/event -H 'content-type: application/json' 
 | Error | merah | gemetar dan berasap |
 | Offline | abu-abu | tidur di meja |
 
-**Lantai:**
+**Denah:** satu lantai bertingkat (terasering). Tiga tingkat naik ke belakang, dihubungkan tangga, jadi semua area
+terlihat sekaligus tanpa saling menutupi.
 
-- **Lt.1 Santai:** lounge (TV, sofa, beanbag), pantry (mesin kopi, kulkas), game room (arcade, pingpong),
-  ruang rebahan. Agen yang idle main HP, nonton TV, ngopi, atau tidur siang di sini.
-- **Lt.2 Kantor:** 9 meja kerja (agen ke-10 dan seterusnya hanya tampil di Daftar Agen), Papan Tugas, ruang kreatif (whiteboard, main kartu), pojok baca, ruang server,
-  jendela.
-  Papan misi di dinding merangkum agen aktif, tugas selesai, token, dan error.
-- **Lt.3 Security** (naik lift dari Lt.2):
+- **Depan, Santai:** lounge (TV, sofa, beanbag), pantry (mesin kopi, kulkas), game room (arcade, pingpong),
+  ruang rebahan, lobby (lambang AGENT HQ, bangku, tangga utama), mesin minuman, dan teras dengan teropong.
+  Agen yang idle main HP, nonton TV, ngopi, tidur siang, atau bengong lihat planet di sini.
+- **Tengah, Kantor:** 9 meja kerja (agen ke-10 dan seterusnya hanya tampil di Daftar Agen), Papan Tugas, papan
+  misi, jam, Papan Jadwal, ruang kreatif (whiteboard, main kartu), pojok baca, dan taman (kolam, bangku).
+  Papan misi di dinding kiri merangkum agen aktif, tugas selesai, token, dan error.
+- **Belakang, Security:**
   - **Red Team Lab:** peta target. Node yang punya temuan jadi merah.
   - **Ruang Laporan VA:** papan jumlah temuan per severity.
   - **SOC Blue Team:** grafik login gagal per menit. Saat ada alert, sirene berputar dan ruangan berkedip merah.
-- **Lt.4 Meeting** (lift terus naik dari Lt.3): tiga ruang meeting (A, B, C) tertutup kaca seperti kantor biasa:
-  dinding kaca buram setinggi 2,6 dengan kusen tipis, dan pintu geser yang terbuka sendiri saat agen lewat.
-  Masing-masing berisi meja dengan 5 kursi dan layar tim. Di tampilan Semua lantai ini ada di paling atas, jadi layar dinding belakang Lt.3 hanya terlihat
-  penuh di tampilan Lt.3 (alert tetap muncul di log dan toast).
+- **Belakang, Meeting:** tiga ruang meeting (A, B, C) tertutup kaca seperti kantor biasa: dinding kaca buram
+  setinggi 2,6 dengan kusen tipis, dan pintu geser yang terbuka sendiri saat agen lewat. Masing-masing berisi meja
+  dengan 5 kursi dan layar tim.
+- **Belakang, Ruang Server:** ruangan khusus berdinding kaca dengan pintu geser: dua baris rak, tabung disk, unit
+  pendingin, layar dinding, lampu status di atas pintu, dan 3 stasiun DevOps (lihat **Ruang server** di bawah).
 
 **Ruang meeting:** satu tim = satu sesi + subagennya, atau agen dengan grup yang sama (`HQ_GROUP`, field `group`).
 Selama tim punya subagen aktif, atau minimal dua anggota grup aktif, tim itu dapat ruang kosong pertama. Ketua
-duduk di ujung meja menghadap kamera, anggota lain di sisi meja. Rapat menang atas ruangan Lt.3, dan ketua yang
-santai tetap duduk menunggu subagennya. Subagen yang dapat kursi tidak memakai meja Lt.2. Layar ruangan
+duduk di ujung meja menghadap kamera, anggota lain di sisi meja. Rapat menang atas ruangan tim (Security,
+DevOps), dan ketua yang santai tetap duduk menunggu subagennya. Subagen yang dapat kursi tidak memakai meja kantor. Layar ruangan
 menampilkan nama tim, tugas ketua, anggota, dan lama rapat. Ruangan penuh atau anggota lebih dari lima? Sisanya
 kerja di meja seperti biasa. Log mencatat `Rapat mulai` dan `Rapat selesai` dengan nama `Meeting`.
 
-**Diskusi dengan goal:** klik monitor Meeting A/B/C di Lt.4 (atau tombol nama ruangan di kanan bawah).
+**Diskusi dengan goal:** klik monitor Meeting A/B/C (atau tombol nama ruangan di kanan bawah tampilan Meeting).
 Isi goal, pilih 2–5 agen Hermes, dan/atau tekan **Buat agen baru** untuk mengisi Nama, Peran, dan Model.
 **Buat dan tambahkan** membuat sesi agen sungguhan dan langsung memilihnya sebagai peserta. Agen baru tetap
 tersedia di kantor dan Riwayat setelah rapat. Tekan **Mulai diskusi**: peserta berbicara bergiliran dan menerima
@@ -210,21 +213,23 @@ atau memuat ulang halaman tidak menghentikan rapat. Setelah restart server, rapa
 tidak dijalankan ulang otomatis. Detail: [diskusi meeting](docs/meeting-discussion.md).
 
 **Papan Tugas:** setiap kali agen yang sedang santai atau offline menerima tugas baru (prompt), kartu berwarna
-agen itu muncul di Papan Tugas di dinding kiri Lt.2. Agen lari ke papan, mengambil kartunya, lalu membawanya ke
+agen itu muncul di Papan Tugas di dinding kiri Kantor. Agen lari ke papan, mengambil kartunya, lalu membawanya ke
 meja atau ke ruangan timnya. Kalau tugasnya selesai sebelum kartu diambil, kartunya batal dan agen kembali
 santai. Papan punya tiga tempat. Kalau penuh, atau agen sudah sibuk sejak awal, agen langsung ke meja.
 
-**Ruang server** (Lt.2, kanan belakang) memantau mesin tempat Agent HQ jalan, misalnya VPS-mu. Server Agent HQ
+**Ruang server** (tingkat belakang, paling kanan) memantau mesin tempat Agent HQ jalan, misalnya VPS-mu. Server Agent HQ
 mengukurnya sendiri tiap 5 detik sejak start, juga saat tidak ada yang membuka halaman, tanpa program tambahan:
 
-- **Rak kiri = CPU, rak kanan = RAM.** Baris LED menyala dari bawah sesuai persen. Warnanya hijau di bawah 50%,
+- **Dua rak paling kiri di baris depan: CPU, lalu RAM.** Baris LED menyala dari bawah sesuai persen. Warnanya hijau di bawah 50%,
   kuning sampai 75%, oranye sampai 90%, lalu merah. Makin sibuk CPU, makin cepat LED-nya berkedip.
 - **Tabung = disk.** Tinggi cairan sesuai pemakaian disk `/`, merah mulai 90%.
-- **Layar di atas rak:** CPU (jumlah core dan load average), RAM, disk, uptime, dan memori proses Agent HQ.
+- **Layar di dinding belakang:** CPU (jumlah core dan load average), RAM, disk, uptime, dan memori proses Agent HQ.
+- **Lampu di atas pintu** berwarna sesuai level terburuk CPU/RAM/disk; kipas pendingin berputar makin cepat saat
+  CPU sibuk. Layar stasiun DevOps ikut menampilkan bar CPU dan RAM.
 - **Peringatan** di Log Aktivitas (nama `Server`) dan toast: CPU 90% atau lebih selama 1 menit, RAM atau disk
   90% atau lebih. Baris "normal lagi" muncul setelah turun di bawah 85%.
 - Data berhenti datang lebih dari 20 detik: LED abu-abu dan layar menulis TERPUTUS.
-- **Klik rak, tabung, atau layarnya** (di tampilan Lt.2) untuk membuka panel **Server** di kanan: CPU, RAM, dan
+- **Klik rak, tabung, atau layarnya** untuk membuka panel **Server** di kanan: CPU, RAM, dan
   disk dengan detailnya, grafik 30 menit terakhir (arahkan kursor ke grafik untuk membaca nilainya), uptime, memori
   Agent HQ, dan peringatan server terakhir. Tutup dengan tombol Tutup atau Esc. Riwayat 30 menit disimpan di memori
   server, jadi grafiknya langsung terisi saat halaman dibuka dan mulai kosong lagi setelah Agent HQ di-restart.
@@ -236,11 +241,14 @@ average tidak ada, jadi tidak ditampilkan. Tidak tersedia di `examples/server.js
 **Token** di kartu agen adalah total kumulatif semua jenis token sesi itu (input, output, dan cache), dibaca dari
 transcript Claude Code, jadi angkanya bisa besar karena cache read ikut dihitung.
 
-**Agen masuk ke Lt.3** kalau `HQ_TEAM` diisi, atau kalau prompt dan perintahnya memuat kata kunci tim:
+**Agen pindah ke ruangan timnya** (Security atau Ruang Server) kalau `HQ_TEAM` diisi, atau kalau prompt dan
+perintahnya memuat kata kunci tim:
 
 - **Red Team:** pentest, nmap, sqlmap, exploit, recon, xss, idor
 - **Blue Team:** bruteforce, siem, fail2ban, wazuh, login gagal
 - **Laporan VA:** laporan, cvss, temuan, remediasi
+- **DevOps** (Ruang Server): docker, kubectl, kubernetes, helm, terraform, ansible, systemctl, rolling deploy,
+  rollout, sertifikat TLS, infrastruktur, atau peran DevOps/SRE
 
 Daftar kata kuncinya ada di `lib/teams.ts`.
 
@@ -251,9 +259,9 @@ Daftar kata kuncinya ada di `lib/teams.ts`.
 | Putar kamera | seret dengan klik kiri |
 | Geser kamera | seret dengan klik kanan |
 | Zoom | scroll mouse atau cubit trackpad |
-| Fokus ke agen | klik badan, bubble nama, atau kartu agen; kamera lalu mengikuti agen itu (termasuk naik turun lantai) |
+| Fokus ke agen | klik badan, bubble nama, atau kartu agen; kamera lalu mengikuti agen itu (termasuk naik turun tangga) |
 | Keluar dari fokus | klik lagi agen yang sedang difokus (kamera kembali ke posisi sebelumnya) |
-| Lihat satu lantai | tombol Semua / Lt.4 Meeting / Lt.3 Security / Lt.2 Kantor / Lt.1 Santai |
+| Lihat satu area | tombol Semua / Santai / Kantor / Security / Meeting / Server |
 | Reset kamera | tombol ⌂ |
 
 - **Daftar Agen** (kanan): satu kartu per agen. Klik kartu untuk fokus dan melihat progres serta 12 event
@@ -295,11 +303,11 @@ curl -s -X POST $E -H "$H" -d '{"type":"task_done","id":"bot-1","task":"Refactor
 # hapus agen
 curl -s -X POST $E -H "$H" -d '{"type":"remove","id":"bot-1"}'
 
-# Lt.4 Meeting: subagen menyebut induknya (parent), agen terpisah memakai grup yang sama (group)
+# Meeting: subagen menyebut induknya (parent), agen terpisah memakai grup yang sama (group)
 curl -s -X POST $E -H "$H" -d '{"type":"agent_update","id":"bot-2","parent":"bot-1","status":"working","task":"Cek test"}'
 curl -s -X POST $E -H "$H" -d '{"type":"agent_update","id":"bot-3","group":"Rilis v2.3","status":"working"}'
 
-# Lt.3 Security
+# Security
 curl -s -X POST $E -H "$H" -d '{"type":"finding","id":"rexx","severity":"high","title":"SQL injection di /login"}'
 curl -s -X POST $E -H "$H" -d '{"type":"alert","id":"sentra","severity":"critical","message":"Bruteforce SSH 412x/2 mnt","source_ip":"103.94.12.7"}'
 curl -s -X POST $E -H "$H" -d '{"type":"metric","name":"failed_logins","value":37}'
@@ -443,8 +451,8 @@ dihapus. Klik **Keluarkan** di kartu Daftar Agen, tanpa dialog konfirmasi. Tombo
 Kerja, Mikir, Butuh kamu, atau Error, dan bridge juga menolaknya.
 
 Agen langsung hilang dari Daftar Agen. Di kantor, drone pengantar menuntunnya ke **Airlock** di pojok depan kanan
-Lt.4. Setelah pintu dalam tertutup, alarm berbunyi, pintu luar terbuka, dan agen terlempar ke luar angkasa. Paling
-jelas dilihat di tampilan Semua atau Lt.4.
+area Santai, di antara mesin minuman dan Teras. Setelah pintu dalam tertutup, alarm berbunyi, pintu luar terbuka, dan
+agen terlempar ke luar angkasa. Paling jelas dilihat di tampilan Semua atau Santai.
 
 Agen kembali sendiri begitu ada aktivitas lagi (status Mikir, Kerja, Butuh kamu, atau Error, juga temuan atau alert),
 lengkap dengan nama, peran, tim, dan token terakhirnya. Event santai, offline, hitungan token, dan log tidak

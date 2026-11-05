@@ -1,15 +1,16 @@
-// Floor 3 "Security Ops": Red Team lab, VA report room, SOC Blue Team, lift F2<->F3, team stations.
-// Ported 1:1 from references/agent-hq.html.
+// Back tier, left: "Security Ops" (deviation 29): Red Team lab, VA report room, SOC Blue Team, and the team stations
+// (also used for the DevOps stations in the server room). The rooms are the prototype's floor 3
+// (references/agent-hq.html), authored in its old floor-plan coordinates inside one group that OFFSET moves to the
+// back tier. The lift is gone; the hologram table moved a little back so the street in front stays clear.
 
 import * as THREE from "three";
-import { F2, F3 } from "../constants";
 import type { Fonts } from "../scene/fonts";
-import { boxAt, canvasTex, cyl, mesh, noLine, rbox, thin, type CanvasTex } from "../scene/kit";
+import { boxAt, canvasTex, cyl, mesh, noLine, rbox, type CanvasTex } from "../scene/kit";
 import { STATION_LAYOUT, stationPlace, type StationPlace } from "../nav/places";
+import { T2 } from "../layout";
 import { DEPTS, type Dept } from "@/lib/teams";
 import { alienPlant } from "./props/alienPlant";
 import { makeWall, partition, roomLabel, type Build } from "./structure";
-import type { CSS2DObject } from "three/addons/renderers/CSS2DRenderer.js";
 
 type BasicMesh = THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;
 type ToonMesh = THREE.Mesh<THREE.BufferGeometry, THREE.MeshToonMaterial>;
@@ -34,52 +35,29 @@ export interface Sec {
   printer: { paper: THREE.Mesh; stack: THREE.Mesh; n: number };
   soc: CanvasTex;
   siren: { dome: ToonMesh; beams: THREE.Group; light: THREE.PointLight };
-  pad: BasicMesh;
-  stations: Station[];
-  /** Lid and top ring of the lift tube: hidden while floor 4 is shown (the tube goes on up, and the ring would
-   *  float between the floors). */
-  liftTop: THREE.Object3D[];
-  /** "LIFT KE LT.3 & 4" on floor 2 ("LIFT KE LT.3" without the meeting floor). */
-  liftLabel2: CSS2DObject;
 }
 
-/** Lift tube axis (floors 2 to 4). */
-export const LIFT_X = 6.8, LIFT_Z = 4.8;
-/** Open side of the glass tube, facing the floor-3 exit (X3) and the floor-4 exit (X4). */
-export const LIFT_GAP = Math.atan2(5.4 - LIFT_X, 4.0 - LIFT_Z);
+/** The prototype's floor-3 height, and where its floor plan lands on the back tier. */
+const F3 = 11.2;
+export const SEC_OFFSET = { dx: -15.8, dy: T2 - F3, dz: -12.2 };
 
-export function buildFloor3(b: Build, g2: THREE.Group, g3: THREE.Group, tentacles: THREE.Group[], fonts: Fonts): Sec {
+export function buildSecurity(b: Build, g: THREE.Group, tentacles: THREE.Group[], fonts: Fonts): Sec {
   const { M } = b;
   const { toon, flat } = b.kit;
   const SEC = {} as Sec;
+  const g3 = new THREE.Group();
+  g3.position.set(SEC_OFFSET.dx, SEC_OFFSET.dy, SEC_OFFSET.dz);
+  g.add(g3);
 
-  // slab with the lift hole
-  for (const [x0, x1, z0, z1] of [[-13, 5.8, -8, 8.4], [7.8, 13, -8, 8.4], [5.8, 7.8, -8, 3.8], [5.8, 7.8, 5.8, 8.4]]) {
-    boxAt(g3, x1 - x0, 0.4, z1 - z0, (x0 + x1) / 2, F3 - 0.4, (z0 + z1) / 2, M.slab, 0.04, false);
-  }
-  const V2 = (x: number, y: number) => new THREE.Vector2(x, y);
-  const sh = new THREE.Shape([V2(-12.6, 7.6), V2(13, 7.6), V2(13, -8.4), V2(-12.6, -8.4)]);
-  sh.holes.push(new THREE.Path([V2(5.8, -3.8), V2(5.8, -5.8), V2(7.8, -5.8), V2(7.8, -3.8)]));
-  const tile = canvasTex(128, 128);
-  {
-    const c = tile.ctx;
-    c.fillStyle = "#2f2858"; c.fillRect(0, 0, 128, 128);
-    c.fillStyle = "#383066"; c.fillRect(0, 0, 64, 64); c.fillRect(64, 64, 64, 64);
-    c.strokeStyle = "rgba(160,140,255,.18)"; c.lineWidth = 2; c.strokeRect(1, 1, 126, 126);
-  }
-  tile.tex.wrapS = tile.tex.wrapT = THREE.RepeatWrapping;
-  tile.tex.repeat.set(0.25, 0.25);
-  const fl = mesh(new THREE.ShapeGeometry(sh), noLine(toon("#ffffff", { map: tile.tex })), false, true);
-  fl.rotation.x = -Math.PI / 2; fl.position.y = F3 + 0.006; g3.add(fl);
-  // walls
+  // walls: back wall in three room colors, the left wall down to the riser (the office tier starts in front of it)
   makeWall(b, g3, "x", -7.8, -13, -4, F3, 4.4, [], M.redWall);
   makeWall(b, g3, "x", -7.8, -4, 4, F3, 4.4, [], M.repWall);
   makeWall(b, g3, "x", -7.8, 4, 13, F3, 4.4, [], M.socWall);
-  makeWall(b, g3, "z", -12.8, -8, 8.4, F3, 4.4, [{ a0: 3, a1: 6.5, y0: F3 + 1.3, y1: F3 + 3.3 }], M.redWall);
+  makeWall(b, g3, "z", -12.8, -8, 4.2, F3, 4.4, [], M.redWall);
   boxAt(g3, 26.4, 0.18, 0.56, 0, F3 + 4.4, -7.8, M.trim, 0.04);
-  boxAt(g3, 0.56, 0.18, 16.4, -12.8, F3 + 4.4, 0.2, M.trim, 0.04);
+  boxAt(g3, 0.56, 0.18, 12.4, -12.8, F3 + 4.4, -1.9, M.trim, 0.04);
   boxAt(g3, 26, 0.25, 0.48, 0, F3, -7.8, M.dark, 0.04);
-  boxAt(g3, 0.48, 0.25, 16, -12.8, F3, 0.2, M.dark, 0.04);
+  boxAt(g3, 0.48, 0.25, 12.0, -12.8, F3, -1.9, M.dark, 0.04);
   partition(b, g3, "z", -4, -7.6, -2.2, F3);
   partition(b, g3, "z", 4, -7.6, -2.2, F3);
   const rug = (x0: number, x1: number, z0: number, z1: number, c: string) => {
@@ -93,7 +71,7 @@ export function buildFloor3(b: Build, g2: THREE.Group, g3: THREE.Group, tentacle
   SEC.redWall = canvasTex(768, 256);
   const rw = mesh(new THREE.PlaneGeometry(6.0, 2.0), noLine(flat("#ffffff", { map: SEC.redWall.tex })), false, false);
   rw.position.set(-8.6, F3 + 3.07, -7.41); g3.add(rw);
-  const holo = new THREE.Group(); holo.position.set(-8.8, F3, 4.4); g3.add(holo);
+  const holo = new THREE.Group(); holo.position.set(-8.8, F3, 2.4); g3.add(holo);
   cyl(holo, 0.95, 1.05, 0.85, 0, 0, 0, M.dark, 24);
   const disc = mesh(new THREE.CylinderGeometry(0.85, 0.85, 0.04, 32), noLine(flat("#59c3ff")), false, false) as BasicMesh;
   disc.position.y = 0.88; holo.add(disc);
@@ -101,9 +79,9 @@ export function buildFloor3(b: Build, g2: THREE.Group, g3: THREE.Group, tentacle
   const hmat = noLine(flat("#7fe3ff", { transparent: true, opacity: 0.35, depthWrite: false }));
   const edgeMat = new THREE.LineBasicMaterial({ color: "#bff3ff" });
   for (const [w, h, d, x, z] of [[0.9, 0.55, 0.6, 0, 0], [0.32, 1.05, 0.32, 0.42, -0.12], [0.45, 0.3, 0.4, -0.45, 0.2]]) {
-    const g = new THREE.BoxGeometry(w, h, d);
-    const bx = new THREE.Mesh(g, hmat); bx.position.set(x, h / 2, z); model.add(bx);
-    const e = new THREE.LineSegments(new THREE.EdgesGeometry(g), edgeMat); e.position.copy(bx.position); model.add(e);
+    const geo = new THREE.BoxGeometry(w, h, d);
+    const bx = new THREE.Mesh(geo, hmat); bx.position.set(x, h / 2, z); model.add(bx);
+    const e = new THREE.LineSegments(new THREE.EdgesGeometry(geo), edgeMat); e.position.copy(bx.position); model.add(e);
   }
   const roof = new THREE.Mesh(new THREE.ConeGeometry(0.62, 0.35, 4), hmat); roof.position.set(0, 0.72, 0); roof.rotation.y = Math.PI / 4; model.add(roof);
   const scan = mesh(new THREE.TorusGeometry(0.72, 0.025, 6, 40), noLine(flat("#ff4f5e")), false, false);
@@ -158,43 +136,24 @@ export function buildFloor3(b: Build, g2: THREE.Group, g3: THREE.Group, tentacle
   const alarm = new THREE.PointLight("#ff2a3a", 0, 14, 0); alarm.position.set(8.3, F3 + 3.4, -3); g3.add(alarm);
   SEC.siren = { dome, beams, light: alarm };
 
-  // --- lift Lt.2 <-> Lt.3 ---
-  const LX = LIFT_X, LZ = LIFT_Z;
-  const glassM = thin(toon("#bfe9ff", { transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false }), 0.7);
-  const gapC = LIFT_GAP;
-  const tubeGeo = (h: number) => new THREE.CylinderGeometry(0.95, 0.95, h, 32, 1, true, gapC + 0.7, Math.PI * 2 - 1.4);
-  const t2 = mesh(tubeGeo(F3 - F2), glassM, false, false); t2.position.set(LX, F2 + (F3 - F2) / 2, LZ); g2.add(t2);
-  const t3 = mesh(tubeGeo(2.8), glassM, false, false); t3.position.set(LX, F3 + 1.4, LZ); g3.add(t3);
-  cyl(g2, 1.12, 1.12, 0.1, LX, F2, LZ, M.dark, 32);
-  const pad = mesh(new THREE.CircleGeometry(0.9, 32), noLine(flat("#ff6fd8")), false, false) as BasicMesh;
-  pad.rotation.x = -Math.PI / 2; pad.position.set(LX, F2 + 0.11, LZ); g2.add(pad);
-  SEC.liftTop = [cyl(g3, 1.12, 1.12, 0.14, LX, F3 + 2.8, LZ, M.dark, 32)];
-  for (const [g, y] of [[g2, F2 + 0.15], [g2, F3 - 0.5], [g3, F3 + 0.05], [g3, F3 + 2.7]] as const) {
-    const r = mesh(new THREE.TorusGeometry(0.97, 0.05, 8, 40), noLine(flat("#ff6fd8")), false, false);
-    r.rotation.x = Math.PI / 2; r.position.set(LX, y, LZ); g.add(r);
-    if (y === F3 + 2.7) SEC.liftTop.push(r);
-  }
-  SEC.pad = pad;
-  SEC.liftLabel2 = roomLabel(b, g2, "LIFT KE LT.3 & 4", LX, F2 + 0.2, LZ + 1.6, 2);
-  roomLabel(b, g3, "LIFT", LX, F3 + 0.2, LZ + 1.6, 3);
-  alienPlant(b, tentacles, g3, -12.0, F3, 7.3, 0.8);
-  alienPlant(b, tentacles, g3, 12.2, F3, 7.3, 0.8);
-  roomLabel(b, g3, "RED TEAM LAB", -8.6, F3 + 0.2, 6.6, 3);
-  roomLabel(b, g3, "RUANG LAPORAN VA", 0, F3 + 0.2, 1.4, 3);
-  roomLabel(b, g3, "SOC · BLUE TEAM", 10.6, F3 + 0.2, 2.6, 3);
-
-  SEC.stations = STATION_LAYOUT.map((_, i) => buildStation(b, g3, i));
+  alienPlant(b, tentacles, g3, -12.0, F3, 2.8, 0.8);
+  alienPlant(b, tentacles, g3, 12.3, F3, -5.9, 0.8);
+  roomLabel(b, g3, "RED TEAM LAB", -8.6, F3 + 0.2, 3.0, "security");
+  roomLabel(b, g3, "RUANG LAPORAN VA", 0, F3 + 0.2, 1.4, "security");
+  roomLabel(b, g3, "SOC · BLUE TEAM", 10.6, F3 + 0.2, 2.6, "security");
   return SEC;
 }
 
-/** Team workstation, facing the back wall so the camera sees the agent over the shoulder. */
-function buildStation(b: Build, g3: THREE.Group, index: number): Station {
+const STATION_TOP: Record<Dept, string> = { red: "#a8394f", report: "#c98a4b", blue: "#3a6fb8", ops: "#2f8f86" };
+
+/** Team workstation (STATION_LAYOUT[index], world coordinates), facing the back wall so the camera sees the agent
+ *  over the shoulder. */
+export function buildStation(b: Build, parent: THREE.Object3D, index: number): Station {
   const { M } = b;
   const { toon, flat } = b.kit;
   const [dept, x, z] = STATION_LAYOUT[index];
-  const g = new THREE.Group(); g.position.set(x, F3, z); g.rotation.y = Math.PI; g3.add(g);
-  const topC = { red: "#a8394f", report: "#c98a4b", blue: "#3a6fb8" }[dept];
-  g.add(mesh(rbox(2.6, 0.14, 1.3, 0.06), toon(topC)).translateY(1.02));
+  const g = new THREE.Group(); g.position.set(x, T2, z); g.rotation.y = Math.PI; parent.add(g);
+  g.add(mesh(rbox(2.6, 0.14, 1.3, 0.06), toon(STATION_TOP[dept])).translateY(1.02));
   for (const sx of [-1.15, 1.15]) {
     const leg = mesh(rbox(0.14, 0.95, 1.1, 0.04), M.dark); leg.position.set(sx, 0.48, 0); g.add(leg);
   }
@@ -214,6 +173,7 @@ function buildStation(b: Build, g3: THREE.Group, index: number): Station {
   if (dept === "report") for (let i = 0; i < 3; i++) boxAt(g, 0.42, 0.05 + i * 0.03, 0.55, -1.0, 1.09 + i * 0.07, -0.1 + i * 0.02, M.white, 0.01);
   if (dept === "red") for (const cx of [1.0, 1.15]) cyl(g, 0.06, 0.06, 0.2, cx, 1.09, -0.2, toon("#ff4f5e"), 10);
   if (dept === "blue") cyl(g, 0.09, 0.08, 0.18, 1.05, 1.09, -0.2, toon("#9ad0ff"), 12);
+  if (dept === "ops") boxAt(g, 0.36, 0.08, 0.26, 1.0, 1.09, -0.15, toon("#3fe0c5"), 0.02); // a little network switch
   const chair = new THREE.Group(); chair.position.set(0, 0, -1.05); g.add(chair);
   chair.add(mesh(new THREE.CylinderGeometry(0.58, 0.5, 0.14, 24), toon("#4a3f80")).translateY(0.58));
   const ring = mesh(new THREE.TorusGeometry(0.42, 0.05, 8, 28), noLine(flat("#3a3360")), false, false) as BasicMesh;

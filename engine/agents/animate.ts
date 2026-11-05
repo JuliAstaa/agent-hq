@@ -1,21 +1,21 @@
 // Per-frame agent animation (port of animateAgent in references/agent-hq.html, prd.md §10.4).
 
 import * as THREE from "three";
-import { F2, F3, F4 } from "../constants";
+import { T1, T2 } from "../layout";
 import { V } from "../scene/kit";
 import type { Desk } from "../world/props/desk";
-import type { Station } from "../world/floor3";
+import type { Station } from "../world/security";
 import type { Avatar } from "./avatar";
 import { QUIRK_DUR, type FunState } from "./fun";
-import { floorOf, updateNav, type Mover, type NavCtx } from "./movement";
+import { updateNav, type Mover, type NavCtx } from "./movement";
 import type { SeatPlace } from "../nav/places";
 import { POSE } from "./poses";
 import { STATUS } from "@/lib/events";
-import type { Agent, FloorMode } from "@/lib/store";
+import type { Agent } from "@/lib/store";
 
 export interface AgentRuntime extends Mover {
   av: Avatar;
-  /** Home desk on floor 2; null for a subagent seated on the meeting floor without one (prd.md §7.9). */
+  /** Home desk in the office; null for a subagent seated in a meeting room without one (prd.md §7.9). */
   desk: Desk | null;
   /** Random actions and chat balloons (fun.ts). */
   fun?: FunState;
@@ -26,12 +26,9 @@ export interface AgentRuntime extends Mover {
 export interface AnimCtx {
   camera: THREE.Camera;
   selectedId: string | null;
-  floorMode: FloorMode;
-  /** Floor 4 hidden (engine.debug.hideMeetingFloor): Semua shows three floors, as in the prototype. */
-  meetingHidden: boolean;
   nav: NavCtx;
   stations: Station[];
-  /** Meeting seat chairs by SeatPlace.index (floor 4). */
+  /** Meeting seat chairs by SeatPlace.index. */
   seatChairs: THREE.Group[];
   /** The store's meeting seat for an agent, as a place. */
   seatOf: (a: Agent) => SeatPlace | null;
@@ -143,6 +140,7 @@ export function animateAgent(ctx: AnimCtx, rt: AgentRuntime, a: Agent, t: number
         break;
       }
       case "phone":
+      case "park": // garden bench: phone in hand, like the sofa
       case "lie_phone": {
         const recl = act === "lie_phone";
         setArms(recl ? -2.0 : -1.25, 0.5, (recl ? -2.0 : -1.25) + Math.sin(t * 14) * 0.05, -0.5);
@@ -266,7 +264,7 @@ export function animateAgent(ctx: AnimCtx, rt: AgentRuntime, a: Agent, t: number
   LR.rotation.x += (legR - LR.rotation.x) * Math.min(1, dt * 14);
   // props
   const P = v.P;
-  P.phone.visible = act === "phone" || act === "lie_phone";
+  P.phone.visible = act === "phone" || act === "park" || act === "lie_phone";
   P.book.visible = act === "read";
   P.cards.visible = act === "cards";
   P.paddle.visible = act === "pingpong";
@@ -306,30 +304,17 @@ export function animateAgent(ctx: AnimCtx, rt: AgentRuntime, a: Agent, t: number
     if (mv.dest.kind === "station") {
       const sc = ctx.stations[mv.dest.index].chair;
       sc.position.y = bob;
-      v.root.position.y = F3 + sc.position.y;
+      v.root.position.y = T2 + sc.position.y;
     } else if (mv.dest.kind === "seat") {
       const sc = ctx.seatChairs[mv.dest.index];
-      sc.position.y = F4 + bob;
+      sc.position.y = T2 + bob;
       v.root.position.y = sc.position.y;
-    } else if (d) v.root.position.y = F2 + d.chair.position.y;
+    } else if (d) v.root.position.y = T1 + d.chair.position.y;
   }
   if (d && d.plateName !== a.name) ctx.drawPlate(rt, a);
   if (st === "error" && mode === "desk") {
     v.smokeT -= dt;
     if (v.smokeT <= 0) { v.smokeT = 0.35; ctx.spawnSmoke(v.root.position.clone().add(tmpV.set(0, v.top + 0.15, 0))); }
-  }
-  // visibility per floor: floors above the view are hidden; on Lt.3 and Lt.4 other floors' bubbles too
-  const fm = ctx.floorMode;
-  const fl = floorOf(rt);
-  const vis = !(fm !== "all" && fl > Number(fm)) && !(ctx.meetingHidden && fl === 4);
-  v.root.visible = vis;
-  v.label.visible = vis && !((fm === "3" || fm === "4") && fl < Number(fm));
-  const top = ctx.meetingHidden ? 3 : 4;
-  const badge = fm === "all" && fl < top;
-  v.el.classList.toggle("f1", badge);
-  if (badge && v.badgeFloor !== fl) {
-    v.badgeFloor = fl;
-    (v.el.querySelector(".fl") as HTMLElement).textContent = "Lt." + fl;
   }
   v.el.style.opacity = st === "offline" ? "0.55" : "1";
 }

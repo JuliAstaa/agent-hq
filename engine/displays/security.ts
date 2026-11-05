@@ -1,14 +1,15 @@
-// Floor 3 displays: attack-surface wall, VA severity board, SOC video wall, team station monitors.
-// Ported 1:1 from references/agent-hq.html.
+// Security displays: attack-surface wall, VA severity board, SOC video wall, team station monitors.
+// Ported 1:1 from references/agent-hq.html; the DevOps station monitors (server room, deviation 29) are new.
 
 import { SEV, SEV_KEYS, STATUS } from "@/lib/events";
 import { fmtTime, truncate } from "@/lib/format";
 import { hashStr } from "@/lib/palette";
 import type { Agent, HQState } from "@/lib/store";
 import { DEPTS } from "@/lib/teams";
-import { RED_EDGES, RED_NODES, SOCLOG, TERM } from "../constants";
+import { LEVEL_COLOR, levelOf, memPct } from "@/lib/server";
+import { OPSLOG, RED_EDGES, RED_NODES, SOCLOG, TERM } from "../constants";
 import type { Fonts } from "../scene/fonts";
-import type { Sec, Station } from "../world/floor3";
+import type { Sec, Station } from "../world/security";
 
 /** Time-driven SOC state owned by the engine (series, flash, metric). */
 export interface SocAnim {
@@ -128,7 +129,7 @@ export function drawSOC(F: Fonts, SEC: Sec, s: HQState, soc: SocAnim, simTime: n
 
 export function drawStation(F: Fonts, st: Station, a: Agent | undefined, s: HQState, soc: SocAnim, simTime: number, t: number) {
   const { ctx: c } = st.cv, W = 512, H = 160, d = st.dept;
-  const bg = { red: "#16070d", report: "#1d1a2e", blue: "#07122a" }[d];
+  const bg = { red: "#16070d", report: "#1d1a2e", blue: "#07122a", ops: "#061a1a" }[d];
   c.fillStyle = bg; c.fillRect(0, 0, W, H); c.textAlign = "left";
   if (!a) {
     c.fillStyle = "rgba(255,255,255,.25)"; c.font = `20px ${F.bungee}`; c.textAlign = "center";
@@ -164,6 +165,31 @@ export function drawStation(F: Fonts, st: Station, a: Agent | undefined, s: HQSt
     }
     c.fillStyle = "#ffd23f"; c.font = `14px ${F.bungee}`; c.fillText("CVSS", 272, 24);
     SEV_KEYS.forEach((k, i) => { c.fillStyle = SEV[k].color; c.fillRect(272, 38 + i * 22, 20 + Math.min(200, s.vuln.counts[k] * 24), 14); });
+  } else if (d === "ops") {
+    // left: deploy terminal; right: pipeline stages, and the live CPU / RAM of the server monitor when it reports
+    c.font = `12px ${F.mono}`;
+    const off = status === "working" ? Math.floor(t * 2) : 0;
+    for (let i = 0; i < 9; i++) {
+      const line = OPSLOG[(i + off) % OPSLOG.length];
+      c.fillStyle = line.startsWith("$") ? "#ffd23f" : "#7ff5dc";
+      c.fillText(line, 10, 18 + i * 16);
+    }
+    c.fillStyle = "#3fe0c5"; c.font = `14px ${F.bungee}`; c.fillText("PIPELINE", 272, 24);
+    const stage = status === "working" ? Math.floor(t * 0.8 + (hashStr(a.id) % 4)) % 4 : -1;
+    ["BUILD", "TEST", "PUSH", "DEPLOY"].forEach((name, i) => {
+      c.fillStyle = i < stage ? "#2f8f86" : i === stage ? (Math.sin(t * 6) > 0 ? "#3fe0c5" : "#1f6f68") : "#173836";
+      c.fillRect(272 + i * 58, 36, 52, 26);
+      c.fillStyle = "#e9fffb"; c.font = `10px ${F.mono}`; c.fillText(name, 276 + i * 58, 53);
+    });
+    const sv = s.server;
+    if (sv) {
+      ([["CPU", sv.cpu], ["RAM", memPct(sv)]] as const).forEach(([name, p], i) => {
+        const y = 80 + i * 26;
+        c.fillStyle = "#9fe9da"; c.font = `11px ${F.mono}`; c.fillText(name, 272, y + 12);
+        c.fillStyle = "#173836"; c.fillRect(306, y, 190, 16);
+        if (p != null) { c.fillStyle = LEVEL_COLOR[levelOf(p)]; c.fillRect(306, y, 190 * Math.min(1, p), 16); }
+      });
+    }
   } else {
     const max = Math.max(30, ...soc.series), alertOn = simTime < soc.alertUntil;
     c.beginPath();

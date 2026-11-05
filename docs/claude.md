@@ -48,7 +48,7 @@ claude                                  # tanpa nama: "<folder>#<4 huruf session
 PowerShell: `$env:HQ_NAME="Rexx"; $env:HQ_TEAM="red"; claude`.
 
 - `HQ_TEAM`: `red`, `report`, `blue`, atau kosong (ditebak dari prompt dan perintah).
-- `HQ_GROUP`: sesi dengan grup yang sama rapat bersama di Lt.4 Meeting. Subagen ikut sesinya otomatis.
+- `HQ_GROUP`: sesi dengan grup yang sama rapat bersama di ruang Meeting. Subagen ikut sesinya otomatis.
 - `HQ_TOKEN`: isi kalau Agent HQ dijalankan dengan `HQ_TOKEN`.
 - Nama bisa diganti kapan saja lewat tombol ✎ di kartu agen (README bagian 3).
 
@@ -56,11 +56,11 @@ PowerShell: `$env:HQ_NAME="Rexx"; $env:HQ_TEAM="red"; claude`.
 
 | Claude Code | Kantor |
 |---|---|
-| Prompt masuk | kartu di Papan Tugas (Lt.2), karakter mengambilnya |
+| Prompt masuk | kartu di Papan Tugas (Kantor), karakter mengambilnya |
 | Tool jalan | karakter kerja, bubble `$ npm test`, `Edit auth.go` |
 | Minta izin | melambai, "Butuh kamu" |
 | Selesai | confetti, lalu santai |
-| Subagen | sesi naik ke ruang meeting Lt.4 bersama subagennya |
+| Subagen | sesi naik ke ruang meeting bersama subagennya |
 | Sesi ditutup | offline, hilang setelah 5 menit |
 
 Token di kartu agen dibaca dari transcript Claude Code (semua jenis token, kumulatif per sesi).

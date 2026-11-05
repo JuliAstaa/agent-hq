@@ -200,7 +200,7 @@ export default function Office() {
         }
       />
       <div data-hq-ui="panels" style={infoHidden ? { display: "none" } : undefined}>
-        {floor === "4" && meetingRoom === null && <nav data-hq-ui="meeting-access" aria-label="Buka ruang meeting" className={cn(CARD, "fixed bottom-[14px] right-[14px] z-[5] flex gap-2 p-2")}>
+        {floor === "meeting" && meetingRoom === null && <nav data-hq-ui="meeting-access" aria-label="Buka ruang meeting" className={cn(CARD, "fixed bottom-[14px] right-[14px] z-[5] flex gap-2 p-2")}>
           {MEETING_ROOMS.map((name, room) => <Button key={name} size="log" onClick={() => openMeeting(room)}>{name}</Button>)}
         </nav>}
         <Roster open={rosterOpen} onOpenChat={hermesOn ? openAgentChat : undefined} openingChatId={openingChatId} />

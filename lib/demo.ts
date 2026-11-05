@@ -139,7 +139,7 @@ export function createDemo(store: HQStore): Demo {
         task: d.tasks[0], tokens: 2000 + i * 1700, progress: 0.1 + i * 0.08,
       })),
     });
-    S().pushLog({ id: "krunch", message: "Mode demo aktif. Klik agen untuk zoom, pilih lantai di atas." });
+    S().pushLog({ id: "krunch", message: "Mode demo aktif. Klik agen untuk zoom, pilih area di atas." });
     timer = setTimeout(tick, 2500);
     after(6000, delegate); // show the meeting floor early in the demo
     S().setConn("demo");

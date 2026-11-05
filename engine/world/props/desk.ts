@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { F2 } from "../../constants";
+import { T1 } from "../../layout";
 import { canvasTex, mesh, noLine, rbox, type CanvasTex } from "../../scene/kit";
 import type { DeskSlot } from "../../nav/places";
 import type { Build } from "../structure";
@@ -18,13 +18,13 @@ export interface Desk {
   plateName?: string;
 }
 
-/** Home desk with monitor, name plate and hover chair. All 12 are built up front (deviation 7 in plan-m1.md). */
-export function buildDesk(b: Build, g2: THREE.Group, slot: DeskSlot): Desk {
+/** Home desk with monitor, name plate and hover chair. All 9 are built up front (deviation 7 in plan-m1.md). */
+export function buildDesk(b: Build, parent: THREE.Group, slot: DeskSlot): Desk {
   const { M } = b;
   const { toon, flat } = b.kit;
-  // Built facing local -z (chair side), then turned PI like the floor-3 stations: the chair ends up on the front
+  // Built facing local -z (chair side), then turned PI like the team stations: the chair ends up on the front
   // side (+z) and the single monitor at the back of the desk faces the agent and the camera.
-  const g = new THREE.Group(); g.position.set(slot.x, F2, slot.z); g.rotation.y = Math.PI; g2.add(g);
+  const g = new THREE.Group(); g.position.set(slot.x, T1, slot.z); g.rotation.y = Math.PI; parent.add(g);
   g.add(mesh(rbox(2.7, 0.16, 1.35, 0.06), M.mustard).translateY(1.02));
   for (const sx of [-1.18, 1.18]) {
     const leg = mesh(rbox(0.14, 0.95, 1.15, 0.04), M.dark); leg.position.set(sx, 0.48, 0); g.add(leg);

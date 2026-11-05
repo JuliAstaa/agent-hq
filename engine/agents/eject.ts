@@ -1,18 +1,18 @@
-// Kicked agents (prd.md §7.10). A small escort drone leads the agent to the Airlock on floor 4. Inside, the inner
+// Kicked agents (prd.md §7.10). A small escort drone leads the agent to the Airlock in the front right corner of the
+// Santai tier. Inside, the inner
 // door shuts and the alarm goes; then the hatch swings open and the agent is blown out, tumbling away into space
 // toward the yellow moon until it twinkles out. The store has already dropped the agent: the engine hands its
 // runtime over here (out of its agent map), so a returning agent can get a new avatar while this one still flies.
 
 import * as THREE from "three";
-import { F4, INK } from "../constants";
+import { INK } from "../constants";
+import { T0, zoneAt } from "../layout";
 import { lerpAngle, mesh, noLine, V, type Kit, type Materials } from "../scene/kit";
 import { AIRLOCK, type AirlockPlace } from "../nav/places";
 import { route } from "../nav/router";
 import { stepAirlock, type AirlockProp } from "../world/airlock";
 import type { AgentRuntime } from "./animate";
-import { floorAtY } from "./movement";
 import type { SfxDetail } from "@/lib/audio";
-import type { FloorMode } from "@/lib/store";
 
 export type EjectPhase = "walk" | "wait" | "launch" | "fly" | "gone";
 
@@ -56,22 +56,18 @@ export interface EjectCtx {
   dispose: (obj: THREE.Object3D, rt?: AgentRuntime) => void;
 }
 
-export interface View {
-  floorMode: FloorMode;
-  meetingHidden: boolean;
-}
-
 /** Walking speed to the Airlock (as fast as an urgent agent), seconds inside before launch, flight time. */
 const SPEED = 4.6, WAIT = 1.4, FLY = 3.0;
-/** Where the hatch lets out (mid height, just outside) and the way into space: up and to the right on screen in
- *  every floor view, a little away from the camera, so the agent shrinks and twinkles out before it leaves the frame. */
-const EXIT = V(AIRLOCK.x1 + 0.3, F4 + 1.0, AIRLOCK.doorZ);
-const AWAY = V(0.25, 0.85, -0.45).normalize();
+/** Where the hatch lets out (mid height, just outside) and the way into space: blown out to the right, then up and a
+ *  little to the left on screen in every view (all seen from the front right), up over the island, so the agent
+ *  shrinks and twinkles out inside the frame even where the Airlock sits at its right edge (the Santai view). */
+const EXIT = V(AIRLOCK.x1 + 0.3, T0 + 1.0, AIRLOCK.doorZ);
+const AWAY = V(-0.55, 0.7, -0.45).normalize();
 /** The drone is a bit bigger than life so it reads next to the agent. */
 const DRONE_SCALE = 1.5;
 /** Outside the inner door: where the drone waits while the Airlock cycles. */
-const DRONE_POST = V(AIRLOCK.x0 - 0.75, F4 + 2.1, AIRLOCK.doorZ);
-const DOOR = V(AIRLOCK.x0, F4, AIRLOCK.doorZ);
+const DRONE_POST = V(AIRLOCK.x0 - 0.75, T0 + 2.1, AIRLOCK.doorZ);
+const DOOR = V(AIRLOCK.x0, T0, AIRLOCK.doorZ);
 
 export function createEjector(ctx: EjectCtx) {
   const list: Eject[] = [];
@@ -105,8 +101,8 @@ export function createEjector(ctx: EjectCtx) {
     return { root, rotor, lamp: lampMat, beam, pop: 0, leave: 0 };
   }
 
-  /** Take over a kicked agent's runtime and start the walk. Without the meeting floor (tests) it just goes poof. */
-  function start(rt: AgentRuntime, meetingHidden: boolean) {
+  /** Take over a kicked agent's runtime and start the walk. */
+  function start(rt: AgentRuntime) {
     const v = rt.av;
     v.root.scale.setScalar(1);
     delete v.spawn;
@@ -117,11 +113,6 @@ export function createEjector(ctx: EjectCtx) {
     v.el.style.pointerEvents = "none";
     v.el.style.opacity = "1";
     (v.el.querySelector(".tt") as HTMLElement).textContent = "· diantar ke Airlock";
-    if (meetingHidden) {
-      ctx.smoke(v.root.position.clone().add(V(0, v.cy, 0)), "#e6f6ff", 1.2, 0.6);
-      ctx.dispose(v.root, rt);
-      return;
-    }
     const busy = new Set(list.filter((e) => e.phase !== "fly" && e.phase !== "gone").map((e) => e.spot));
     const spot = ctx.spots.find((s) => !busy.has(s)) ?? ctx.spots[list.length % ctx.spots.length];
     const mv = rt.mv;
@@ -146,8 +137,8 @@ export function createEjector(ctx: EjectCtx) {
     }
   }
 
-  function update(dt: number, t: number, view: View) {
-    const walkerNear = list.some((e) => e.phase === "walk" && onFloor4(e.rt.root.position) && flatDist(e.rt.root.position, DOOR) < 3.6);
+  function update(dt: number, t: number) {
+    const walkerNear = list.some((e) => e.phase === "walk" && onTier(e.rt.root.position) && flatDist(e.rt.root.position, DOOR) < 3.6);
     for (let i = list.length - 1; i >= 0; i--) {
       const e = list[i];
       e.t += dt;
@@ -169,7 +160,7 @@ export function createEjector(ctx: EjectCtx) {
           // decompression: pulled toward the hatch, faster and faster, tumbling
           if (e.vel.lengthSq() === 0) for (let k = 0; k < 6; k++) ctx.smoke(EXIT.clone().add(V(rnd(0, 1.2), rnd(-0.6, 0.8), rnd(-0.7, 0.7))), "#e6f6ff", 0.9, 0.4);
           tmp.set(1, 0, (EXIT.z - pos.z) * 0.8).normalize();
-          e.vel.addScaledVector(tmp, 30 * dt);
+          e.vel.addScaledVector(tmp, 20 * dt);
           e.vel.y += 4 * dt;
           pos.addScaledVector(e.vel, dt);
           tumble(e, dt, 0.6);
@@ -177,7 +168,7 @@ export function createEjector(ctx: EjectCtx) {
         }
       } else if (e.phase === "fly") {
         const speed = 2.5 + 2 * e.t;
-        e.vel.lerp(tmp.copy(AWAY).multiplyScalar(speed), Math.min(1, dt * 5));
+        e.vel.lerp(tmp.copy(AWAY).multiplyScalar(speed), Math.min(1, dt * 8)); // a short overshoot, then up
         pos.addScaledVector(e.vel, dt);
         tumble(e, dt, 1);
         flailPose(e.rt, t, dt);
@@ -196,8 +187,6 @@ export function createEjector(ctx: EjectCtx) {
         list.splice(i, 1);
         continue;
       }
-      if (e.phase !== "gone") show(e, view);
-      else show(e, view, false);
     }
     const armed = list.some((e) => e.phase === "wait" || e.phase === "launch" || (e.phase === "fly" && e.t < 1.2));
     const hatch = list.some((e) => (e.phase === "launch" && e.t > 0.25) || (e.phase === "fly" && e.t < 0.8));
@@ -259,30 +248,6 @@ export function createEjector(ctx: EjectCtx) {
     }
   }
 
-  /** Floor visibility like animateAgent: floors above the view are hidden, and floor 4 without the meeting floor. */
-  function show(e: Eject, view: View, agent = true) {
-    const fm = view.floorMode;
-    const visOn = (y: number) => {
-      const fl = floorAtY(y);
-      return !(fm !== "all" && fl > Number(fm)) && !(view.meetingHidden && fl === 4);
-    };
-    if (agent) {
-      const v = e.rt.av, fl = floorAtY(v.root.position.y);
-      const vis = visOn(v.root.position.y);
-      v.root.visible = vis;
-      v.label.visible = vis && (e.phase === "walk" || e.phase === "wait") && !((fm === "3" || fm === "4") && fl < Number(fm));
-      const badge = fm === "all" && fl < 4;
-      v.el.classList.toggle("f1", badge);
-      if (badge && v.badgeFloor !== fl) {
-        v.badgeFloor = fl;
-        (v.el.querySelector(".fl") as HTMLElement).textContent = "Lt." + fl;
-      }
-    }
-    const dv = visOn(e.drone.root.position.y);
-    e.drone.root.visible = dv;
-    if (!dv) e.drone.beam.visible = false;
-  }
-
   function twinkle(at: THREE.Vector3) {
     const s = new THREE.Shape();
     for (let k = 0; k < 8; k++) {
@@ -304,27 +269,17 @@ export function createEjector(ctx: EjectCtx) {
     return Math.max(-1, Math.min(1, q.x));
   }
 
-  /** Everything this module put in the world, for the per-floor render passes (engine/index.ts renderFloors). */
-  function objects(): THREE.Object3D[] {
-    const out: THREE.Object3D[] = [];
-    for (const e of list) {
-      if (e.phase !== "gone") out.push(e.rt.root);
-      out.push(e.drone.root, e.drone.beam);
-    }
-    for (const w of twinkles) out.push(w.m);
-    return out;
-  }
-
   /** Tests: who is on the way out, and how far along. */
-  const state = () => list.map((e) => ({ id: e.rt.id, phase: e.phase, t: e.t, floor: floorAtY(e.rt.root.position.y), door: ctx.airlock.door.open, hatch: ctx.airlock.hatch.open }));
+  const state = () => list.map((e) => ({ id: e.rt.id, phase: e.phase, t: e.t, zone: zoneAt(e.rt.root.position.x, e.rt.root.position.z), door: ctx.airlock.door.open, hatch: ctx.airlock.hatch.open }));
 
-  return { start, cancel, update, objects, state };
+  return { start, cancel, update, state };
 }
 
 export type Ejector = ReturnType<typeof createEjector>;
 
 const rnd = (a: number, b: number) => a + Math.random() * (b - a);
-const onFloor4 = (p: THREE.Vector3) => Math.abs(p.y - F4) < 1;
+/** On the Airlock's tier (not on a stair or another tier). */
+const onTier = (p: THREE.Vector3) => Math.abs(p.y - T0) < 0.5;
 const flatDist = (p: THREE.Vector3, q: THREE.Vector3) => Math.hypot(p.x - q.x, p.z - q.z);
 
 /** Step along the route (like updateNav); true once there. */

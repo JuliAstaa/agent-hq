@@ -941,7 +941,7 @@ function parseAgent(v: unknown): ChatAgentInput | null | { error: string } {
   if (name.length > MAX_IDENTITY_LEN) return { error: `Nama terlalu panjang (maks ${MAX_IDENTITY_LEN} karakter)` };
   if (role.length > MAX_IDENTITY_LEN) return { error: `Peran terlalu panjang (maks ${MAX_IDENTITY_LEN} karakter)` };
   const team = v.team == null || v.team === "" ? "office" : String(v.team);
-  if (!CHAT_TEAMS.includes(team as ChatTeam)) return { error: "Tim harus office, red, report, atau blue" };
+  if (!CHAT_TEAMS.includes(team as ChatTeam)) return { error: "Tim harus office, red, report, blue, atau ops" };
   return { name: name || DEFAULT_CHAT_AGENT.name, role: role || DEFAULT_CHAT_AGENT.role, team: team as ChatTeam };
 }
 
