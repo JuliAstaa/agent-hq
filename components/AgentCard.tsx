@@ -18,6 +18,7 @@ const TEAM_CHOICES: [string, string][] = [
   ["red", DEPTS.red.label],
   ["report", DEPTS.report.label],
   ["blue", DEPTS.blue.label],
+  ["ops", DEPTS.ops.label],
 ];
 
 /** Rename form inside a roster card (deviation 16). Live: saved on the bridge; demo: this screen only. */
@@ -107,7 +108,7 @@ function AgentCard({ a, selected, now, onOpenChat, openingChatId }: {
   }, [selected]);
 
   const st = STATUS[a.status];
-  const loc = a.loc ?? (a.meeting ? { where: `${MEETING_ROOMS[a.meeting.room]} · Lt.4`, what: `rapat ${a.meeting.team}` } : a.slot == null ? { where: "Tanpa meja", what: "" } : { where: "Meja kerja · Lt.2", what: "" });
+  const loc = a.loc ?? (a.meeting ? { where: MEETING_ROOMS[a.meeting.room], what: `rapat ${a.meeting.team}` } : a.slot == null ? { where: "Tanpa meja", what: "" } : { where: "Meja kerja · Kantor", what: "" });
   const pct = a.progress == null ? null : Math.round(a.progress * 100);
   const events = a.events.slice(-12).reverse();
   return (

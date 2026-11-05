@@ -33,7 +33,7 @@ export interface FunInfo {
   pose: string;
   activity: Activity | null;
   dept: Dept | null;
-  /** Bubble visible on screen right now (floor filter). */
+  /** Bubble visible on screen right now. */
   visible: boolean;
   /** Holding a task card (deviation 14): hands are busy, no actions. */
   carrying?: boolean;
@@ -96,6 +96,7 @@ export const CHAT_BY_DEPT: Record<Dept, string[]> = {
   red: ["scope aman, lanjut", "port-nya kebuka nih", "catat dulu temuannya"],
   report: ["CVSS-nya berapa ya", "tinggal executive summary", "screenshot PoC mana ya"],
   blue: ["login gagal naik nih", "IP ini lagi ini lagi", "alert-nya beneran nggak ya"],
+  ops: ["deploy jangan Jumat sore", "rak-nya panas nih", "rollback dulu aja?"],
 };
 
 export const CHAT_THINKING = ["hmm...", "kalau begini gimana ya", "coba pikir ulang", "sebentar, mikir dulu"];

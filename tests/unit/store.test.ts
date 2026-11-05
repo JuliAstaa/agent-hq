@@ -193,23 +193,23 @@ describe("ui state", () => {
   it("floor and focus signals", () => {
     apply({ id: "a" });
     signals = [];
-    S().setFloor("3");
-    S().setFloor("2", false);
+    S().setFloor("security");
+    S().setFloor("kantor", false);
     S().select("a", true);
     S().select("missing", true);
-    expect(S().floorMode).toBe("2");
+    expect(S().floorMode).toBe("kantor");
     expect(S().selectedId).toBe("missing");
-    expect(signals).toEqual([{ type: "floor", floor: "3", moveCam: true }, { type: "floor", floor: "2", moveCam: false }, { type: "focus", id: "a" }]);
+    expect(signals).toEqual([{ type: "floor", floor: "security", moveCam: true }, { type: "floor", floor: "kantor", moveCam: false }, { type: "focus", id: "a" }]);
   });
   it("setLocs only updates changed agents", () => {
     apply({ id: "a" });
     apply({ id: "b" });
     const before = S().agents;
-    S().setLocs(new Map([["a", { where: "Meja kerja · Lt.2", what: "" }]]));
+    S().setLocs(new Map([["a", { where: "Meja kerja · Kantor", what: "" }]]));
     expect(S().agents).not.toBe(before);
     expect(S().agents.get("b")).toBe(before.get("b"));
     const after = S().agents;
-    S().setLocs(new Map([["a", { where: "Meja kerja · Lt.2", what: "" }]]));
+    S().setLocs(new Map([["a", { where: "Meja kerja · Kantor", what: "" }]]));
     expect(S().agents).toBe(after);
   });
   it("conn defaults", () => {
@@ -231,7 +231,7 @@ describe("demo simulator", () => {
     expect(agent("rexx")).toMatchObject({ status: "working", dept: "red" });
     expect(agent("plonk").status).toBe("idle");
     expect(S().conn.mode).toBe("demo");
-    expect(S().logs.at(-1)?.message).toBe("Mode demo aktif. Klik agen untuk zoom, pilih lantai di atas.");
+    expect(S().logs.at(-1)?.message).toBe("Mode demo aktif. Klik agen untuk zoom, pilih area di atas.");
     vi.advanceTimersByTime(120_000);
     expect(S().logs.length).toBeGreaterThan(10);
     demo.stop();

@@ -1,18 +1,21 @@
-// Places an agent can go: lounge spots, home desks, floor-3 stations (prd.md §9, §10).
-// Every place is a chain hub -> via points -> final position, with a facing angle.
-// Reservations (occ) are per engine instance: create fresh objects with createSpots()/createDeskPlaces().
+// Places an agent can go: lounge spots, home desks, team stations, the task board, meeting seats (prd.md §9, §10).
+// Every place is a chain hub -> via points -> final position, with a facing angle. Single-floor terraced layout
+// (deviation 29, engine/layout.ts): all coordinates are world coordinates.
+// Reservations (occ) are per engine instance: create fresh objects with createSpots()/createDeskSlots().
 
 import * as THREE from "three";
-import { F2, F3, F4, type Activity } from "../constants";
+import { type Activity } from "../constants";
+import { STREET_B, STREET_M, T0, T1, T2 } from "../layout";
 import { MEETING_ROOMS, SEATS_PER_ROOM } from "@/lib/meeting";
 import type { Dept } from "@/lib/teams";
 import { DEPTS } from "@/lib/teams";
+import type { ZoneId } from "@/lib/zones";
 
 export type PoseName = "desk" | "walk" | "stand" | "sit" | "stool" | "recline" | "lie";
 
 interface PlaceBase {
   room: string;
-  floor: number;
+  zone: ZoneId;
   hub: string;
   via: THREE.Vector3[];
   final: THREE.Vector3;
@@ -32,7 +35,7 @@ export interface DeskPlace extends PlaceBase {
 export interface StationPlace extends PlaceBase {
   kind: "station";
   dept: Dept;
-  /** Index among all stations (0..10), for tests and debug. */
+  /** Index among all stations (0..13), for tests and debug. */
   index: number;
 }
 /** A spot in front of the task board where an agent picks up a new task card (deviation 14). */
@@ -41,7 +44,7 @@ export interface BoardPlace extends PlaceBase {
   /** Slot index 0..2, matching the card pinned in front of it. */
   index: number;
 }
-/** Meeting floor seat (prd.md §7.9). Assigned by the store (Agent.meeting), not picked by the engine. */
+/** Meeting seat (prd.md §7.9). Assigned by the store (Agent.meeting), not picked by the engine. */
 export interface SeatPlace extends PlaceBase {
   kind: "seat";
   /** Room 0..2 (Meeting A, B, C) and seat 0..4 (0 = head seat). */
@@ -57,56 +60,64 @@ type XZ = [number, number];
 
 export function createSpots(): SpotPlace[] {
   const out: SpotPlace[] = [];
-  const spot = (id: string, room: string, floor: 1 | 2, hub: string, via: XZ[], final: XZ, face: number, types: Activity[], pose: PoseName) => {
-    const y = floor === 2 ? F2 : 0;
-    out.push({ kind: "spot", id, room, floor, hub, via: via.map((p) => new THREE.Vector3(p[0], y, p[1])), final: new THREE.Vector3(final[0], y, final[1]), face, types, pose, occ: null });
+  const spot = (id: string, room: string, zone: ZoneId, y: number, hub: string, via: XZ[], final: XZ, face: number, types: Activity[], pose: PoseName) => {
+    out.push({ kind: "spot", id, room, zone, hub, via: via.map((p) => new THREE.Vector3(p[0], y, p[1])), final: new THREE.Vector3(final[0], y, final[1]), face, types, pose, occ: null });
   };
-  // Lt.1 - lounge
-  for (const x of [-9.3, -8.0, -6.7]) spot("sofa" + x, "Lounge", 1, "LH", [[-4.6, -4.65], [x, -4.65]], [x, -3.75], PI, ["tv", "tv", "phone"], "sit");
-  spot("beanL", "Lounge", 1, "LH", [[-4.6, -4.65], [-11.4, -4.65]], [-11.6, -6.2], 1.92, ["lie_phone"], "recline");
-  spot("beanR", "Lounge", 1, "LH", [[-4.6, -4.65]], [-4.4, -6.3], -1.89, ["lie_phone"], "recline");
+  // Front tier (Santai). Hubs sit on the front street (z 10.6).
+  // lounge: sofa facing the TV, beanbags either side
+  for (const x of [-24.9, -23.6, -22.3]) spot("sofa" + x, "Lounge", "santai", T0, "LH", [[-20.2, 7.35], [x, 7.35]], [x, 8.25], PI, ["tv", "tv", "phone"], "sit");
+  spot("beanL", "Lounge", "santai", T0, "LH", [[-20.2, 7.35], [-27.0, 7.35]], [-27.2, 5.8], 1.92, ["lie_phone"], "recline");
+  spot("beanR", "Lounge", "santai", T0, "LH", [[-20.2, 7.35]], [-20.0, 5.7], -1.89, ["lie_phone"], "recline");
   // pantry
-  spot("coffee", "Pantry", 1, "PH", [[2.9, -2.8], [2.9, -5.4], [1.4, -5.4]], [1.4, -6.1], PI, ["coffee"], "stand");
-  spot("fridge", "Pantry", 1, "PH", [[2.9, -2.8], [2.9, -5.0]], [4.2, -5.6], PI, ["fridge"], "stand");
-  spot("stoolL", "Pantry", 1, "PH", [[-1.8, -2.8], [-1.8, -4.3]], [-0.55, -4.3], PI / 2, ["sip"], "stool");
-  spot("stoolR", "Pantry", 1, "PH", [[2.9, -2.8], [2.9, -4.3]], [1.95, -4.3], -PI / 2, ["sip"], "stool");
+  spot("coffee", "Pantry", "santai", T0, "PH", [[-6.7, 9.2], [-6.7, 6.6], [-8.2, 6.6]], [-8.2, 5.9], PI, ["coffee"], "stand");
+  spot("fridge", "Pantry", "santai", T0, "PH", [[-6.7, 9.2], [-6.7, 7.0]], [-5.4, 6.4], PI, ["fridge"], "stand");
+  spot("stoolL", "Pantry", "santai", T0, "PH", [[-11.4, 9.2], [-11.4, 7.7]], [-10.15, 7.7], PI / 2, ["sip"], "stool");
+  spot("stoolR", "Pantry", "santai", T0, "PH", [[-6.7, 9.2], [-6.7, 7.7]], [-7.65, 7.7], -PI / 2, ["sip"], "stool");
   // game room
-  spot("arcade", "Game Room", 1, "GH", [[6.6, -3.4]], [6.6, -5.85], PI, ["arcade"], "stand");
-  spot("ping", "Game Room", 1, "GH", [[7.6, -3.4]], [7.6, -5.0], PI / 2, ["pingpong"], "stand");
-  // rebahan
-  spot("futonA", "Ruang Rebahan", 1, "NH", [[-11.6, 2.2]], [-11.6, 4.65], 0, ["nap", "nap", "lie_phone"], "lie");
-  spot("futonB", "Ruang Rebahan", 1, "NH", [[-9.3, 2.2]], [-9.3, 4.65], 0, ["nap", "lie_phone"], "lie");
-  // Lt.2
-  spot("winA", "Jendela", 2, "Top2", [[10.4, -5.6]], [10.4, -6.95], PI, ["gaze"], "stand");
-  spot("winB", "Jendela", 2, "Top2", [[12.1, -5.6]], [12.1, -6.95], PI, ["gaze"], "stand");
-  // "Ruang Rapat" in the prototype, renamed for the meeting floor (deviation 24).
-  spot("board", "Ruang Kreatif", 2, "Kf2", [[-10.0, 5.0]], [-11.6, 6.3], -PI / 2, ["whiteboard"], "stand");
-  spot("cardL", "Ruang Kreatif", 2, "Kf2", [[-10.0, 5.0]], [-9.4, 6.4], PI / 2, ["cards"], "stool");
-  spot("cardR", "Ruang Kreatif", 2, "Kf2", [[-6.4, 5.0]], [-7.0, 6.4], -PI / 2, ["cards"], "stool");
-  spot("readA", "Pojok Baca", 2, "Kf1", [[-4.4, 7.5], [-2.2, 7.5]], [-2.2, 6.85], 0, ["read"], "sit");
-  spot("readB", "Pojok Baca", 2, "Kf1", [[-4.4, 7.5], [0.6, 7.5]], [0.6, 6.85], 0, ["read"], "sit");
+  spot("arcade", "Game Room", "santai", T0, "GH", [[9.6, 8.6]], [9.6, 6.15], PI, ["arcade"], "stand");
+  spot("ping", "Game Room", "santai", T0, "GH", [[10.6, 8.6]], [10.6, 7.0], PI / 2, ["pingpong"], "stand");
+  // nap area (in front of the lounge, pillows toward the street)
+  spot("futonA", "Ruang Rebahan", "santai", T0, "NH", [[-26.6, 10.6]], [-26.6, 13.05], 0, ["nap", "nap", "lie_phone"], "lie");
+  spot("futonB", "Ruang Rebahan", "santai", T0, "NH", [[-24.3, 10.6]], [-24.3, 13.05], 0, ["nap", "lie_phone"], "lie");
+  // lobby benches either side of the floor emblem, facing the camera
+  spot("benchA", "Lobby", "santai", T0, "H1", [[-0.6, 11.5]], [-0.6, 12.6], 0, ["park"], "sit");
+  spot("benchB", "Lobby", "santai", T0, "GH", [[9.4, 11.5]], [9.4, 12.6], 0, ["park"], "sit");
+  // terrace on the front-right corner, looking out at the moons (was "Jendela" on floor 2)
+  spot("terasA", "Teras", "santai", T0, "TE", [[26.2, 11.2]], [27.6, 11.2], PI / 2, ["gaze"], "stand");
+  spot("terasB", "Teras", "santai", T0, "TE", [[26.2, 13.8]], [27.6, 13.8], PI / 2, ["gaze"], "stand");
+  // Middle tier (Kantor). Hubs sit on the middle street (z 3.0).
+  // "Ruang Rapat" in the prototype, renamed for the meeting rooms (deviation 24).
+  spot("board", "Ruang Kreatif", "kantor", T1, "MK", [[-10.2, 1.4]], [-10.2, -2.1], -PI / 2, ["whiteboard"], "stand");
+  spot("cardL", "Ruang Kreatif", "kantor", T1, "MK", [[-8.0, 1.4]], [-8.0, -2.0], PI / 2, ["cards"], "stool");
+  spot("cardR", "Ruang Kreatif", "kantor", T1, "MK", [[-5.6, 1.4]], [-5.6, -2.0], -PI / 2, ["cards"], "stool");
+  spot("readA", "Pojok Baca", "kantor", T1, "MB", [[-2.4, -0.8]], [-2.4, -2.2], 0, ["read"], "sit");
+  spot("readB", "Pojok Baca", "kantor", T1, "MB", [[0.4, -0.8]], [0.4, -2.2], 0, ["read"], "sit");
+  // garden benches facing the camera, the pond behind them
+  spot("parkA", "Taman", "kantor", T1, "MT", [[10.0, 0.4]], [10.0, -0.75], 0, ["park"], "sit");
+  spot("parkB", "Taman", "kantor", T1, "MT", [[16.0, 0.4]], [16.0, -0.75], 0, ["park"], "sit");
   return out;
 }
 
-/** 9 home desks on floor 2: 3 rows x 3, slot index = row * 3 + column. */
-// Deviation 8 (plan-m1.md): like the floor-3 stations, the chair is on the front side (+z) and the agent faces
-// the back wall, looking at a monitor that faces it (and the camera). Rows moved back 0.8 so the aisle in front
-// of each row (K2, K3, K4) clears the chairs.
+/** 9 home desks on the middle tier: 3 rows x 3, slot index = row * 3 + column. */
+// Deviation 8 (plan-m1.md): like the team stations, the chair is on the front side (+z) and the agent faces the back,
+// looking at a monitor that faces it (and the camera). Each row has its aisle in front of it; the front aisle is the
+// middle tier's street.
 export const DESK_ROWS = [
-  { z: -5.4, aisle: -3.0 },
-  { z: -1.8, aisle: 0.6 },
-  { z: 1.8, aisle: 4.0 },
+  { z: -6.4, aisle: -4.0 },
+  { z: -2.8, aisle: -0.4 },
+  { z: 0.8, aisle: STREET_M },
 ];
-// Deviation 17 (plan-m1.md): 9 desks (3 x 3) instead of 12. The outer columns stay where they were (the task-board
-// walkway and the aisles are unchanged); the middle column sits halfway between them.
-export const DESK_XS = [-9.6, -4.2, 1.2];
+// Deviation 17 (plan-m1.md): 9 desks (3 x 3) instead of 12.
+export const DESK_XS = [-25.4, -20.0, -14.6];
 /** Walkways through the gaps between desk columns (deviation 18). */
-export const DESK_GAPS = [-6.9, -1.5];
+export const DESK_GAPS = [-22.7, -17.3];
+/** Right-hand walkway of the office (the "K" column), up to the stairs to Security. */
+export const OFFICE_RIGHT_X = -12.2;
 
 /**
- * Office grid node on floor 2 (deviation 18): aisle z (one of DESK_ROWS[].aisle) x column. The graph links them along
- * each aisle and across aisles through the desk gaps and the left wall walkway (BOARD_X), so an agent walks the
- * short way between the task board and any desk instead of detouring via the right-hand K column.
+ * Office grid node (deviation 18): aisle z (one of DESK_ROWS[].aisle) x column. The graph links them along each
+ * aisle and across aisles through the desk gaps and the left wall walkway (BOARD_X), so an agent walks the short way
+ * between the task board and any desk.
  */
 export const officeNode = (aisle: number, x: number) => `O${aisle}:${x}`;
 
@@ -121,62 +132,69 @@ export function createDeskSlots(): DeskSlot[] {
   for (const r of DESK_ROWS) {
     for (const x of DESK_XS) {
       // hub: the desk's own spot on its aisle, then straight to the chair
-      out.push({ x, z: r.z, place: { kind: "desk", room: "Meja kerja", floor: 2, hub: officeNode(r.aisle, x), via: [], final: new THREE.Vector3(x, F2, r.z + 1.05), face: Math.PI, occ: null } });
+      out.push({ x, z: r.z, place: { kind: "desk", room: "Meja kerja", zone: "kantor", hub: officeNode(r.aisle, x), via: [], final: new THREE.Vector3(x, T1, r.z + 1.05), face: PI, occ: null } });
     }
   }
   return out;
 }
 
-/** Floor-3 station layout: [dept, x, z, hub, aisleX, aisleZ] in build order. */
-export const STATION_LAYOUT: [Dept, number, number, string, number, number][] = [
-  ...[-5.2, -1.6].flatMap((z) => [-10.6, -7.0].map((x) => ["red", x, z, "RH", -4.9, z + 2.1] as [Dept, number, number, string, number, number])),
-  ...[-1.8, 1.8].map((x) => ["report", x, -5.2, "RPH", 0, -3.1] as [Dept, number, number, string, number, number]),
-  ["report", -1.8, -1.6, "RPH", -1.8, 0.5],
-  ...[-4.6, -1.0].flatMap((z) => [6.4, 10.2].map((x) => ["blue", x, z, "BH", 8.3, z + 2.1] as [Dept, number, number, string, number, number])),
+/** Team station layout: [dept, x, z, hub, aisleX, aisleZ] in build order (y: back tier). Security's stations keep the
+ *  floor-3 arrangement; the DevOps ("ops") stations stand in the server room. */
+export type StationRow = [Dept, number, number, string, number, number];
+export const STATION_LAYOUT: StationRow[] = [
+  ...[-17.4, -13.8].flatMap((z) => [-26.4, -22.8].map((x): StationRow => ["red", x, z, "RH", -20.7, z + 2.1])),
+  ...[-17.6, -14.0].map((x): StationRow => ["report", x, -17.4, "RPH", -15.8, -15.3]),
+  ["report", -17.6, -13.8, "RPH", -17.6, -11.7],
+  ...[-16.8, -13.2].flatMap((z) => [-9.4, -5.6].map((x): StationRow => ["blue", x, z, "BH", -7.5, z + 2.1])),
+  ...[20.2, 23.2, 26.2].map((x): StationRow => ["ops", x, -14.0, "SD", 23.2, -11.7]),
 ];
 
 export function stationPlace(index: number): StationPlace {
   const [dept, x, z, hub, aisleX, aisleZ] = STATION_LAYOUT[index];
   return {
-    kind: "station", dept, index, room: DEPTS[dept].room, floor: 3, hub,
-    via: [new THREE.Vector3(aisleX, F3, aisleZ), new THREE.Vector3(x, F3, aisleZ)],
-    final: new THREE.Vector3(x, F3, z + 1.05), face: Math.PI, occ: null,
+    kind: "station", dept, index, room: DEPTS[dept].room, zone: dept === "ops" ? "server" : "security", hub,
+    via: [new THREE.Vector3(aisleX, T2, aisleZ), new THREE.Vector3(x, T2, aisleZ)],
+    final: new THREE.Vector3(x, T2, z + 1.05), face: PI, occ: null,
   };
 }
 
 /**
- * Task board ("PAPAN TUGAS", floor 2 left wall, deviation 14): three standing spots side by side in front of it.
- * Hub: the left wall walkway on the middle aisle (deviation 18), then straight down the gap between the wall and the
- * first desk column (x -11.75 keeps clear of both).
+ * Task board ("PAPAN TUGAS", Kantor left wall, deviation 14): three standing spots side by side in front of it.
+ * Hub: the left wall walkway on the middle aisle (deviation 18), then straight down between the wall and the first
+ * desk column (x -27.55 keeps clear of both).
  */
-export const BOARD_X = -11.75;
-export const BOARD_SLOTS_Z = [0.95, 1.7, 2.45];
+export const BOARD_X = -27.55;
+/** Board center on the left wall, and the standing spots in front of its three cards. */
+export const BOARD_Z = 1.75;
+export const BOARD_SLOTS_Z = [1.0, 1.75, 2.5];
 
 export function createBoardSlots(): BoardPlace[] {
   return BOARD_SLOTS_Z.map((z, index) => ({
-    kind: "board", index, room: "Papan Tugas", floor: 2, hub: officeNode(DESK_ROWS[1].aisle, BOARD_X),
-    via: [], final: new THREE.Vector3(BOARD_X, F2, z), face: -PI / 2, occ: null,
+    kind: "board", index, room: "Papan Tugas", zone: "kantor", hub: officeNode(DESK_ROWS[1].aisle, BOARD_X),
+    via: [], final: new THREE.Vector3(BOARD_X, T1, z), face: -PI / 2, occ: null,
   }));
 }
 
-/* ---------------- floor 4: meeting rooms (prd.md §7.9) ---------------- */
+/* ---------------- back tier: meeting rooms (prd.md §7.9) ---------------- */
 
-/** Room centers along x (Meeting A, B, C). Rooms run from the back wall (z -7.6) to the corridor (z 1.0). */
-export const ROOM_XS = [-8.4, 0, 8.6];
-/** Room walls between the rooms (glass partitions), x. */
-export const ROOM_WALLS = [-4.2, 4.2];
-/** Enclosed glass rooms: the front wall on the corridor (z), Meeting C's right wall (x, the building side is open),
- *  and the sliding door in the middle of each front wall (half width). */
-export const ROOM_FRONT_Z = 1.0;
-export const ROOM_RIGHT_X = 12.9;
+/** Room centers along x (Meeting A, B, C). Rooms run from the back wall to the glass front (z ROOM_FRONT_Z). */
+export const ROOM_XS = [1.0, 7.8, 14.6];
+/** Glass walls between the rooms, x. */
+export const ROOM_WALLS = [4.4, 11.2];
+/** Enclosed glass rooms: the outer side walls (x), the back (inner face of the back wall), the front wall on the
+ *  street (z), and the sliding door in the middle of each front wall (half width). */
+export const ROOM_LEFT_X = -2.4;
+export const ROOM_RIGHT_X = 18.0;
+export const ROOM_BACK_Z = -19.8;
+export const ROOM_FRONT_Z = -11.2;
 export const DOOR_HALF = 0.75;
 /** Table center z, half sizes. Seats sit 0.4 from its edge, like a desk chair. */
-export const TABLE_Z = -3.6;
+export const TABLE_Z = -15.8;
 export const TABLE_HALF_X = 0.9;
 export const TABLE_HALF_Z = 1.6;
-/** Corridor walkway in front of the rooms (graph nodes M0..M2) and the lanes beside / behind each table. */
-export const CORRIDOR_Z = 2.6;
-const LANE_X = 2.3, ENTRY_Z = -0.8, BACK_Z = -6.7;
+/** Walkway in front of the rooms (graph nodes M0..M2 on the back street) and the lanes beside / behind each table. */
+export const CORRIDOR_Z = STREET_B;
+const LANE_X = 2.3, ENTRY_Z = TABLE_Z + 2.8, BACK_Z = ROOM_BACK_Z + 0.9;
 /** Just inside the door: every way in and out of a room goes through its door. */
 const DOOR_IN_Z = ROOM_FRONT_Z - 0.7;
 /** Seat 0 at the back facing the camera, then left front/back and right front/back facing the table. */
@@ -201,11 +219,19 @@ export function createSeats(): SeatPlace[] {
         ? [[cx, DOOR_IN_Z], [lane, ENTRY_Z], [lane, BACK_Z], [cx, BACK_Z]]
         : [[cx, DOOR_IN_Z], [lane, ENTRY_Z], [lane, s.z]];
       out.push({
-        kind: "seat", roomIndex, seat, index: roomIndex * SEATS_PER_ROOM + seat, room: MEETING_ROOMS[roomIndex], floor: 4,
-        hub: roomNode(roomIndex), via: via.map(([x, z]) => new THREE.Vector3(x, F4, z)),
-        final: new THREE.Vector3(cx + s.dx, F4, s.z), face: s.face, occ: null,
+        kind: "seat", roomIndex, seat, index: roomIndex * SEATS_PER_ROOM + seat, room: MEETING_ROOMS[roomIndex], zone: "meeting",
+        hub: roomNode(roomIndex), via: via.map(([x, z]) => new THREE.Vector3(x, T2, z)),
+        final: new THREE.Vector3(cx + s.dx, T2, s.z), face: s.face, occ: null,
       });
     });
   });
   return out;
 }
+
+/* ---------------- back tier: server room ---------------- */
+
+/** Server room: glass front (z) with the door at x SERVER_DOOR_X, rack rows (z), and the DevOps stations above. */
+export const SERVER_FRONT_Z = -11.0;
+export const SERVER_DOOR_X = 23.2;
+export const RACK_FRONT_Z = -16.4;
+export const RACK_BACK_Z = -19.0;

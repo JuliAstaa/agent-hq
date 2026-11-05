@@ -1,4 +1,4 @@
-// Meeting floor (prd.md §7.9): teams, the meeting rule, room and seat assignment.
+// Meeting rooms (prd.md §7.9): teams, the meeting rule, room and seat assignment.
 // Pure functions shared by the store and the tests. No DOM, no three.js.
 
 import type { Status } from "./events";

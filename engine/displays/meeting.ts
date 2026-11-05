@@ -1,11 +1,11 @@
-// Meeting room screen on floor 4 (prd.md §7.9): room name, then KOSONG or the team, the leader's task, up to five
+// Meeting room screen (prd.md §7.9): room name, then KOSONG or the team, the leader's task, up to five
 // members and how long the meeting has run. Text only once fonts are ready (before that the screen stays blank).
 
 import { STATUS, type Status } from "@/lib/events";
 import { truncate } from "@/lib/format";
 import type { Fonts } from "../scene/fonts";
 import type { CanvasTex } from "../scene/kit";
-import { MEETING_SCREEN_H, MEETING_SCREEN_W } from "../world/floor4";
+import { MEETING_SCREEN_H, MEETING_SCREEN_W } from "../world/meeting";
 
 export interface MeetingScreenInfo {
   team: string;

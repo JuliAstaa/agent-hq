@@ -8,12 +8,14 @@ import { OutlineEffect } from "three/addons/effects/OutlineEffect.js";
 import { STATUS } from "@/lib/events";
 import type { Agent, FloorMode, HQState, HQStore, Signal } from "@/lib/store";
 import { DEPTS } from "@/lib/teams";
+import type { ZoneId } from "@/lib/zones";
 import { truncate } from "@/lib/format";
-import { ACT_LABEL, F2, F3, F4, INK, VIEW_ALL_3, VIEWS } from "./constants";
+import { ACT_LABEL, INK } from "./constants";
+import { T2, VIEWS } from "./layout";
 import { animateAgent, type AgentRuntime, type AnimCtx } from "./agents/animate";
 import { buildAvatar } from "./agents/avatar";
 import { allowedQuirks, CHAT_REPLIES, chatLine, newFun, say, startQuirk, tickFun, type ChatSlots, type FunInfo, type Quirk } from "./agents/fun";
-import { floorOf, locText, newMovement, pickSpot, placeAt, releasePlaces, workTarget, type NavCtx } from "./agents/movement";
+import { locText, newMovement, pickSpot, placeAt, releasePlaces, workTarget, zoneOf, type NavCtx } from "./agents/movement";
 import { drawArcade, drawBoard, drawEmptyDesk, drawPlate, drawScreen, drawTaskBoard, drawTV, drawWhiteboard, newWhiteboardEgg } from "./displays/office";
 import { drawRedWall, drawReportBoard, drawSOC, drawStation, newSocAnim } from "./displays/security";
 import { drawScheduleBoard } from "./displays/schedule";
@@ -24,15 +26,17 @@ import { createFx } from "./fx";
 import { createSkyEvents, type SkyEventKind } from "./skyEvents";
 import { planMeteors, planPortal, type NdcRect, type PlaceCtx, type SkyZone } from "./skyPlacement";
 import { SFX_EVENT } from "@/lib/audio";
-import { createBoardSlots, createDeskSlots, createSeats, createSpots, type Place, type SeatPlace } from "./nav/places";
+import { createBoardSlots, createDeskSlots, createSeats, createSpots, STATION_LAYOUT, type Place, type SeatPlace } from "./nav/places";
 import { loadFonts, resolveFonts } from "./scene/fonts";
 import { createKit, createMaterials, V } from "./scene/kit";
 import { buildSky, makeSkyTexture } from "./scene/sky";
 import { buildDesk, type Desk } from "./world/props/desk";
-import { buildIslandAndFloor1Shell, buildFloor1Props } from "./world/floor1";
-import { buildFloor2Props, buildFloor2Shell, LIQUID_BASE, LIQUID_FULL } from "./world/floor2";
-import { buildFloor3 } from "./world/floor3";
-import { buildFloor4, flyCard, MEETING_IDLE, stepCards, stepDoors } from "./world/floor4";
+import { buildIsland } from "./world/island";
+import { buildSantai } from "./world/santai";
+import { buildKantor } from "./world/kantor";
+import { buildSecurity, buildStation } from "./world/security";
+import { buildMeeting, flyCard, MEETING_IDLE, stepCards, stepDoors } from "./world/meeting";
+import { buildServerRoom, LIQUID_BASE, LIQUID_FULL, stepServerDoor } from "./world/server";
 import { drawMeetingScreen, type MeetingScreenInfo } from "./displays/meeting";
 import { MEETING_ROOMS, SEATS_PER_ROOM } from "@/lib/meeting";
 import { DISCUSSION_LABEL, discussionActive, MEETING_OPEN_EVENT } from "@/lib/discussions";
@@ -63,8 +67,6 @@ export interface Engine {
     hideScheduleBoard: (hidden: boolean) => void;
     /** Keep the server room decor (as in the prototype) even while the bridge sends server samples. */
     hideServerMonitor: (hidden: boolean) => void;
-    /** Hide floor 4 (visual parity: the prototype has three floors; Semua then uses the prototype camera). */
-    hideMeetingFloor: (hidden: boolean) => void;
     /** Whiteboard easter egg: write it now if someone is at the board, else at the next whiteboard session. */
     whiteboardEgg: () => void;
     /** Open a chat balloon on agent `id` (random line for its context when `text` is omitted). */
@@ -94,7 +96,6 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
   renderer.shadowMap.type = THREE.PCFShadowMap;
   stage.appendChild(renderer.domElement);
   const effect = new OutlineEffect(renderer, { defaultThickness: 0.0038, defaultColor: new THREE.Color(INK).toArray(), defaultAlpha: 1 });
-  effect.autoClear = false; // renderFloors() clears once per frame, then draws the floors in passes
   const labelRenderer = new CSS2DRenderer({ element: labelsEl });
   labelRenderer.setSize(vw(), vh());
 
@@ -117,8 +118,9 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
   const sun = new THREE.DirectionalLight("#fff1d6", 2.1);
   sun.position.set(16, 36, 22);
   sun.castShadow = true;
-  sun.shadow.mapSize.set(2048, 2048);
-  Object.assign(sun.shadow.camera, { left: -22, right: 22, top: 22, bottom: -22, near: 1, far: 120 });
+  // One floor (deviation 29): the shadow box covers the whole island, at a higher resolution for the larger area.
+  sun.shadow.mapSize.set(4096, 4096);
+  Object.assign(sun.shadow.camera, { left: -40, right: 40, top: 40, bottom: -40, near: 1, far: 140 });
   sun.shadow.bias = -0.0008;
   sun.shadow.normalBias = 0.04; // toon materials cast from front faces (shadowSide), avoid self-shadow acne
   scene.add(sun);
@@ -127,30 +129,23 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
   scene.add(rim);
 
   /* ---------------- world ---------------- */
+  // Single-floor terraced island (deviation 29, engine/layout.ts). One group per area, all always visible.
   const world = new THREE.Group(); scene.add(world);
-  const g1 = new THREE.Group(); world.add(g1); // floor 1
-  const g2 = new THREE.Group(); world.add(g2); // floor 2 (hideable)
-  const g3 = new THREE.Group(); world.add(g3); // floor 3 security
-  const g4 = new THREE.Group(); world.add(g4); // floor 4 meeting (prd.md §7.9)
+  const gSantai = new THREE.Group(), gKantor = new THREE.Group(), gSecurity = new THREE.Group(), gMeeting = new THREE.Group(), gServer = new THREE.Group();
+  world.add(gSantai, gKantor, gSecurity, gMeeting, gServer);
   const b: Build = { kit, M, roomLabels: [], looseTextures: [] };
-  buildIslandAndFloor1Shell(b, world, g1);
-  buildFloor2Shell(b, g1, g2);
+  buildIsland(b, world);
   const skyAnim = buildSky(kit, scene);
   const tentacles: THREE.Group[] = [];
-  const props = buildFloor1Props(b, g1, tentacles, fonts);
-  const p2 = buildFloor2Props(b, g2, tentacles);
-  const SEC = buildFloor3(b, g2, g3, tentacles, fonts);
+  const props = buildSantai(b, gSantai, tentacles, fonts);
+  const p2 = buildKantor(b, gKantor, tentacles);
+  const SEC = buildSecurity(b, gSecurity, tentacles, fonts);
+  const SR = buildServerRoom(b, gServer);
   const seats = createSeats();
-  const F4P = buildFloor4(b, g4, tentacles, fonts, seats);
+  const F4P = buildMeeting(b, gMeeting, fonts, seats);
   const seatProps = F4P.rooms.flatMap((r) => r.seats); // index = SeatPlace.index
-  let meetingHidden = false; // tests only, see Engine.debug
-  // The siren light stays in every pass (only its intensity changes per pass) so the light count, and
-  // with it the compiled shader programs, never flips between passes.
-  scene.attach(SEC.siren.light);
-  // Objects drawn in the floor-1 pass besides g1: sky (scene root) and the island slab and rocks (world root).
-  const skyObjects = new Set(scene.children.filter((o) => o !== world && !(o as THREE.Light).isLight));
-  const islandObjects = new Set(world.children.filter((o) => o !== g1 && o !== g2 && o !== g3 && o !== g4));
-  const stations = SEC.stations;
+  // Team stations in STATION_LAYOUT order: Security's eleven, then the three DevOps stations in the server room.
+  const stations = STATION_LAYOUT.map((r, i) => buildStation(b, r[0] === "ops" ? gServer : gSecurity, i));
   const spots = createSpots();
   const boards = createBoardSlots(); // task board standing spots (deviation 14)
   drawTaskBoard(null, p2.taskBoard.face);
@@ -166,7 +161,6 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
   };
   refreshSchedule();
   // Server monitor (prd.md §7.8): racks, tank and wall screen show the bridge's samples; decor without them.
-  const SR = p2.server;
   let serverHidden = false; // tests only, see Engine.debug
   const serverOn = () => (serverHidden ? null : S().server);
   const refreshServer = () => {
@@ -177,10 +171,10 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
   refreshServer();
   let liquidKey = "";
   const slots = createDeskSlots();
-  // All 12 home desks exist from the start (deviation 7): an agent takes the desk of its slot and leaves it
+  // All 9 home desks exist from the start (deviation 7): an agent takes the desk of its slot and leaves it
   // empty again on removal. The prototype built a desk per agent, so an office without agents had no desks.
   const DESK_EMPTY = "#3a3360";
-  const desks: Desk[] = slots.map((slot) => buildDesk(b, g2, slot));
+  const desks: Desk[] = slots.map((slot) => buildDesk(b, gKantor, slot));
   let emptyDesksHidden = false; // tests only, see Engine.debug
   const resetDesk = (d: Desk) => {
     d.group.visible = !emptyDesksHidden;
@@ -196,7 +190,7 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
   const fx = createFx(kit, world);
   // Random sky events (deviation 13). Sounds go out as a bubbling DOM event that lib/audio.ts plays.
   // Placement inputs, read when an event starts (skyPlacement.ts): sky bodies to avoid, the building's silhouette
-  // for the floors on show, and the screen areas covered by UI panels.
+  // (the whole island), and the screen areas covered by UI panels.
   const placeCtx = (): PlaceCtx => {
     const obstacles: THREE.Sphere[] = [], occluders: THREE.Sphere[] = [];
     for (const o of scene.children) {
@@ -206,11 +200,11 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
       obstacles.push(s);
       if (!o.userData.smallRock) occluders.push(s);
     }
-    const top = g4.visible ? F4 + 4.7 : g3.visible ? F3 + 4.7 : g2.visible ? F2 + 5.3 : 5.4;
+    const top = T2 + 4.7; // back wall top
     const dy = world.position.y;
     const building: THREE.Vector3[] = [];
-    for (const x of [-14.2, 14.2]) for (const z of [-9.2, 9.2]) for (const y of [-0.8, top]) building.push(V(x, y + dy, z));
-    building.push(V(0, -9.8 + dy, 0), V(4, -13 + dy, 1.5)); // the rock under the island
+    for (const x of [-30, 30]) for (const z of [-21, 16.4]) for (const y of [-0.8, top]) building.push(V(x, y + dy, z));
+    building.push(V(0, -15.8 + dy, -2.2), V(7, -21.5 + dy, -1)); // the rock under the island
     const cr = renderer.domElement.getBoundingClientRect();
     const uiRects: NdcRect[] = [];
     for (const el of document.querySelectorAll<HTMLElement>("[data-hq-ui]")) {
@@ -357,7 +351,7 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
 
   /* ---------------- random actions + chat balloons (agents/fun.ts) ---------------- */
   const chatSlots: ChatSlots = { open: 0 };
-  /** Meeting rooms where someone waits or errors (no balloons there); refreshed every frame in the floor-4 block. */
+  /** Meeting rooms where someone waits or errors (no balloons there); refreshed every frame in the meeting block. */
   const roomHush = new Set<number>();
   const funInfo = (rt: AgentRuntime, a: Agent): FunInfo => {
     const mv = rt.mv;
@@ -372,7 +366,7 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
     const f = rt.fun;
     if (!f) return;
     const res = tickFun(f, funInfo(rt, a), now, dt, chatSlots);
-    // Sometimes a neighbour on the same floor answers.
+    // Sometimes a neighbour on the same tier answers.
     if (res.said && !res.isReply && Math.random() < 0.5) {
       const here = rt.root.position;
       for (const other of agents.values()) {
@@ -397,38 +391,30 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
     av.chatLabel.visible = av.label.visible && (on || now < (av.chatOffAt ?? 0));
   }
 
-  /* ---------------- floors + camera ---------------- */
+  /* ---------------- area views + camera ---------------- */
   let fly: { p0: THREE.Vector3; t0: THREE.Vector3; p1: THREE.Vector3; t1: THREE.Vector3; k: number } | null = null;
   const flyTo = (pos: THREE.Vector3, target: THREE.Vector3) => {
     fly = { p0: camera.position.clone(), t0: controls.target.clone(), p1: pos.clone(), t1: target.clone(), k: 0 };
     controls.enabled = false;
   };
+  /** Area view (deviation 29): every area stays on show; a view only moves the camera and picks the room labels
+   *  (all of them in Semua, the area's own otherwise). */
   function applyFloor(f: FloorMode, moveCam: boolean) {
-    g2.visible = f !== "1";
-    g3.visible = f === "all" || f === "3" || f === "4";
-    g4.visible = (f === "all" || f === "4") && !meetingHidden;
-    for (const o of SEC.liftTop) o.visible = !g4.visible; // with floor 4 on show the tube goes on up
-    const lf = f === "all" ? (meetingHidden ? 3 : 4) : Number(f);
-    for (const r of b.roomLabels) r.o.visible = r.floor === lf;
-    // The taller building needs a wider shadow box; three floors keep the prototype's.
-    const sb = g4.visible ? 27 : 22;
-    if (sun.shadow.camera.top !== sb) {
-      Object.assign(sun.shadow.camera, { left: -sb, right: sb, top: sb, bottom: -sb });
-      sun.shadow.camera.updateProjectionMatrix();
-    }
-    if (g4.visible) meetingDirty = true;
-    const view = f === "all" && meetingHidden ? VIEW_ALL_3 : VIEWS[f];
+    for (const r of b.roomLabels) r.o.visible = f === "all" || r.zone === f;
+    const view = VIEWS[f];
     if (moveCam) flyTo(V(...view.pos), V(...view.target));
   }
   /* Focus mode (deviation 12): clicking an agent (body or bubble) flies the camera to it; clicking the focused agent
-     again, or clearing the selection anywhere else, flies back to the camera pose and floor from before the focus. */
+     again, or clearing the selection anywhere else, flies back to the camera pose and area view from before the focus. */
   let preFocus: { pos: THREE.Vector3; target: THREE.Vector3; floor: FloorMode } | null = null;
   const toggleFocus = (id: string) => S().select(S().selectedId === id ? null : id, true);
   /* Follow cam (deviation 15): while an agent is in focus, the camera rides along with it (orbit and zoom still
-     work around it), and the floor view switches when it takes the stairs or the lift. */
-  let follow: { id: string; last: THREE.Vector3; floor: number } | null = null;
-  // The top floor keeps Semua (floor 4 is on top there); any other floor switches to its own view (prd.md §7.9).
-  const floorViewFor = (fl: number, fm: FloorMode): FloorMode => (fl === 4 ? (fm === "all" ? "all" : "4") : (String(fl) as FloorMode));
+     work around it). In an area view the area switcher follows the agent from area to area (Semua stays Semua). */
+  let follow: { id: string; last: THREE.Vector3; zone: ZoneId } | null = null;
+  const followZone = (z: ZoneId) => {
+    const fm = S().floorMode;
+    if (fm !== "all" && fm !== z) S().setFloor(z, false);
+  };
   function updateFollow() {
     if (!follow) return;
     const rt = agents.get(follow.id);
@@ -448,11 +434,10 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
         controls.target.add(d);
       }
     }
-    const fl = floorOf(rt);
-    if (fl !== follow.floor) {
-      follow.floor = fl;
-      const want = floorViewFor(fl, S().floorMode);
-      if (want !== S().floorMode) S().setFloor(want, false);
+    const z = zoneOf(rt);
+    if (z !== follow.zone) {
+      follow.zone = z;
+      followZone(z);
     }
   }
   function unfocus() {
@@ -466,15 +451,14 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
   function focus(id: string) {
     const rt = agents.get(id);
     if (!rt) return;
-    const fl = floorOf(rt);
+    const z = zoneOf(rt);
     const fm = S().floorMode;
     // Remember where the user was only when entering focus; hopping from agent to agent keeps the first pose.
     if (!preFocus) preFocus = { pos: fly ? fly.p1.clone() : camera.position.clone(), target: fly ? fly.t1.clone() : controls.target.clone(), floor: fm };
-    const want = floorViewFor(fl, fm);
-    if (want !== fm) S().setFloor(want, false);
+    followZone(z);
     const tp = rt.root.position.clone().add(V(window.innerWidth > 820 ? 0.9 : 0, 1.2, 0.4));
     flyTo(tp.clone().add(V(4.6, 4.4, 7.6)), tp);
-    follow = { id, last: rt.root.position.clone(), floor: fl };
+    follow = { id, last: rt.root.position.clone(), zone: z };
   }
 
   /* ---------------- store signals ---------------- */
@@ -531,11 +515,11 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
         if (fontsReady) drawReportBoard(fonts, SEC, S());
         break;
       case "floor":
-        // An explicit floor/camera choice (floor buttons, home) replaces the remembered pre-focus pose, otherwise
+        // An explicit view/camera choice (area buttons, home) replaces the remembered pre-focus pose, otherwise
         // the unfocus() that follows a select(null) would fly back over it on the next frame.
         if (s.moveCam) {
           preFocus = null;
-          follow = null; // an explicit floor/camera choice ends the follow cam
+          follow = null; // an explicit view/camera choice ends the follow cam
         }
         applyFloor(s.floor, s.moveCam);
         break;
@@ -565,27 +549,26 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
     const roots: THREE.Object3D[] = [];
     for (const rt of agents.values()) {
       if (rt.root.visible) roots.push(rt.root);
-      if (g2.visible && !g3.visible && rt.desk) roots.push(rt.desk.group);
+      if (rt.desk) roots.push(rt.desk.group);
     }
     const hit = ray.intersectObjects(roots, true).find((h) => (h.object as THREE.Mesh).isMesh);
     return (hit?.object.userData.agentId as string) || null;
   }
-  /** Schedule board under the pointer. Only in the floor-2 view (like desks): elsewhere other floors are in front of it. */
+  /** Schedule board under the pointer (only while a schedule source reports). */
   function pickScheduleBoard(e: PointerEvent): boolean {
-    if (!SB.group.visible || !g2.visible || g3.visible) return false;
+    if (!SB.group.visible) return false;
     ndc.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
     ray.setFromCamera(ndc, camera);
     return ray.intersectObject(SB.group, true).length > 0;
   }
-  /** Server room rack, tank or screen under the pointer: floor-2 view only, and only while it shows samples (not decor). */
+  /** Server room rack, tank or screen under the pointer, only while it shows samples (not decor). */
   function pickServerRoom(e: PointerEvent): boolean {
-    if (!serverOn() || !g2.visible || g3.visible) return false;
+    if (!serverOn()) return false;
     ndc.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
     ray.setFromCamera(ndc, camera);
     return ray.intersectObjects(SR.hit, true).some((h) => (h.object as THREE.Mesh).isMesh);
   }
   function pickMeetingScreen(e: PointerEvent): number | null {
-    if (!g4.visible) return null;
     ndc.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
     ray.setFromCamera(ndc, camera);
     const hit = ray.intersectObjects(F4P.rooms.map((r) => r.screenMesh), false)[0];
@@ -666,6 +649,7 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
     SEC.sign.draw();
     props.neon.draw();
     props.sign.draw();
+    props.emblem.draw();
     for (const rt of agents.values()) if (rt.desk) rt.desk.plateName = undefined; // redrawn by animateAgent
     const taken = new Set([...agents.values()].map((rt) => rt.desk));
     for (const d of desks) if (!taken.has(d)) drawEmptyDesk(fonts, d);
@@ -681,7 +665,7 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
     drawStatic();
   });
 
-  /* ---------------- floor 4: room screens and talking turns (prd.md §7.9) ---------------- */
+  /* ---------------- meeting rooms: room screens and talking turns (prd.md §7.9) ---------------- */
   function meetingInfo(ri: number, s: HQState): MeetingScreenInfo | null {
     const r = s.meetings[ri];
     const d = s.discussions.find((d) => d.room === ri);
@@ -740,8 +724,6 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
   const anim: AnimCtx = {
     camera,
     selectedId: null,
-    floorMode: S().floorMode,
-    meetingHidden: false,
     nav,
     stations,
     seatChairs: seatProps.map((sp) => sp.chair),
@@ -760,8 +742,6 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
     const t = simTime;
     const s = S();
     anim.selectedId = s.selectedId;
-    anim.floorMode = s.floorMode;
-    anim.meetingHidden = meetingHidden;
     if (s.agents !== lastAgents) {
       lastAgents = s.agents;
       reconcile(s);
@@ -830,7 +810,7 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
       wbAcc = 0;
       drawWhiteboard(p2.wb, activeActs.has("whiteboard"), fontsReady ? fonts : null);
     }
-    // ---- floor 3 ----
+    // ---- team stations (Security, DevOps) ----
     const occ = new Map<number, Agent>();
     let redOn = false, repOn = false, blueOn = false;
     for (const rt of agents.values()) {
@@ -856,13 +836,13 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
     secAcc += dt;
     if (secAcc > 0.15) {
       secAcc = 0;
-      if (g3.visible && fontsReady) {
+      if (fontsReady) {
         drawRedWall(fonts, SEC, s, t, redOn);
         drawSOC(fonts, SEC, s, soc, simTime, t, blueOn);
         stations.forEach((st, i) => drawStation(fonts, st, occ.get(i), s, soc, simTime, t));
       }
     }
-    // ---- floor 4 (prd.md §7.9): seat colors, room strips, talking turns, flying cards ----
+    // ---- meeting rooms (prd.md §7.9): seat colors, room strips, talking turns, flying cards ----
     const seated = new Map<number, Agent>();
     const byRoom: AgentRuntime[][] = MEETING_ROOMS.map(() => []);
     for (const rt of agents.values()) {
@@ -883,7 +863,7 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
         sp.glow.material.color.set(c);
         sp.glow.material.opacity = a && a.status !== "offline" ? 0.25 + 0.15 * Math.sin(t * 3) : 0;
         sp.screen.material.color.set(!a || a.status === "offline" ? "#150e2c" : c).multiplyScalar(0.75);
-        if (!a) sp.chair.position.y = F4;
+        if (!a) sp.chair.position.y = T2;
       }
       const here = byRoom[ri];
       if (s.discussions.some((d) => d.room === ri && discussionActive(d.phase))) roomHush.add(ri); // manual chat is real; suppress random dialogue
@@ -892,7 +872,7 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
     });
     stepCards(F4P.cards, dt);
     stepDoors(F4P.rooms, [...agents.values()].map((rt) => rt.root.position), dt);
-    if (meetingDirty && g4.visible) refreshMeetings();
+    if (meetingDirty) refreshMeetings();
     const H = SEC.holo;
     H.model.rotation.y += dt * (redOn ? 0.9 : 0.25);
     H.scan.visible = redOn;
@@ -910,8 +890,7 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
     SEC.siren.beams.visible = alertOn;
     SEC.siren.beams.rotation.y += dt * 6;
     SEC.siren.dome.material.color.set(alertOn ? (Math.sin(t * 12) > 0 ? "#ff2a3a" : "#ffb3bb") : "#7a2030");
-    SEC.siren.light.intensity = alertOn && g3.visible ? 1.3 + Math.sin(t * 12) * 0.9 : 0;
-    SEC.pad.material.color.set(Math.sin(t * 2) > 0 ? "#ff6fd8" : "#c3a6ff");
+    SEC.siren.light.intensity = alertOn ? 1.3 + Math.sin(t * 12) * 0.9 : 0;
     slowAcc += dt;
     if (slowAcc > 1) {
       slowAcc = 0;
@@ -928,9 +907,9 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
         const a = s.agents.get(rt.id);
         if (a) updateBubble(rt, a, s.selectedId);
       }
-      if (SB.group.visible && g2.visible) refreshSchedule(); // countdowns, like the mission board every 1 s
-      if (g4.visible) refreshMeetings(); // tasks and "rapat N mnt"
-      if (SR.screen.group.visible && g2.visible) refreshServer(); // "TERPUTUS" once samples stop
+      if (SB.group.visible) refreshSchedule(); // countdowns, like the mission board every 1 s
+      refreshMeetings(); // tasks and "rapat N mnt"
+      if (SR.screen.group.visible) refreshServer(); // "TERPUTUS" once samples stop
     }
     // schedule bell: short rings while a job runs, then settles
     SB.bell.rotation.z = bellOn && t % 2.4 < 0.9 ? Math.sin(t * 24) * 0.42 : SB.bell.rotation.z * 0.85;
@@ -956,13 +935,17 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
         card.g.scale.setScalar(Math.max(0.01, 1 + 2.4 * Math.pow(card.pop - 1, 3) + 1.4 * Math.pow(card.pop - 1, 2)));
       }
     }
-    // server room: live racks and tank while the bridge sends samples (left rack CPU, right rack RAM, tank disk)
+    // server room: live racks and tank while the bridge sends samples (front row: CPU rack, RAM rack; tank: disk);
+    // the other racks always blink as decor. The beacon over the door shows the worst level, the fans spin with CPU.
     const sv = serverOn();
     let liquidH = 2.0, liquidColor = "#ff6fd8"; // decor liquid
+    const decor = (bl: (typeof SR.blinkers)[number]) => bl.m.material.color.set(Math.sin(t * bl.rate + bl.ph) > 0.2 ? bl.color : "#2a2350");
+    let beacon = "#3a4a6b", fanSpeed = 5;
     if (sv) {
       const stale = serverStale(sv, Date.now());
       const vals = [sv.cpu, memPct(sv)];
-      for (const bl of p2.blinkers) {
+      for (const bl of SR.blinkers) {
+        if (bl.rack < 0) { decor(bl); continue; }
         const p = vals[bl.rack];
         let c = "#2a2350";
         if (p != null && bl.row < litRows(p)) {
@@ -976,7 +959,13 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
         liquidH = LIQUID_FULL * Math.max(0.03, dp);
         liquidColor = stale ? OFFLINE_COLOR : dp >= 0.9 ? LEVEL_COLOR.hot : "#ff6fd8";
       }
-    } else for (const bl of p2.blinkers) bl.m.material.color.set(Math.sin(t * bl.rate + bl.ph) > 0.2 ? bl.color : "#2a2350");
+      const worst = Math.max(0, ...[sv.cpu, memPct(sv), dp].filter((x): x is number => x != null));
+      beacon = stale ? OFFLINE_COLOR : LEVEL_COLOR[levelOf(worst)];
+      fanSpeed = stale ? 2 : 5 + 14 * (sv.cpu ?? 0);
+    } else for (const bl of SR.blinkers) decor(bl);
+    SR.beacon.material.color.set(beacon).multiplyScalar(sv && Math.sin(t * 3) < -0.3 ? 0.7 : 1);
+    for (const f of SR.fans) f.rotation.z -= dt * fanSpeed;
+    stepServerDoor(SR.door, [...agents.values()].map((rt) => rt.root.position), dt);
     const lk = `${liquidH.toFixed(3)}|${liquidColor}`;
     if (lk !== liquidKey) {
       liquidKey = lk;
@@ -985,7 +974,7 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
       SR.liquid.material.color.set(liquidColor);
     }
     const bubbleTop = sv ? LIQUID_BASE + liquidH - 0.08 : 2.55; // bubbles stay inside the liquid
-    for (const bb of p2.tankBubbles) {
+    for (const bb of SR.tankBubbles) {
       bb.visible = bubbleTop > 0.85;
       bb.position.y += bb.userData.sp * dt;
       bb.position.x = bb.userData.x + Math.sin(t * 3 + bb.userData.ph) * 0.05;
@@ -1008,52 +997,11 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
     world.position.y = Math.sin(t * 0.6) * 0.08;
     fx.update(dt);
     sky.update(dt);
-    renderFloors();
+    // One floor, one pass (deviation 29): the per-floor shadow passes of deviation 6 are not needed without slabs.
+    effect.render(scene, camera);
     labelRenderer.render(scene, camera);
   }
   raf = requestAnimationFrame(loop);
-
-  /* ---------------- per-floor render passes ----------------
-     Floor slabs do not cast shadows (otherwise every lower floor would sit in the slab's shadow).
-     Drawn in one pass, objects on upper floors would then throw their shadows straight through the
-     slabs onto the floors below. So the floors are drawn bottom to top into the same depth buffer, and
-     each pass re-renders the sun's shadow map with only that floor's objects: every floor gets the same
-     sun, but only its own shadows (dollhouse lighting). */
-  const SPLIT2 = F2 - 0.3, SPLIT3 = F3 - 0.3, SPLIT4 = F4 - 0.3;
-  const floorBand = (y: number) => (y < SPLIT2 ? 1 : y < SPLIT3 ? 2 : y < SPLIT4 ? 3 : 4);
-  const passVis: [THREE.Object3D, boolean][] = [];
-  const agentBand = new Map<THREE.Object3D, number>();
-  function renderFloors() {
-    const floors = [1];
-    if (g2.visible) floors.push(2);
-    if (g3.visible) floors.push(3);
-    if (g4.visible) floors.push(4);
-    const last = floors[floors.length - 1];
-    agentBand.clear();
-    for (const rt of agents.values()) agentBand.set(rt.root, floorBand(rt.root.position.y));
-    passVis.length = 0;
-    for (const o of scene.children) if (o !== world && !(o as THREE.Light).isLight) passVis.push([o, o.visible]);
-    for (const o of world.children) passVis.push([o, o.visible]);
-    const bandOf = (o: THREE.Object3D) =>
-      o === g1 ? 1 : o === g2 ? 2 : o === g3 ? 3 : o === g4 ? 4
-        : agentBand.get(o) ?? (skyObjects.has(o) || islandObjects.has(o) ? 1 : last); // fx particles: last pass
-    const background = scene.background;
-    const siren = SEC.siren.light.intensity;
-    const autoUpdate = scene.matrixWorldAutoUpdate;
-    scene.updateMatrixWorld();
-    scene.matrixWorldAutoUpdate = false;
-    renderer.clear();
-    for (const k of floors) {
-      for (const [o, v] of passVis) o.visible = v && bandOf(o) === k;
-      scene.background = k === 1 ? background : null;
-      SEC.siren.light.intensity = k === 3 ? siren : 0;
-      effect.render(scene, camera);
-    }
-    for (const [o, v] of passVis) o.visible = v;
-    scene.background = background;
-    SEC.siren.light.intensity = siren;
-    scene.matrixWorldAutoUpdate = autoUpdate;
-  }
 
   /* ---------------- API ---------------- */
   const placeById = (rtId: string, placeId: string): Place | null => {
@@ -1141,11 +1089,6 @@ export function createEngine(stage: HTMLElement, labelsEl: HTMLElement, store: H
       hideServerMonitor: (hidden) => {
         serverHidden = hidden;
         refreshServer();
-      },
-      hideMeetingFloor: (hidden) => {
-        meetingHidden = hidden;
-        SEC.liftLabel2.element.textContent = hidden ? "LIFT KE LT.3" : "LIFT KE LT.3 & 4";
-        applyFloor(S().floorMode, false);
       },
       whiteboardEgg: () => {
         if (p2.wb.wasOn) p2.wb.egg = newWhiteboardEgg(0);

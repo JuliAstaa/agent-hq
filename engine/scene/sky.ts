@@ -40,10 +40,11 @@ export function buildSky(kit: Kit, scene: THREE.Scene): THREE.Mesh[] {
   const moonA = mesh(new THREE.SphereGeometry(3, 28, 20), toon("#ffe08a"), false, false); moonA.position.set(36, 26, -46); moonA.userData.obstacleRadius = 3; scene.add(moonA);
   const moonB = mesh(new THREE.SphereGeometry(1.6, 24, 16), toon("#9fe6ff"), false, false); moonB.position.set(43, 18, -36); moonB.userData.obstacleRadius = 1.6; scene.add(moonB);
   for (let i = 0; i < 9; i++) {
-    const r = 0.6 + Math.random() * 1.2;
+    const r = 0.9 + Math.random() * 1.5;
     const m = mesh(wobble(new THREE.IcosahedronGeometry(r, 2), 0.14, i * 3.3), toon(i % 2 ? "#6b4c8a" : "#7d5a9e"), false, false);
-    const ang = (i / 9) * Math.PI * 2 + 0.4, dist = 22 + Math.random() * 7;
-    m.position.set(Math.cos(ang) * dist, -3 + Math.random() * 9, Math.sin(ang) * dist * 0.8);
+    // Orbit well clear of the single-floor island (x -30..30, z -21..16, deviation 29); was 22-29 around the tower.
+    const ang = (i / 9) * Math.PI * 2 + 0.4, dist = 44 + Math.random() * 8;
+    m.position.set(Math.cos(ang) * dist, -4 + Math.random() * 10, -2 + Math.sin(ang) * dist * 0.8);
     m.userData.base = m.position.y; m.userData.ph = Math.random() * 6;
     m.userData.obstacleRadius = r * 1.25 + 0.6; // wobble bumps, plus the +-0.6 bob
     m.userData.smallRock = true; // avoided, but may pass in front of an event (natural layering)

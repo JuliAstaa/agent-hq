@@ -2,22 +2,36 @@ import * as THREE from "three";
 import { describe, expect, it } from "vitest";
 import { ADJ, N, shortest } from "@/engine/nav/graph";
 import { createBoardSlots, createDeskSlots, createSpots, stationPlace, STATION_LAYOUT, type Place } from "@/engine/nav/places";
-import { atPlace, chainOf, route } from "@/engine/nav/router";
-import { FETCH_DONE, FETCH_GRAB, floorOf, locText, newMovement, pickSpot, placeAt, releasePlaces, updateNav, workTarget, type Mover, type NavAgent, type NavCtx } from "@/engine/agents/movement";
-import { F2, F3 } from "@/engine/constants";
+import { atPlace, chainOf, route, type Waypoint } from "@/engine/nav/router";
+import { FETCH_DONE, FETCH_GRAB, locText, newMovement, pickSpot, placeAt, releasePlaces, updateNav, workTarget, zoneOf, type Mover, type NavAgent, type NavCtx } from "@/engine/agents/movement";
+import { STAIRS, T0, T1, T2, zoneAt } from "@/engine/layout";
 import type { Dept } from "@/lib/teams";
+import { ZONE_LABEL } from "@/lib/zones";
 
 describe("waypoint graph", () => {
   it("links are symmetric and every node is reachable from the lobby", () => {
     for (const [a, list] of Object.entries(ADJ)) for (const b of list) expect(ADJ[b]).toContain(a);
     for (const id of Object.keys(N)) expect(shortest("H1", id).at(-1)).toBe(id);
   });
-  it("floor 1 -> floor 3 goes up the stairs, then the lift", () => {
+  it("pantry -> Red Team climbs both risers: the stairs beside the lounge, then the stairs to Security (deviation 29)", () => {
     const p = shortest("PH", "RH");
-    expect(p).toEqual(["PH", "H1", "L1a", "Land1", "SB", "ST", "Top2", "HL", "Lift2a", "Lift2", "Lift3", "X3", "RPH", "RH"]);
+    expect(p[0]).toBe("PH");
+    expect(p.at(-1)).toBe("RH");
+    const at = (id: string) => p.indexOf(id);
+    for (const id of ["FA:0", "FA:1", "SA:0", "SA:1"]) expect(at(id)).toBeGreaterThan(0);
+    expect(at("FA:0")).toBeLessThan(at("FA:1"));
+    expect(at("FA:1")).toBeLessThan(at("SA:0"));
+    expect(at("SA:0")).toBeLessThan(at("SA:1"));
+  });
+  it("graph nodes stand on a tier, except the stair ends", () => {
+    for (const [id, v] of Object.entries(N)) {
+      const stair = /^(SA|SB|SC|FA|FB):[01]$/.test(id);
+      if (!stair) expect([T0, T1, T2], id).toContain(v.y);
+    }
+    for (const s of STAIRS) expect([N[`${s.id}:0`].y, N[`${s.id}:1`].y]).toEqual([s.lo, s.hi]);
   });
   it("same node", () => {
-    expect(shortest("K1", "K1")).toEqual(["K1"]);
+    expect(shortest("K2", "K2")).toEqual(["K2"]);
   });
 });
 
@@ -26,7 +40,6 @@ describe("router", () => {
   const desks = createDeskSlots();
   const stations = STATION_LAYOUT.map((_, i) => stationPlace(i));
   const all: Place[] = [...spots, ...desks.map((d) => d.place), ...stations, ...createBoardSlots()];
-  const floorOfY = (y: number) => (y > 8.4 ? 3 : y > 2.8 ? 2 : 1);
 
   it("every place is reachable from every desk, ending at its final point", () => {
     for (const d of desks) {
@@ -38,7 +51,7 @@ describe("router", () => {
     }
   });
 
-  it("desk -> coffee: retrace the aisle, go down the stairs, enter the pantry chain", () => {
+  it("desk -> coffee: retrace the aisle, down the stairs beside the lounge, enter the pantry chain", () => {
     const desk = desks[0].place;
     const coffee = spots.find((s) => s.id === "coffee")!;
     const r = route(atPlace(desk), coffee);
@@ -46,12 +59,32 @@ describe("router", () => {
     expect(r[1].p.equals(N[desk.hub])).toBe(true); // the desk's own spot on its aisle (deviation 18)
     const ids = r.filter((w) => w.ref.t === "node").map((w) => (w.ref as { id: string }).id);
     expect(ids[0]).toBe(desk.hub);
-    expect(ids.slice(-8)).toEqual(["HL", "Top2", "ST", "SB", "Land1", "L1a", "H1", "PH"]);
+    expect(ids.slice(-4)).toEqual(["FA:1", "FA:0", "FA:s", "PH"]);
     expect(r.slice(-4).map((w) => w.p.toArray())).toEqual(chainOf(coffee).slice(1).map((w) => w.p.toArray()));
-    // height only changes on the stairs segment
-    const ys = r.map((w) => floorOfY(w.p.y));
-    expect(ys[0]).toBe(2);
-    expect(ys.at(-1)).toBe(1);
+    expect(r[0].p.y).toBe(T1);
+    expect(r.at(-1)!.p.y).toBe(T0);
+  });
+
+  it("heights only change on the stairs (deviation 29)", () => {
+    const stairEnd = (w: Waypoint) => w.ref.t === "node" && /^(SA|SB|SC|FA|FB):[01]$/.test(w.ref.id);
+    const sample = [...all.filter((_, i) => i % 3 === 0), ...desks.map((d) => d.place)];
+    for (const a of sample) {
+      for (const b of sample) {
+        if (a === b) continue;
+        const r = route(atPlace(a), b);
+        for (let i = 1; i < r.length; i++) {
+          if (Math.abs(r[i].p.y - r[i - 1].p.y) < 1e-6) continue;
+          expect(stairEnd(r[i - 1]) && stairEnd(r[i]), `${a.final.toArray()} -> ${b.final.toArray()} step ${i}`).toBe(true);
+        }
+      }
+    }
+  });
+
+  it("every place lies in the area it names, at the height of that tier", () => {
+    for (const p of all) {
+      expect(zoneAt(p.final.x, p.final.z), `${p.kind} ${p.room}`).toBe(p.zone);
+      expect(p.final.y).toBe(p.zone === "santai" ? T0 : p.zone === "kantor" ? T1 : T2);
+    }
   });
 
   // Deviation 18: the floor-2 office is a walkway grid, so trips between the task board and desks take the short way.
@@ -75,14 +108,14 @@ describe("router", () => {
   it("no floor-2 route cuts through a desk", () => {
     const pad = 0.3; // agent clearance around the desk top (2.7 x 1.35)
     const inDesk = (x: number, z: number) => desks.some((d) => Math.abs(x - d.x) < 1.35 + pad && Math.abs(z - d.z) < 0.675 + pad);
-    const lt2 = [...office, ...spots.filter((s) => s.floor === 2)];
+    const lt2 = [...office, ...spots.filter((s) => s.zone === "kantor")];
     for (const a of lt2) {
       for (const b of lt2) {
         if (a === b) continue;
         const r = route(atPlace(a), b);
         for (let i = 1; i < r.length; i++) {
           const p = r[i - 1].p, q = r[i].p;
-          if (Math.abs(p.y - F2) > 0.3 || Math.abs(q.y - F2) > 0.3) continue;
+          if (Math.abs(p.y - T1) > 0.3 || Math.abs(q.y - T1) > 0.3) continue;
           for (let k = 0; k <= 20; k++) {
             const x = p.x + ((q.x - p.x) * k) / 20, z = p.z + ((q.z - p.z) * k) / 20;
             expect(inDesk(x, z), `${a.final.toArray()} -> ${b.final.toArray()} at (${x.toFixed(2)}, ${z.toFixed(2)})`).toBe(false);
@@ -108,14 +141,16 @@ describe("router", () => {
     expect(r.map((w) => w.p.toArray())).toEqual([coffee.via[1].toArray(), coffee.via[2].toArray(), coffee.final.toArray()]);
   });
 
-  it("stations are on floor 3 and face the back wall", () => {
-    expect(stations).toHaveLength(11);
+  it("stations are on the back tier and face the back wall; DevOps stations are in the server room", () => {
+    expect(stations).toHaveLength(14);
     expect(stations.filter((s) => s.dept === "red")).toHaveLength(4);
     expect(stations.filter((s) => s.dept === "report")).toHaveLength(3);
     expect(stations.filter((s) => s.dept === "blue")).toHaveLength(4);
+    expect(stations.filter((s) => s.dept === "ops")).toHaveLength(3);
     for (const s of stations) {
-      expect(s.final.y).toBe(F3);
+      expect(s.final.y).toBe(T2);
       expect(s.face).toBe(Math.PI);
+      expect(s.zone).toBe(s.dept === "ops" ? "server" : "security");
     }
   });
 });
@@ -175,12 +210,12 @@ describe("agent behavior (prd.md §10)", () => {
     const dest = m.mv.dest;
     expect(dest.kind).toBe("spot");
     expect(dest.occ).toBe("zorp");
-    expect(logs.at(-1)).toMatch(/^zorp: Jalan santai, ke .+ \(Lt\.[12]\)$/);
+    expect(logs.at(-1)).toMatch(/^zorp: Jalan santai, ke [^(]+$/);
     run(m, a, 40);
     expect(m.mv.mode).toBe("act");
     expect(m.root.position.distanceTo(dest.final)).toBeLessThan(1e-6);
     if (dest.kind === "spot") expect(dest.types).toContain(m.mv.activity);
-    expect(locText(m).where).toBe(`${dest.room} · Lt.${dest.floor}`);
+    expect(locText(m).where).toBe(`${dest.room} · ${ZONE_LABEL[dest.zone]}`);
   });
 
   it("work status: runs back to the desk (urgent)", () => {
@@ -189,33 +224,43 @@ describe("agent behavior (prd.md §10)", () => {
     const coffee = ctx.spots.find((s) => s.id === "coffee")!;
     placeAt(ctx, m, coffee);
     expect(m.mv.mode).toBe("act");
-    expect(floorOf(m)).toBe(1);
+    expect(zoneOf(m)).toBe("santai");
     run(m, { status: "working", dept: null }, 0.05);
     expect(m.mv).toMatchObject({ mode: "walk", urgent: true, speed: 4.6 });
     expect(coffee.occ).toBeNull();
     expect(logs.at(-1)).toBe("glimbo: Buru-buru balik ke meja");
-    expect(locText(m)).toEqual({ where: "Lt.1", what: "jalan balik ke meja" });
+    expect(locText(m)).toEqual({ where: "Santai", what: "jalan balik ke meja" });
     run(m, { status: "working", dept: null }, 30);
     expect(m.mv.mode).toBe("desk");
     expect(m.root.position.distanceTo(m.home.final)).toBeLessThan(1e-6);
-    expect(m.root.position.y).toBe(F2);
+    expect(m.root.position.y).toBe(T1);
   });
 
-  it("team agent goes to its floor-3 station via the lift", () => {
+  it("team agent climbs to its Security station", () => {
     const { logs, mk, run } = setup();
     const m = mk("rexx");
     const a: NavAgent = { status: "working", dept: "red" };
     run(m, a, 0.05);
-    expect(logs.at(-1)).toBe("rexx: Buru-buru ke Red Team Lab (Lt.3)");
-    const ys = new Set<number>();
-    for (let i = 0; i < 400 && m.mv.mode === "walk"; i++) {
-      run(m, a, 0.05);
-      ys.add(floorOf(m));
-    }
-    expect(ys.has(3)).toBe(true);
+    expect(logs.at(-1)).toBe("rexx: Buru-buru ke Red Team Lab");
+    for (let i = 0; i < 400 && m.mv.mode === "walk"; i++) run(m, a, 0.05);
     expect(m.mv.mode).toBe("desk");
     expect(m.mv.dest.kind).toBe("station");
-    expect(locText(m)).toEqual({ where: "Red Team Lab · Lt.3", what: "Red Team" });
+    expect(zoneOf(m)).toBe("security");
+    expect(m.root.position.y).toBe(T2);
+    expect(locText(m)).toEqual({ where: "Red Team Lab", what: "Red Team" });
+  });
+
+  it("DevOps agent works in the server room (deviation 29)", () => {
+    const { logs, mk, run } = setup();
+    const m = mk("krunch", 4);
+    const a: NavAgent = { status: "working", dept: "ops" };
+    run(m, a, 0.05);
+    expect(logs.at(-1)).toBe("krunch: Buru-buru ke Ruang Server");
+    for (let i = 0; i < 600 && m.mv.mode === "walk"; i++) run(m, a, 0.05);
+    expect(m.mv).toMatchObject({ mode: "desk" });
+    expect(m.mv.dest).toMatchObject({ kind: "station", dept: "ops", zone: "server" });
+    expect(zoneOf(m)).toBe("server");
+    expect(locText(m)).toEqual({ where: "Ruang Server", what: "DevOps" });
   });
 
   it("one agent per station; overflow works at the home desk", () => {
@@ -307,11 +352,11 @@ describe("task board (deviation 14)", () => {
     expect(m.mv.dest.kind).toBe("board");
     expect(m.mv.dest.occ).toBe("rexx");
     expect(logs.at(-1)).toBe("rexx: Buru-buru ambil tugas di papan");
-    expect(locText(m)).toEqual({ where: "Lt.2", what: "jalan ke Papan Tugas" });
+    expect(locText(m)).toEqual({ where: "Kantor", what: "jalan ke Papan Tugas" });
     until(run, m, busy, () => m.mv.mode === "fetch");
     const board = m.mv.dest;
     expect(m.root.position.distanceTo(board.final)).toBeLessThan(1e-6);
-    expect(locText(m)).toEqual({ where: "Papan Tugas · Lt.2", what: "ambil tugas" });
+    expect(locText(m)).toEqual({ where: "Papan Tugas · Kantor", what: "ambil tugas" });
     run(m, busy, FETCH_GRAB + 0.05);
     expect(m.mv.carrying).toBe(true);
     run(m, busy, FETCH_DONE - FETCH_GRAB);
@@ -324,7 +369,7 @@ describe("task board (deviation 14)", () => {
     expect(m.mv.carrying).toBe(false); // card put down on the desk
   });
 
-  it("from the lounge, a security agent goes board first, then its floor-3 station", () => {
+  it("from the lounge, a security agent goes board first, then its Security station", () => {
     const { ctx, mk, run } = setup();
     const m = mk("sentra", 2);
     placeAt(ctx, m, ctx.spots.find((s) => s.id === "coffee")!);
@@ -333,10 +378,10 @@ describe("task board (deviation 14)", () => {
     run(m, busy, 0.05);
     expect(m.mv.dest.kind).toBe("board");
     until(run, m, busy, () => m.mv.mode === "fetch");
-    expect(floorOf(m)).toBe(2);
+    expect(zoneOf(m)).toBe("kantor");
     until(run, m, busy, () => m.mv.mode === "desk", 60);
     expect(m.mv.dest.kind).toBe("station");
-    expect(floorOf(m)).toBe(3);
+    expect(zoneOf(m)).toBe("security");
   });
 
   it("no board detour for agents that are already busy, mid-task status changes, or a full board", () => {

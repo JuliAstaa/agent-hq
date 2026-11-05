@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { drawWhiteboard, WB_EGG_CHANCE, WB_EGG_TEXT } from "@/engine/displays/office";
-import type { Floor2Props } from "@/engine/world/floor2";
+import type { KantorProps } from "@/engine/world/kantor";
 import type { Fonts } from "@/engine/scene/fonts";
 
 const FONTS: Fonts = { bungee: "Bungee", fredoka: "Fredoka", mono: "monospace" };
@@ -22,7 +22,7 @@ function board() {
     } as Record<string, unknown>,
     { get: (o, k) => (k in o ? o[k as string] : () => {}), set: () => true },
   );
-  const wb = { c: {}, ctx, tex: { needsUpdate: false }, strokes: 0, cx: 120, cy: 120 } as unknown as Floor2Props["wb"];
+  const wb = { c: {}, ctx, tex: { needsUpdate: false }, strokes: 0, cx: 120, cy: 120 } as unknown as KantorProps["wb"];
   return { wb, texts, points, clears: () => clears };
 }
 

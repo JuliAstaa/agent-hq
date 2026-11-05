@@ -106,7 +106,7 @@ Ekstensi VS Code tidak membawa env dari terminal. Tulis nama default di `~/.code
 | Yang terjadi di Codex | Yang kamu lihat |
 |---|---|
 | Sesi dimulai | Karakter masuk, peran `Codex · <folder>` |
-| Prompt masuk | Karakter mikir; kalau sedang santai, kartu tugas muncul di Papan Tugas (Lt.2) |
+| Prompt masuk | Karakter mikir; kalau sedang santai, kartu tugas muncul di Papan Tugas (Kantor) |
 | Perintah shell | Kerja, bubble `$ npm test` |
 | `apply_patch` | Kerja, bubble `Edit cart.py` atau `Menulis new.py`; lebih dari satu file: `Edit cart.py (+2)` |
 | Tool MCP | Kerja, bubble `MCP github: create_issue` |
@@ -115,7 +115,7 @@ Ekstensi VS Code tidak membawa env dari terminal. Tulis nama default di `~/.code
 | Giliran selesai | Confetti, lalu jalan ke area santai |
 | Kamu menekan Esc (Interrupt) | Santai, "Menunggu prompt berikutnya", tanpa confetti |
 | Merangkum konteks (compact) | Mikir, "Merangkum konteks (compact)" |
-| Subagen dimulai | Sesi naik ke ruang meeting Lt.4 bersama subagennya; subagen tanpa peran bernama `subagen#xxxx` |
+| Subagen dimulai | Sesi naik ke ruang meeting bersama subagennya; subagen tanpa peran bernama `subagen#xxxx` |
 | Subagen selesai | Subagen pergi sekitar 45 detik kemudian |
 | Sesi ditutup | Offline, hilang setelah 5 menit |
 
@@ -135,8 +135,8 @@ Semua pengaturan ada di `~/.codex/agent-hq/agent-hq.env`. Env var dengan nama sa
 | `HQ_TOKEN` | kosong | isi kalau Agent HQ dijalankan dengan `HQ_TOKEN` |
 | `HQ_NAME` | `<folder>#xxxx` | nama karakter (huruf Latin; nama lain lewat ✎) |
 | `HQ_ROLE` | `Codex · <folder>` | peran di kartu agen |
-| `HQ_TEAM` | kosong | `red`, `report`, `blue`: agen pindah ke ruangannya di Lt.3 |
-| `HQ_GROUP` | kosong | sesi dengan grup yang sama rapat bersama di Lt.4 Meeting |
+| `HQ_TEAM` | kosong | `red`, `report`, `blue`, `ops`: agen pindah ke ruangannya (Security, atau Ruang Server untuk `ops`) |
+| `HQ_GROUP` | kosong | sesi dengan grup yang sama rapat bersama di ruang Meeting |
 | `HQ_TIMEOUT` | `1.5` | batas tunggu kirim ke Agent HQ, dalam detik |
 | `HQ_DISABLE` | mati | `1` mematikan hook tanpa mengubah `hooks.json` |
 | `HQ_STATE_DIR` | folder temp sistem | tempat catatan "Agent HQ tidak terjangkau" |

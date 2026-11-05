@@ -1,6 +1,6 @@
-// Server room screen on floor 2 (server monitor, prd.md §7.8): CPU, RAM, disk and uptime of the machine Agent HQ
-// runs on. Not in the prototype; hidden until the bridge sends a sample. Redrawn every second while floor 2 is
-// visible, like the mission board, and right away when a sample arrives.
+// Server room wall screen (server monitor, prd.md §7.8): CPU, RAM, disk and uptime of the machine Agent HQ runs on.
+// Not in the prototype; hidden until the bridge sends a sample. Redrawn every second, like the mission board, and
+// right away when a sample arrives.
 
 import { ago } from "@/lib/format";
 import { diskPct, fmtBytes, fmtPair, fmtUptime, LEVEL_COLOR, levelOf, memPct, pctText, serverStale, serverState, type ServerStats } from "@/lib/server";
@@ -12,7 +12,7 @@ export const SERVER_SCREEN_W = 640;
 export const SERVER_SCREEN_H = 334;
 const W = SERVER_SCREEN_W, H = SERVER_SCREEN_H, HEAD = 54;
 const PAPER = "#fff6e3";
-/** LED rows per rack (engine/world/floor2.ts). */
+/** LED rows per monitored rack (engine/world/server.ts). */
 export const RACK_ROWS = 6;
 
 /** LED rows lit from the bottom for a share `p` (0..1): at least one, so a live rack never looks dead. */

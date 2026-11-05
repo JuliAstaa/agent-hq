@@ -118,18 +118,6 @@ body {
 .bubble .nm {
   font-weight: 700;
 }
-.bubble .fl {
-  font-size: 10px;
-  font-weight: 700;
-  border: 2px solid var(--ink);
-  border-radius: 6px;
-  padding: 0 4px;
-  background: var(--paper2);
-  display: none;
-}
-.bubble.f1 .fl {
-  display: inline-block;
-}
 .bubble.sel {
   background: var(--thinking);
 }

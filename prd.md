@@ -14,7 +14,7 @@ A 3D virtual office for watching AI agents work in real time.
 
 ## 1. Summary
 
-Agent HQ turns agent telemetry into a living cartoon office. Each agent is a small character with its own desk. Work status changes what the character does: it types when working, scratches its chin when thinking, waves when it needs a human, smokes when it errors, and walks off to the lounge when idle. A security wing on floor 3 holds a Red Team lab, a vulnerability-assessment (VA) report room, and a Blue Team SOC. Agents whose work matches those teams move there automatically. A meeting floor on top (floor 4) seats a session with its subagents, or agents that share a group, around one table (§7.9).
+Agent HQ turns agent telemetry into a living cartoon office. Each agent is a small character with its own desk. Work status changes what the character does: it types when working, scratches its chin when thinking, waves when it needs a human, smokes when it errors, and walks off to the lounge when idle. The office is one terraced floor (§9). On its back tier a security wing holds a Red Team lab, a vulnerability-assessment (VA) report room, and a Blue Team SOC, next to three meeting rooms and a server room with DevOps stations. Agents whose work matches those teams move there automatically. The meeting rooms seat a session with its subagents, or agents that share a group, around one table (§7.9).
 
 The goal is to make it obvious, at a glance, **who is doing what, who is stuck, and who needs me**, without reading terminal logs.
 
@@ -55,11 +55,11 @@ Primary user: a developer and DevOps engineer running multiple Claude Code agent
 | S2 | A session asks for permission to run a command | Character jumps and waves, bubble turns orange, roster pill "Butuh kamu", log line in yellow |
 | S3 | A session finishes its turn | Confetti, status "Santai", and after a short delay the character walks to a lounge activity |
 | S4 | A session spawns subagents | New characters appear for each subagent, then leave about 45 s after they stop |
-| S5 | A pentest session runs `nmap` | Character walks to the Red Team lab on floor 3 (lift from floor 2), attack-surface wall animates |
+| S5 | A pentest session runs `nmap` | Character climbs the stairs to the Red Team lab on the back tier, attack-surface wall animates |
 | S6 | Blue Team agent reports a brute-force alert | SOC video wall banner flashes, siren spins, room light pulses red, alert logged and toasted |
 | S7 | Red Team agent reports a finding | VA board counts update, the affected node on the attack map turns red |
 | S8 | User clicks a character | Camera flies to it, switches to its floor, roster card expands with progress and recent events |
-| S9 | A session delegates to two subagents | The session's character walks to a free meeting room on floor 4 (lift), the subagents pop in at its table, the room screen lists the team; when the last subagent is done the character goes back to work |
+| S9 | A session delegates to two subagents | The session's character walks up to a free meeting room, the subagents pop in at its table, the room screen lists the team; when the last subagent is done the character goes back to work |
 
 ## 5. Current state (prototype)
 
@@ -198,7 +198,7 @@ Not in the prototype (there the server room is decor). The server room on floor 
 - `HQ_SERVER_STATS=0` (or `off`, `false`) turns sampling off; the room then stays decor.
 - In the office: left rack = CPU, right rack = RAM. LED rows light up from the bottom by percent (at least one row), colored by level: below 50% `#a6e22e`, 50-75% `#ffd23f`, 75-90% `#ff9f1c`, from 90% `#ff4f5e`; the CPU rack blinks faster the busier it is. The tank = disk: liquid height by percent, pink, red from 90%. A wall screen above the racks (redrawn every 1 s while floor 2 is visible) shows CPU with cores and load, RAM and disk with used / total, uptime, and the Agent HQ process memory, plus a state: NORMAL, SIBUK (a value from 75%), KRITIS (a value from 90%). No sample for 20 s: grey LEDs and liquid, and the screen says TERPUTUS with the age of the last sample.
 - Without any sample (demo mode, static export, sampling off) the room looks exactly like the prototype (random blinking LEDs, bubbling tank) and the screen is hidden.
-- Clicking the server room (a rack, the tank or the wall screen) opens the **Server** panel on the right. Only in the Lt.2 view (in Semua floor 3 is in front of it, as for the schedule board) and only while there is a sample (decor is not clickable); the pointer turns into a hand over it. The panel shows the state (as on the screen) and the age of the last sample; a card each for CPU (cores, load 1/5/15 minutes), RAM and disk (used / total, free) with the percent, a bar in the level color, and a line chart of the last 30 minutes (from `history` plus the live samples, with the 90% warning line); then uptime, Agent HQ memory and platform; and the last 5 `Server` log lines. Without a fresh sample a banner says the data is cut off and since when, and the colors turn grey. It closes with Tutup or Esc, and it takes the spot of the Hermes and terminal panels: opening one closes the other.
+- Clicking the server room (a rack, the tank or the wall screen) opens the **Server** panel on the right, in any view, only while there is a sample (decor is not clickable); the pointer turns into a hand over it. The panel shows the state (as on the screen) and the age of the last sample; a card each for CPU (cores, load 1/5/15 minutes), RAM and disk (used / total, free) with the percent, a bar in the level color, and a line chart of the last 30 minutes (from `history` plus the live samples, with the 90% warning line); then uptime, Agent HQ memory and platform; and the last 5 `Server` log lines. Without a fresh sample a banner says the data is cut off and since when, and the colors turn grey. It closes with Tutup or Esc, and it takes the spot of the Hermes and terminal panels: opening one closes the other.
 - Warnings, computed in the office (each viewer): CPU at 90% or more for 60 s, RAM at 90% or more, disk at 90% or more give a `warn` log line under the name `Server` and a toast; once the value is below 85% again, an `info` line says it is back to normal.
 
 ### 7.9 Meeting floor (team collaboration)
@@ -228,13 +228,13 @@ Idle members without an active subagent do their idle activities as usual. Offli
 
 **In the room.** Each seat has a laptop on the table. Seated members use the desk pose and the desk status overlays (typing, chin scratch, wave, smoke, sleep). Every 4 to 7 s one calm member (working or thinking) talks for 2 to 3 s: it turns to the table and gestures, and the others look at it. Chat balloons in a meeting use work lines (`aku cek bagian ini ya`, `tes-nya hijau!`, `bentar, aku baca dulu`, `siap, lanjut`, `aku ambil yang ini`, `oke, digabung ya`), and stay off while someone in the room waits or errors. When a subagent joins, a small card flies from the leader's seat to its seat (0.6 s). The room's accent strip takes the team color: the leader's dept color (§10.2) when it has one, else pink `#ff6fd8`.
 
-**Room screen.** On the back wall above the head seat. It shows the room name, then either `KOSONG` or the team name, the leader's task, up to five members (avatar color dot, name, status color, short task) and how long the meeting has run (`rapat 3 mnt`). Redrawn every 1 s while floor 4 is visible, and right away when the members change.
+**Room screen.** On the back wall above the head seat. It shows the room name, then either `KOSONG` or the team name, the leader's task, up to five members (avatar color dot, name, status color, short task) and how long the meeting has run (`rapat 3 mnt`). Redrawn every 1 s, and right away when the members change.
 
-**Log and roster.** Log lines under the name `Meeting`: `Rapat mulai: <team> di Meeting A`, `Rapat selesai: <team> (<n> mnt)`, `Ruang meeting penuh, <team> kerja di meja`. Movement lines as for any room (`Buru-buru ke Meeting A (Lt.4)`). Roster location chip: `Meeting A · Lt.4` with the activity `rapat <team>`; while walking `jalan ke Meeting A`.
+**Log and roster.** Log lines under the name `Meeting`: `Rapat mulai: <team> di Meeting A`, `Rapat selesai: <team> (<n> mnt)`, `Ruang meeting penuh, <team> kerja di meja`. Movement lines as for any room (`Buru-buru ke Meeting A`). Roster location chip: `Meeting A` with the activity `rapat <team>`; while walking `jalan ke Meeting A`.
 
 **Manual discussion (approved 2026-11-04, deviation 27).** Clicking a room monitor opens its control panel (HTML room buttons provide keyboard access). The user enters a goal and selects 2–5 Hermes API-server sessions, and/or creates new agents in the panel with name, role and model. Creating an agent makes a normal retained Hermes session and immediately selects it, without changing the open ordinary chat. The server reserves the chosen empty room and participants; each agent receives the shared transcript on its turn. Discussion runs for 1–5 rounds (default 3), then the first participant summarizes conclusions, decisions, open questions and action items. The panel streams attributed messages and supports directions for the next turn, approval requests, and a scoped Stop. It does not start follow-up execution automatically. The latest discussion per room is persisted; browser disconnects do not stop runs, and interrupted server restarts restore the transcript without replaying model calls. Automatic meetings continue in other rooms. Details: `docs/meeting-discussion.md`.
 
-**Floors and views.** Floors stack at y = 0, 5.6, 11.2, 16.8. The floor switcher gets `Lt.4 Meeting` (order: Semua, Lt.4 Meeting, Lt.3 Security, Lt.2 Kantor, Lt.1 Santai) and must fit at 360 px wide. The Lt.4 view uses the Lt.3 camera raised by 5.6; Semua is re-framed to fit four floors. As with every floor, the floor above covers the one below in Semua. Floor 4 is on top, and floor 3 is seen through the open front and right walls, so the floor-3 back-wall displays (attack-surface wall, VA board, SOC wall, siren) are fully visible only in the Lt.3 view. Alerts still log and toast. Following an agent: floor 4 keeps Semua, every other floor switches to its own view. Bubbles: `Lt.N` badge in Semua for agents below floor 4; in the Lt.4 view bubbles of other floors are hidden (as in the Lt.3 view today); in the Lt.3 view agents on floor 4 are hidden. Floor 4 gets its own render pass (deviation 6), and the sky events use the new roof height.
+**Views.** Since deviation 29 (2026-11-05) the meeting rooms are on the back tier of the single floor, between Security and the server room (§9), reached by stairs; there is no floor 4 any more. The area switcher has a `Meeting` view, and the meeting access buttons (Meeting A/B/C, bottom right) show in that view. Following an agent keeps Semua in Semua; in an area view the switcher follows the agent's area.
 
 **Demo.** Glimbo sometimes delegates to 2 or 3 demo subagents (`parent: "glimbo"`) when it starts a new task; each works 20 to 45 s, sends `task_done` and is removed 8 s later. Plonk and Vexa sometimes share the group `Rilis v2.3` for one task.
 
@@ -297,44 +297,61 @@ Red Team activity must stay within properties the user owns or has written autho
 
 ## 9. World specification
 
-Cartoon cutaway building on a floating rock in an alien sky. Front and right walls are open. Floors stack at y = 0, 5.6, 11.2, 16.8.
+Cartoon office on a floating rock in an alien sky. **One floor in three tiers** (terraces) that rise toward the back,
+joined by stairs (user decision 2026-11-05, plan-m1.md deviation 29; until then four stacked floors). Tier heights
+y = 0 (front), 1.2 (middle), 2.4 (back). Outer walls on the back and the left; the front and the right side are open
+toward the camera. Every area is always visible: the area switcher (Semua, Santai, Kantor, Security, Meeting,
+Server) only moves the camera. Constants: `engine/layout.ts`.
 
-### Floor 1: Santai (idle activities)
+```
+   back (y 2.4):   SECURITY (Red | VA | SOC)   | MEETING (A | B | C) | RUANG SERVER
+   middle (y 1.2): KANTOR (9 desks, boards)    | Kreatif | Baca | Taman (garden)
+   front (y 0):    Rebahan | Lounge | Pantry | Lobby (grand stairs) | Game room | Teras
+```
+
+### Front tier: Santai (idle activities)
 | Room | Spots (activity) |
 |---|---|
-| Lounge | 3 sofa seats (nonton TV or main HP), 2 beanbags (rebahan sambil main HP). TV turns on when someone watches. |
-| Pantry | Coffee machine (bikin kopi, steam, then holds a mug), fridge (nyari camilan, door opens), 2 stools (ngopi santai) |
-| Game room | Arcade (screen plays when used), solo ping-pong (half table folded up, ball animates) |
+| Lounge | 3 sofa seats (nonton TV or main HP), 2 beanbags (rebahan sambil main HP). TV on a low cabinet, turns on when someone watches. |
+| Pantry | Coffee machine (bikin kopi, steam, then holds a mug), fridge (nyari camilan, door opens), 2 stools (ngopi santai); shelf on a backsplash |
+| Game room | Arcade (screen plays when used), solo ping-pong (half table folded up, ball animates), PLAY sign on posts |
 | Ruang rebahan | 2 futons (tidur siang or rebahan sambil main HP) |
-| Lobby | Decor: alien plant, water cooler, sign. Stairs to floor 2 at the right. |
+| Lobby | "AGENT HQ" floor emblem, 2 benches (nongkrong di bangku), alien plant, water cooler, grand stairs to the office. Welcome sign on the left wall. |
+| Teras | Deck on the front-right corner with a railing and a telescope, 2 spots (bengong lihat planet) |
 
-### Floor 2: Kantor
+Vending machines stand against the riser right of the game room.
+
+### Middle tier: Kantor
 | Room | Content |
 |---|---|
-| Office | 9 home desks in a 3 x 3 grid (one per agent, max 9; more agents are listed in the roster only), monitor shows status, name plate, hover chair with status ring |
-| Ruang kreatif | Whiteboard (corat-coret, strokes accumulate), card table with 2 stools (main kartu). Called "Ruang rapat" in the prototype; renamed for the meeting floor (§7.9): label `RUANG KREATIF`, roster `Ruang Kreatif` |
+| Office | 9 home desks in a 3 x 3 grid (one per agent, max 9; more agents are listed in the roster only), monitor shows status, name plate, hover chair with status ring. On the left wall: schedule board, mission board, task board with the clock above it |
+| Ruang kreatif | Whiteboard on a stand (corat-coret, strokes accumulate), card table with 2 stools (main kartu). Called "Ruang rapat" in the prototype; renamed for the meeting rooms (§7.9): label `RUANG KREATIF`, roster `Ruang Kreatif` |
 | Pojok baca | Bookshelf, 2 armchairs (baca buku) |
-| Server room | Server monitor (§7.8): left rack CPU, right rack RAM, tank disk, wall screen with the numbers; a click opens the Server panel. Without data: racks with blinking LEDs, bubbling tank (decor, as in the prototype) |
-| Hall jendela | 2 window spots (bengong lihat planet) |
-| Lift | Glass tube to floors 3 and 4, label `LIFT KE LT.3 & 4` |
+| Taman | Pond with lily pads, 2 benches (nongkrong di bangku), alien plants, garden lamps |
 
-### Floor 3: Security Ops
+### Back tier: Security Ops
 | Room | Stations | Displays |
 |---|---|---|
 | Red Team Lab | 4 | Attack-surface wall (nodes WEB, API, SSH, DB, ADMIN, animated packets when active, red nodes with findings), hologram target model with scan ring |
 | Ruang Laporan VA | 3 | Severity board (counts and latest 5 findings), printer that prints while someone writes |
 | SOC Blue Team | 4 | Video wall (failed logins per minute with threshold 25, alert list, flashing banner), siren with rotating beams and red room light |
 
-Stations face the back wall so the camera sees agents and their monitors over their shoulders. The lift continues through floor 3 to floor 4.
+Stations face the back wall so the camera sees agents and their monitors over their shoulders.
 
-### Floor 4: Meeting (§7.9)
+### Back tier: Meeting (§7.9)
 | Room | Content |
 |---|---|
-| Meeting A, B, C | Side by side along the back wall, enclosed like ordinary office meeting rooms: frosted glass walls 2.6 high on the corridor, between the rooms and on Meeting C's open side (dense film with three etched lines near the top), in slim light frames at the floor, the top, the corners and the doors only; the panes hide the outlines of what is behind them; a sliding frosted door in the middle of each front wall opens while an agent is at it (every route in and out goes through it). Seated agents stay visible from the camera over the frosted part. Table with five seats and laptops (head seat at the back facing the camera, two per side), room screen on the back wall, accent strip in the team color, rug per room |
-| Corridor | In front of the rooms, from the lift. Sign `MEETING` on the left wall, alien plants |
-| Lift | Top stop of the glass tube. Pink rings only at floor level: the ring at the top of the floor-3 tube is hidden while floor 4 is shown, so none floats between the floors |
+| Meeting A, B, C | Side by side along the back wall (6.8 wide each), enclosed like ordinary office meeting rooms: frosted glass walls 2.6 high on the street, between the rooms and on both outer sides (dense film with three etched lines near the top), in slim light frames at the floor, the top, the corners and the doors only; the panes hide the outlines of what is behind them; a sliding frosted door in the middle of each front wall opens while an agent is at it (every route in and out goes through it). Seated agents stay visible from the camera over the frosted part. Table with five seats and laptops (head seat at the back facing the camera, two per side), room screen on the back wall, accent strip in the team color, rug per room |
+| Street | In front of the rooms, reached by the stairs from the office. Sign `MEETING` on a post |
 
-Labels: `MEETING A`, `MEETING B`, `MEETING C`, `LIFT`.
+Labels: `MEETING A`, `MEETING B`, `MEETING C`.
+
+### Back tier: Ruang Server
+A dedicated server room behind clear tinted glass with a sliding door. Front rack row: the CPU rack and the RAM rack
+(server monitor, §7.8), two decor racks and the disk tank; back rack row (decor) with the wall screen above it; a
+cooling unit whose fans spin faster with CPU; cable trays over the racks; a status lamp over the door (worst
+CPU/RAM/disk level, dim without samples); 3 **DevOps** stations (team `ops`) whose screens show a deploy terminal,
+pipeline stages, and the live CPU and RAM bars when samples arrive. Label `RUANG SERVER`.
 
 ## 10. Agent behavior
 
@@ -353,13 +370,14 @@ Leaving for work is urgent (runs), leaving for a break is a stroll. Exception: a
 2. Else keywords in the current task. The match is sticky until the agent goes idle or offline, so a pentest session running `ls` stays in the Red Team lab.
 3. Else keywords in the role.
 
-Keyword sets (case-insensitive):
+Keyword sets (case-insensitive), checked in this order:
 - red: pentest, penetration, red team, exploit, recon, nmap, sqlmap, burp, payload, privesc, xss, sqli, sql injection, idor, enumerate, metasploit, subdomain, port scan, "uji ... brute"
 - blue: brute force, siem, soc, blue team, deteksi, detect, fail2ban, ids, waf, threat hunt, incident, insiden, login gagal, failed login, wazuh, suricata, block ip
 - report: laporan, report (word), vulnerability assessment, va, cvss, temuan, executive summary, remediasi, remediation, poc
+- ops (server room, deviation 29): devops, sre, docker, kubectl, kubernetes, k8s, helm, terraform, ansible, systemctl, rolling deploy, deploy ke / deploy to, rollout, worker_processes, sertifikat tls, tls cert, ruang server, server room, infrastruktur, infrastructure
 
 ### 10.3 Navigation
-- Waypoint graph per floor plus vertical links (stairs F1 to F2, lift F2 to F3 to F4). Dijkstra shortest path.
+- Waypoint graph: a street along each tier, the office walkway grid, and five stairs between the tiers (heights change only on the stairs). Dijkstra shortest path.
 - Every place (desk, station, spot) is a chain `hub -> via points -> final position` with a facing angle. Paths never cut through walls or furniture.
 - Redirect mid-walk: retrace to the last reached waypoint, then re-route.
 - Spot and station reservation: one agent per place.
@@ -370,8 +388,8 @@ Poses: desk, walk, stand, sit (sofa, armchair), stool, recline (beanbag), lie (f
 
 ## 11. UI specification
 
-- **Top bar:** logo, floor switcher (Semua, Lt.4 Meeting, Lt.3 Security, Lt.2 Kantor, Lt.1 Santai), status chips with counts, connection pill (Mode demo, Live, Terputus), home camera button, Sambungkan button.
-- **Floor switcher:** hides floors above the chosen one (Sims style) and flies the camera. Bubbles of agents on other floors get an `Lt.N` badge in overview modes and are hidden on Lt.3 and Lt.4 (§7.9).
+- **Top bar:** logo, area switcher (Semua, Santai, Kantor, Security, Meeting, Server), status chips with counts, connection pill (Mode demo, Live, Terputus), home camera button, Sambungkan button.
+- **Area switcher:** flies the camera to the area and shows that area's room labels (all labels in Semua). Every area stays visible (single floor, §9); it was a floor switcher that hid the floors above the chosen one until deviation 29.
 - **Roster (right):** one card per agent: color dot, name, role, status pill, task, location chip (room and floor) plus activity, tokens and last update. Click expands progress bar and last 12 events, and focuses the camera.
 - **Log (bottom left):** timestamped lines. Filters: "Jalan" toggles movement lines, "Error saja" shows only errors and alerts. Max 220 lines.
 - **Bubbles:** status icon, name, and context (activity when idle, destination when walking, task when waiting, error, or selected).
@@ -505,6 +523,12 @@ Decisions:
 - [x] Floor 2 "Ruang Rapat" renamed "Ruang Kreatif" (label and roster).
 - [x] Demo: Glimbo delegates, Plonk and Vexa share `Rilis v2.3`.
 - [x] Tests (`tests/unit/meeting.test.ts`, `tests/unit/meeting-nav.test.ts`, parity and Hermes integration, `tests/e2e/visual.spec.ts` "meeting floor", `tests/e2e/ui.spec.ts`): normalization and hooks (`parent`, `group`, snapshot); store (team key, meeting start and end, room order, head seat, idle leader stays, idle group member leaves, rooms full, more than five members, desk-less subagent, seat freed on remove, meeting before station); nav (every desk, station and spot to every seat and back through the lift, no wall crossing); parity ignores `parent` and `group`; visual: the four prototype views with floor 4 hidden, a new Lt.4 baseline, a meeting placed via `window.agentHQ` for manual review; the floor switcher fits at 360 px; dispose frees floor 4.
+
+### M9. Single terraced floor and server room (§9, plan-m1.md deviation 29)
+- [x] Four stacked floors replaced by one island with three tiers and five stairs (`engine/layout.ts`, `engine/world/`); areas Santai, Kantor, Security, Meeting, Server always visible; area switcher; one render pass.
+- [x] Dedicated server room: rack rows, disk tank, wall screen, cooling unit, cable trays, glass with a sliding door, status lamp, 3 DevOps stations (team `ops`, keyword inference, rename and chat team option).
+- [x] Front tier lobby (floor emblem, benches), terrace with telescope, garden on the middle tier.
+- [x] Tests: stairs are the only height changes, every place lies in its area, DevOps agents reach the server room, server door; e2e area switcher and server panel; the scene parity test against the prototype is retired.
 
 ### M5. Polish
 - [ ] Follow-cam toggle for the selected agent.

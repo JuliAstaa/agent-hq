@@ -1,4 +1,4 @@
-// Schedule board on floor 2 (Hermes cron, docs/hermes.md "Jadwal"): a departure-style board with the next runs.
+// Schedule board in the office (Hermes cron, docs/hermes.md "Jadwal"): a departure-style board with the next runs.
 // Not in the prototype; hidden until a schedule source reports. Redrawn every second, like the mission board.
 
 import { countdown, cronStale, jobPhase, PHASE, sortJobs, type CronState } from "@/lib/cron";

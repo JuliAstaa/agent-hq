@@ -3,17 +3,18 @@
 import * as THREE from "three";
 import { afterEach, describe, expect, it } from "vitest";
 import { audioStore, clampVolume, DEFAULTS, gainOf, parsePrefs, setMusicVolume, setMuted, setSfxVolume, toggleMuted, type SfxDetail } from "@/lib/audio";
-import { F2, F3 } from "@/engine/constants";
+import { T2, VIEWS as ENGINE_VIEWS } from "@/engine/layout";
 import { createKit } from "@/engine/scene/kit";
 import { buildSky } from "@/engine/scene/sky";
 import { createSkyEvents, FIRST_DELAY } from "@/engine/skyEvents";
 import { planMeteors, planPortal, segmentDistance, ZONE_X, ZONES, type PlaceCtx, type SkyZone } from "@/engine/skyPlacement";
 
 const kit = createKit();
+// The engine's camera presets (single-floor island, deviation 29) plus a side view; top = the back wall's top.
 const VIEWS: Record<string, { pos: [number, number, number]; target: [number, number, number]; top: number }> = {
-  semua: { pos: [30, 30, 37], target: [2.6, 6.2, 0.6], top: F3 + 4.7 },
-  lt1: { pos: [10, 16.5, 27.5], target: [2.6, 0.4, -1.2], top: 5.4 },
-  side: { pos: [-38, 22, 20], target: [0, 6, 0], top: F2 + 5.3 },
+  semua: { ...ENGINE_VIEWS.all, top: T2 + 4.7 },
+  santai: { ...ENGINE_VIEWS.santai, top: T2 + 4.7 },
+  side: { pos: [-60, 26, 24], target: [0, 2, -2], top: T2 + 4.7 },
 };
 
 /** The same inputs the engine builds in placeCtx(), minus the DOM. */
@@ -31,8 +32,8 @@ function makeCtx(view = "semua", aspect = 1.6, uiRects: PlaceCtx["uiRects"] = []
   const obstacles = bodies.map(sphere);
   const occluders = bodies.filter((o) => !o.userData.smallRock).map(sphere);
   const building: THREE.Vector3[] = [];
-  for (const x of [-14.2, 14.2]) for (const z of [-9.2, 9.2]) for (const y of [-0.8, v.top]) building.push(new THREE.Vector3(x, y, z));
-  building.push(new THREE.Vector3(0, -9.8, 0), new THREE.Vector3(4, -13, 1.5));
+  for (const x of [-30, 30]) for (const z of [-21, 16.4]) for (const y of [-0.8, v.top]) building.push(new THREE.Vector3(x, y, z));
+  building.push(new THREE.Vector3(0, -15.8, -2.2), new THREE.Vector3(7, -21.5, -1));
   const ctx: PlaceCtx = { camera, obstacles, occluders, building, uiRects };
   return { scene, camera, ctx, rocks };
 }
@@ -86,7 +87,7 @@ describe("sky event placement", () => {
   it("left, center and right all happen when the view has room for them", () => {
     const wide = makeCtx("semua", 2.4).ctx; // wide window: open sky left and right of the building
     // In "Semua" the sky right above the roof holds the big ringed planet, so the center needs a lower view.
-    const tall = makeCtx("lt1", 0.8).ctx; // Lt.1 view in a tall window: open sky above the building
+    const tall = makeCtx("santai", 0.8).ctx; // Santai view in a tall window: open sky above the building
     const inZone = (ctx: PlaceCtx, p: THREE.Vector3, z: SkyZone) => {
       const x = p.clone().project(ctx.camera).x;
       return x >= ZONE_X[z][0] - 1e-6 && x <= ZONE_X[z][1] + 1e-6;

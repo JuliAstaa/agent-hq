@@ -1,6 +1,6 @@
 # Diskusi agen melalui monitor ruang meeting
 
-Status: **diimplementasikan dan diverifikasi 2026-11-04**, berdasarkan alur yang disetujui pengguna dengan tambahan membuat agen baru langsung dari pengaturan rapat. Pengguna memberi goal melalui monitor ruang meeting Lt.4, beberapa agen berdiskusi, dan pengguna melihat chat mereka. Versi awal memakai sesi Hermes API server dan menghasilkan kesimpulan serta rencana tindakan.
+Status: **diimplementasikan dan diverifikasi 2026-11-04**, berdasarkan alur yang disetujui pengguna dengan tambahan membuat agen baru langsung dari pengaturan rapat. Pengguna memberi goal melalui monitor ruang meeting, beberapa agen berdiskusi, dan pengguna melihat chat mereka. Versi awal memakai sesi Hermes API server dan menghasilkan kesimpulan serta rencana tindakan.
 
 ## Tujuan dan aksi utama
 
@@ -8,7 +8,7 @@ Pengguna membuka monitor Meeting A, B, atau C, memilih peserta, menulis goal, la
 
 ## Alur pengguna
 
-1. Klik monitor ruangan di Lt.4 atau pilih nama ruangan lewat kontrol HTML sebagai alternatif keyboard.
+1. Klik monitor ruangan di area Meeting atau pilih nama ruangan lewat kontrol HTML sebagai alternatif keyboard.
 2. Panel ruangan terbuka di kanan, mengikuti pola panel Hermes/Server. Pada layar kecil panel memakai lebar layar yang tersedia.
 3. Isi **Goal rapat**, lalu susun 2 sampai 5 peserta dari **Pilih agen** dan/atau **Buat agen baru**. Form agen baru berisi **Nama**, **Peran**, dan **Model** (default Hermes tersedia). **Buat dan tambahkan** membuat sesi agen sesungguhnya dan langsung memilihnya sebagai peserta; boleh diulang sampai lima peserta. Tampilkan nama, peran, model, dan ketersediaan peserta. Setelah siap tekan **Mulai diskusi**.
 4. Agen menempati kursi ruangan yang dipilih. Monitor menampilkan goal, peserta, status diskusi, dan pembicara saat ini.
@@ -58,7 +58,7 @@ Pengguna membuka monitor Meeting A, B, atau C, memilih peserta, menulis goal, la
 - Gunakan pola guard, token lewat header, redaksi teks sebelum broadcast/persistensi, dan SSE milik chat yang sudah ada. Kunci API tetap di server. Tidak menambah dependency runtime.
 - Pisahkan transkrip diskusi dari log aktivitas kantor. Simpan goal, peserta, status, pesan, dan hasil akhir secara atomik di lokasi state aplikasi.
 - Tambahkan identitas rapat dan penempatan manual ke perencana kursi, tetap melalui store; engine membaca hasilnya. Agen duduk selama rapat, termasuk saat menunggu giliran.
-- Hubungkan raycast monitor ke panel ruangan. Monitor dibaca ulang sesuai laju Lt.4 yang sudah ditetapkan.
+- Hubungkan raycast monitor ke panel ruangan. Monitor dibaca ulang sesuai laju layar ruang meeting yang sudah ditetapkan.
 - Pastikan penghapusan peserta, compression/pergantian ID sesi, pembatalan, dan status hook tidak merusak reservasi rapat.
 
 ## Validasi

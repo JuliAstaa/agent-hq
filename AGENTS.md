@@ -73,21 +73,26 @@ tests/          unit/, integration/, e2e/, fixtures/*.jsonl
 - Canvas text uses font families resolved from the CSS variables set by `next/font` (names are hashed).
   Never hard-code `'Bungee'` in `ctx.font`. Canvas text is drawn only after `document.fonts.ready`
   (load each family explicitly first); before that, text textures stay blank.
-- Floors are rendered in separate passes by `renderFloors()` (approved deviation 6 in `plan-m1.md`): each pass
-  re-renders the sun's shadow map with only that floor's objects, so nothing shadows another floor through a slab.
-  Do not merge back into a single `effect.render`. New world-root objects must be assigned to a pass in `bandOf`.
-  There are four passes since the meeting floor (floor 4, group `g4`, prd.md §7.9); `engine.debug.hideMeetingFloor`
-  restores the prototype's three floors and Semua camera for the visual parity test.
-- Keep the prototype's redraw rates: desk screens, TV, arcade every 120 ms; floor 3 displays every 150 ms
-  and only while floor 3 is visible; whiteboard every 90 ms; mission board and roster "ago" text every 1 s.
-  Meeting room screens (floor 4): every 1 s while floor 4 is visible, and right away when the members change.
+- One floor, three tiers (deviation 29 in `plan-m1.md`): the stacked floors are gone. `engine/layout.ts` holds the
+  tier heights (`T0`, `T1`, `T2`), the risers, the streets, the stairs, `zoneAt()` and the camera presets (`VIEWS`).
+  Areas: Santai (front tier), Kantor (middle tier), Security, Meeting and Server (back tier, side by side). Every area
+  is always visible; a view (`floorMode`) only moves the camera and picks the room labels. The scene is drawn in one
+  `effect.render` pass (the per-floor shadow passes of deviation 6 are gone with the slabs). Heights change only on
+  the stairs: keep every walkable graph node on a tier, except the stair ends (`tests/unit/nav.test.ts` checks it).
+- Area builders live in `engine/world/` (`island.ts`, `santai.ts`, `kantor.ts`, `security.ts`, `meeting.ts`,
+  `server.ts`). The prototype's furniture in `santai.ts` and `security.ts` stays in its old floor-plan coordinates
+  inside an offset group per room (`ROOMS`, `SEC_OFFSET`); everything else is in world coordinates.
+- Keep the prototype's redraw rates: desk screens, TV, arcade every 120 ms; Security and DevOps station displays
+  every 150 ms; whiteboard every 90 ms; mission board and roster "ago" text every 1 s. Meeting room screens: every
+  1 s, and right away when the members change.
 - Do not chase identical `Math.random()` call order with the prototype. Randomness (books, stars, plants,
   demo) may differ; layout, geometry, colors, and behavior may not.
 
 ### Store contract (`lib/store.ts`)
 - One zustand store: agents, logs, soc, vuln, stats, floorMode, selectedId, connection, toast.
 - React writes `floorMode` and `selectedId`. The engine reads them.
-- The engine writes derived per-agent data (location, activity, floor) at most every 250 ms, only on change.
+- The engine writes derived per-agent data (location, activity, area) at most every 250 ms, only on change.
+- `floorMode` is the area view: `"all"` or a `ZoneId` from `lib/zones.ts` (the name stayed from the floors).
 - One-shot effects (confetti, squash, snapshot placement, removal) go through the engine event bus, not store state.
 - The store assigns desks (`slot`) and meeting seats (`meeting`, from `lib/meeting.ts`, recomputed after every
   agent event). The engine never picks a meeting seat; it shows an agent while it has a desk or a seat.
@@ -135,10 +140,10 @@ tests/          unit/, integration/, e2e/, fixtures/*.jsonl
   pathfinding, store flows (walking, poses, room changes are verified here, not by screenshots).
 - Bridge parity: replay `tests/fixtures/*.jsonl` to `node references/server.js` and to `next start`,
   compare SSE output ignoring `ts`.
-- Visual (Playwright): building without agents in the 4 views (Semua, Lt.3, Lt.2, Lt.1) compared with the
-  prototype using a tolerance; agents placed at fixed spots via `window.agentHQ` with the simulator stopped
-  for manual review. Tests run offline: intercept `cdn.jsdelivr.net/npm/three@0.160.0/**` with `page.route`
-  and serve files from `node_modules/three`.
+- Visual (Playwright): the scene is no longer compared with the prototype (deviation 29). Building without agents
+  in every view (renders, views differ, screenshots), demo and meeting screenshots for manual review, 2D UI
+  screenshots next to the prototype. Tests run offline: intercept `cdn.jsdelivr.net/npm/three@0.160.0/**` with
+  `page.route` and serve files from `node_modules/three`.
 
 ## Done means
 `npm run lint`, `npm run typecheck`, `npm test`, `npm run build` pass, and the M1 checks in `plan-m1.md`
