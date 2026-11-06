@@ -188,3 +188,79 @@ test("kick from the roster (live)", async ({ page, request }) => {
   await send({ type: "remove", id });
   expect(errors).toEqual([]);
 });
+
+test("roster buttons ask for HQ_TOKEN once per tab (live)", async ({ page, request }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  // The test server runs without HQ_TOKEN; this route stands in for a bridge that has one (like the VPS). Renames
+  // are answered here so agent-hq-names.json stays untouched; kicks go on to the real bridge.
+  const seen: string[] = [];
+  let lastRename: unknown = null;
+  await page.context().route("**/api/event", async (route) => {
+    const req = route.request();
+    if (req.method() !== "POST") return route.continue();
+    const auth = (await req.headerValue("authorization")) || "";
+    const body = req.postDataJSON() as { type?: string };
+    seen.push(`${body?.type} ${auth === "Bearer e2e-token" ? "ok" : auth ? "wrong" : "none"}`);
+    if (auth !== "Bearer e2e-token") return route.fulfill({ status: 401, contentType: "application/json", body: '{"ok":false,"error":"token salah"}' });
+    if (body?.type === "rename") {
+      lastRename = body;
+      return route.fulfill({ status: 202, contentType: "application/json", body: '{"ok":true}' });
+    }
+    return route.continue();
+  });
+  const open = async (p: typeof page) => {
+    await blockExternal(p);
+    await p.goto("/");
+    await expect(p.locator('[data-hq-ui="top"] [data-mode]')).toHaveAttribute("data-mode", "live", { timeout: 15_000 });
+  };
+  await open(page);
+  const a = `tok-a-${Date.now()}`, b = `tok-b-${Date.now()}`;
+  const send = (data: object) => request.post("/api/event", { data });
+  await send({ id: a, name: "Tokenan", role: "Tester", status: "idle" });
+  await send({ id: b, name: "Tokenin", role: "Tester", status: "idle" });
+
+  // Kick without a token: the card asks for one, a wrong one is refused, the right one kicks.
+  const cardA = page.locator(`.agent[data-id="${a}"]`);
+  await cardA.getByRole("button", { name: "Keluarkan Tokenan" }).click();
+  await expect(cardA).toContainText("Agent HQ memakai HQ_TOKEN. Masukkan tokennya dulu.");
+  const field = cardA.getByLabel("HQ_TOKEN", { exact: true });
+  await expect(field).toBeFocused();
+  await expect(cardA.getByRole("button", { name: "Simpan token" })).toBeDisabled();
+  await page.locator('[data-hq-ui="roster"]').screenshot({ path: "test-results/visual/roster-token.png" });
+  await field.fill("salah");
+  await field.press("Enter");
+  await expect(cardA).toContainText("Token salah. Masukkan lagi.");
+  await cardA.getByLabel("HQ_TOKEN", { exact: true }).fill("e2e-token");
+  await cardA.getByRole("button", { name: "Simpan token" }).click();
+  await expect(cardA).toHaveCount(0);
+  await expect(page.locator('[data-hq-ui="toast"]')).toHaveText("Tokenan dikeluarkan lewat Airlock. Kembali saat mulai kerja.");
+
+  // Same tab: a rename goes straight through with the saved token.
+  const cardB = page.locator(`.agent[data-id="${b}"]`);
+  await cardB.getByRole("button", { name: "Ganti nama Tokenin" }).click();
+  await cardB.getByLabel("Nama", { exact: true }).fill("Tokenin Baru");
+  await cardB.getByRole("button", { name: "Simpan", exact: true }).click();
+  await expect(cardB.locator("form")).toHaveCount(0);
+
+  // A new tab has no token yet: the rename form asks for it, and Enter in the field saves it and sends the rename.
+  // The first tab closes first: its streams would hold the browser's connections to this host.
+  await page.close();
+  const page2 = await page.context().newPage();
+  page2.on("pageerror", (e) => errors.push(e.message));
+  await open(page2);
+  const cardB2 = page2.locator(`.agent[data-id="${b}"]`);
+  await cardB2.getByRole("button", { name: "Ganti nama Tokenin" }).click();
+  await cardB2.getByLabel("Nama", { exact: true }).fill("Tokenin Lagi");
+  await cardB2.getByRole("button", { name: "Simpan", exact: true }).click();
+  await expect(cardB2.locator("form")).toContainText("Agent HQ memakai HQ_TOKEN. Masukkan tokennya dulu.");
+  await cardB2.getByLabel("HQ_TOKEN", { exact: true }).fill("e2e-token");
+  await cardB2.getByLabel("HQ_TOKEN", { exact: true }).press("Enter");
+  await expect(cardB2.locator("form")).toHaveCount(0);
+  expect(lastRename).toEqual({ type: "rename", id: b, name: "Tokenin Lagi" });
+
+  expect(seen).toEqual(["kick none", "kick wrong", "kick ok", "rename ok", "rename none", "rename ok"]);
+  await send({ type: "remove", id: a });
+  await send({ type: "remove", id: b });
+  expect(errors).toEqual([]);
+});

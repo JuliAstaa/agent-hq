@@ -5,6 +5,7 @@
 
 import { STATUS, type Status } from "./events";
 import { liveEventUrl } from "./rename";
+import { authHeader, readToken, tokenError } from "./token";
 
 export const canKick = (status: Status | null | undefined): boolean => status === "idle" || status === "offline";
 
@@ -26,7 +27,8 @@ export const KICK_TTL_MS = 7 * 24 * 3600 * 1000;
 export const kickRefusal = (name: string, status: Status) =>
   `${name} berstatus ${STATUS[status].label}. Hanya agen Santai atau Offline yang bisa dikeluarkan.`;
 
-export type KickResult = { ok: true; local: boolean } | { ok: false; error: string };
+/** `needToken`: the bridge uses HQ_TOKEN and the tab has none (or a wrong one); the card asks for it and retries. */
+export type KickResult = { ok: true; local: boolean } | { ok: false; error: string; needToken?: boolean };
 
 /** The parts of the store this needs (kept small so tests can pass a stub). */
 interface StoreLike {
@@ -39,7 +41,8 @@ interface StoreLike {
 
 /**
  * Roster button. Live: POST {"type":"kick"} to the bridge the page watches, which checks the status again and
- * broadcasts the kick to every viewer. Demo or no bridge: kick on this screen only.
+ * broadcasts the kick to every viewer; the HQ_TOKEN typed in this tab (lib/token.ts) goes along as a header.
+ * Demo or no bridge: kick on this screen only.
  */
 export async function kickAgent(store: StoreLike, id: string): Promise<KickResult> {
   const st = store.getState();
@@ -51,12 +54,13 @@ export async function kickAgent(store: StoreLike, id: string): Promise<KickResul
     st.applyEvent({ type: "remove", id, reason: "kick" });
     return { ok: true, local: true };
   }
+  const token = readToken();
   try {
-    const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ type: "kick", id }) });
+    const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json", ...authHeader(token) }, body: JSON.stringify({ type: "kick", id }) });
     const body = (await res.json().catch(() => null)) as { kicked?: boolean; error?: string } | null;
     if (res.ok && body?.kicked) return { ok: true, local: false };
     if (res.ok) return { ok: false, error: "Bridge ini belum mendukung kick agen." };
-    if (res.status === 401) return { ok: false, error: "Ditolak: bridge memakai HQ_TOKEN. Kick lewat curl dengan token." };
+    if (res.status === 401) return { ok: false, error: tokenError(token), needToken: true };
     return { ok: false, error: body?.error || `Gagal (HTTP ${res.status})` };
   } catch (e) {
     return { ok: false, error: `Bridge tidak bisa dihubungi: ${(e as Error).message}` };

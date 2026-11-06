@@ -1,8 +1,10 @@
 // Rename an agent from the roster (deviation 16). Live: POST {"type":"rename"} to the bridge the page is connected to,
 // so the override is saved and survives later hooks and restarts (prd.md §7.4). Demo or no bridge: change the
-// name on this screen only. The page learns the live stream URL from Office (setLiveUrlSource).
+// name on this screen only. The page learns the live stream URL from Office (setLiveUrlSource). The HQ_TOKEN typed in
+// this tab (lib/token.ts) goes along as a header.
 
 import type { Dept } from "./teams";
+import { authHeader, readToken, tokenError } from "./token";
 
 export interface RenamePatch {
   /** New name; null resets to the name the agent reports itself. */
@@ -12,7 +14,8 @@ export interface RenamePatch {
   team?: Dept | null;
 }
 
-export type RenameResult = { ok: true; local: boolean } | { ok: false; error: string };
+/** `needToken`: the bridge uses HQ_TOKEN and the tab has none (or a wrong one); the card asks for it and retries. */
+export type RenameResult = { ok: true; local: boolean } | { ok: false; error: string; needToken?: boolean };
 
 /** The parts of the store this needs (kept small so tests can pass a stub). */
 interface StoreLike {
@@ -59,10 +62,11 @@ export async function renameAgent(store: StoreLike, id: string, patch: RenamePat
     st.applyEvent(ev);
     return { ok: true, local: true };
   }
+  const token = readToken();
   try {
-    const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ type: "rename", id, ...patch }) });
+    const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json", ...authHeader(token) }, body: JSON.stringify({ type: "rename", id, ...patch }) });
     if (res.ok) return { ok: true, local: false };
-    if (res.status === 401) return { ok: false, error: "Ditolak: bridge memakai HQ_TOKEN. Rename lewat curl dengan token." };
+    if (res.status === 401) return { ok: false, error: tokenError(token), needToken: true };
     const body = (await res.json().catch(() => null)) as { error?: string } | null;
     return { ok: false, error: body?.error || `Gagal (HTTP ${res.status})` };
   } catch (e) {

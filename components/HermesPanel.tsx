@@ -17,7 +17,7 @@ import {
 } from "@/lib/hermes-chat";
 import { sseFrames } from "@/lib/sse";
 import { hqStore } from "@/lib/store";
-import { authHeader, readToken, saveToken } from "./token";
+import { authHeader, readToken, saveToken } from "@/lib/token";
 import { Button, CARD, OFF, PILL, cn } from "./ui";
 
 type Conn = "connecting" | "open" | "down" | "auth";

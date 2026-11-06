@@ -20,7 +20,7 @@ import ServerPanel from "./ServerPanel";
 import TerminalPanel, { useTerminalUrl } from "./TerminalPanel";
 import Toast from "./Toast";
 import TopBar from "./TopBar";
-import { authHeader, readToken } from "./token";
+import { authHeader, readToken } from "@/lib/token";
 import { MEETING_OPEN_EVENT } from "@/lib/discussions";
 import { MEETING_ROOMS } from "@/lib/meeting";
 import MeetingPanel from "./MeetingPanel";

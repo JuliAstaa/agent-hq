@@ -11,7 +11,7 @@ import {
   type CronAction, type CronCmd, type CronJob,
 } from "@/lib/cron";
 import { hqStore } from "@/lib/store";
-import { authHeader, readToken, saveToken as storeToken } from "./token";
+import { authHeader, readToken, saveToken as storeToken } from "@/lib/token";
 import { Button, CARD, OFF, PILL, cn } from "./ui";
 
 const CONFIRM_MS = 4000;

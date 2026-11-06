@@ -10,6 +10,7 @@ import { renameAgent, type RenamePatch } from "@/lib/rename";
 import { canKick, kickAgent } from "@/lib/kick";
 import { hqStore, type Agent } from "@/lib/store";
 import { DEPTS, type Dept } from "@/lib/teams";
+import { saveToken } from "@/lib/token";
 import { Button, OFF, PILL, cn } from "./ui";
 
 const FIELD = "w-full font-[inherit] text-[13px] px-2 py-[5px] border-[2.5px] border-ink rounded-[10px] bg-white";
@@ -22,6 +23,42 @@ const TEAM_CHOICES: [string, string][] = [
   ["ops", DEPTS.ops.label],
 ];
 
+/**
+ * HQ_TOKEN field shown on a card after the bridge answers 401. The token is kept for this tab, shared with the
+ * Hermes, Jadwal and Rapat panels (lib/token.ts); then `onSaved` sends the rename or kick again.
+ */
+function TokenField({ onSaved }: { onSaved: () => void }) {
+  const [draft, setDraft] = useState("");
+  const save = () => {
+    if (!draft.trim()) return;
+    saveToken(draft);
+    setDraft("");
+    onSaved();
+  };
+  return (
+    <div className="flex gap-[6px] items-center" onKeyDown={(e) => e.stopPropagation()}>
+      <input
+        className={cn(FIELD, "min-w-0 flex-1")}
+        type="password"
+        placeholder="HQ_TOKEN"
+        aria-label="HQ_TOKEN"
+        autoComplete="off"
+        autoFocus
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key !== "Enter") return;
+          e.preventDefault(); // inside the rename form, Enter would submit the form instead
+          save();
+        }}
+      />
+      <Button size="log" tone="primary" className={cn(OFF, "flex-none whitespace-nowrap")} disabled={!draft.trim()} onClick={save}>
+        Simpan token
+      </Button>
+    </div>
+  );
+}
+
 /** Rename form inside a roster card (deviation 16). Live: saved on the bridge; demo: this screen only. */
 function RenameForm({ a, onDone }: { a: Agent; onDone: () => void }) {
   const live = useStore(hqStore, (s) => s.conn.mode === "live");
@@ -30,12 +67,15 @@ function RenameForm({ a, onDone }: { a: Agent; onDone: () => void }) {
   const [team, setTeam] = useState("keep");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** The change refused for a missing or wrong HQ_TOKEN; sent again once a token is saved. */
+  const [retry, setRetry] = useState<RenamePatch | null>(null);
 
   const send = async (patch: RenamePatch) => {
     setBusy(true);
     setError(null);
     const res = await renameAgent(hqStore, a.id, patch);
     setBusy(false);
+    setRetry(!res.ok && res.needToken ? patch : null);
     if (res.ok) onDone();
     else setError(res.error);
   };
@@ -77,6 +117,7 @@ function RenameForm({ a, onDone }: { a: Agent; onDone: () => void }) {
       </label>
       {!live && <span className="text-[11.5px] leading-snug opacity-75">Mode demo: nama hanya berubah di layar ini.</span>}
       {error && <span className="text-[12px] leading-snug font-semibold text-[#c2185b]">{error}</span>}
+      {retry && <TokenField onSaved={() => void send(retry)} />}
       <div className="flex gap-[6px] flex-wrap justify-end">
         {live && (
           <Button size="log" disabled={busy} title="Kembalikan nama dan peran yang dilaporkan agen itu sendiri" onClick={() => void send({ name: null, role: null })} className="mr-auto disabled:opacity-45">
@@ -105,12 +146,19 @@ function AgentCard({ a, selected, now, onOpenChat, openingChatId }: {
   const ref = useRef<HTMLDivElement>(null);
   const [editing, setEditing] = useState(false);
   const [kicking, setKicking] = useState(false);
+  /** Set when the bridge wants HQ_TOKEN: the card shows a token field and kicks again once it is saved. */
+  const [kickToken, setKickToken] = useState<string | null>(null);
   const kickable = canKick(a.status);
   const kick = async () => {
     setKicking(true);
     const res = await kickAgent(hqStore, a.id);
     // On success the card leaves the roster; keep the button busy until then.
     if (!res.ok) setKicking(false);
+    if (!res.ok && res.needToken) {
+      setKickToken(res.error);
+      return;
+    }
+    setKickToken(null);
     hqStore.getState().showToast(res.ok ? `${a.name} dikeluarkan lewat Airlock. Kembali saat mulai kerja.` : res.error);
   };
   useEffect(() => {
@@ -196,6 +244,12 @@ function AgentCard({ a, selected, now, onOpenChat, openingChatId }: {
           {openingChatId === a.id ? "Membuka..." : "Buka chat"}
         </Button>
       </div>
+      {kickToken && kickable && (
+        <div className="mt-2 flex flex-col gap-[6px] [border-top:2px_dashed_var(--ink)] pt-2 cursor-default" onClick={(e) => e.stopPropagation()}>
+          <span className="text-[12px] leading-snug font-semibold text-[#c2185b]">{kickToken}</span>
+          <TokenField onSaved={() => void kick()} />
+        </div>
+      )}
       {selected && (
         <div className="mt-2 [border-top:2px_dashed_var(--ink)] pt-2">
           <div className="text-[11.5px] opacity-60 font-mono">{pct == null ? "Progres: tidak dilaporkan" : `Progres: ${pct}%`}</div>

@@ -9,7 +9,7 @@ import { MEETING_ROOMS } from "@/lib/meeting";
 import { hqStore } from "@/lib/store";
 import { sseFrames } from "@/lib/sse";
 import { ModelSelect } from "./HermesPanel";
-import { authHeader, readToken, saveToken } from "./token";
+import { authHeader, readToken, saveToken } from "@/lib/token";
 import { Button, CARD, OFF, PILL, cn } from "./ui";
 
 const FIELD = "w-full box-border [font-family:inherit] text-[13px] px-2 py-[6px] border-[2.5px] border-ink rounded-[10px] bg-paper disabled:opacity-50";

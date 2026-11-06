@@ -135,7 +135,8 @@ di `examples/hermes/`, plus panel chat untuk memberi perintah ke Hermes dari kan
 **Dari Daftar Agen (paling gampang):** klik tombol ✎ di kartu agen, ubah Nama, Peran, atau Tim, lalu Simpan.
 Nama baru tersimpan di bridge, jadi sama permanennya dengan cara curl di bawah. "Pakai nama asli" mengembalikan
 nama dan peran yang dilaporkan agen itu sendiri. Di mode demo, nama hanya berubah di layar. Kalau bridge memakai
-`HQ_TOKEN`, rename dari kartu ditolak, jadi pakai curl dengan token.
+`HQ_TOKEN`, kartu meminta token sekali per tab browser (sama dengan panel Hermes, Jadwal, dan Rapat). Isi token, klik
+Simpan token, dan perubahan langsung dikirim ulang.
 
 **Lewat curl:** sesi yang dibuka tanpa `HQ_NAME` bisa diganti namanya tanpa restart sesi:
 
@@ -465,6 +466,7 @@ curl -s -X POST http://127.0.0.1:8787/event -H 'content-type: application/json' 
 ```
 
 - Balasan `202` berisi `"kicked": true`. `409` kalau agen sedang bekerja, `404` kalau tidak ditemukan.
-- Kalau bridge memakai `HQ_TOKEN`, tombol di kartu ditolak, jadi pakai curl dengan token.
+- Kalau bridge memakai `HQ_TOKEN`, kartu meminta token sekali per tab browser. Setelah token disimpan, agen langsung
+  dikeluarkan. Lewat curl, tambahkan `-H "Authorization: Bearer $HQ_TOKEN"`.
 - Di mode demo, kick hanya berlaku di layar itu; agen demo kembali sendiri dengan tugas baru.
 - Belum tersedia di `examples/server.js`.

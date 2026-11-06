@@ -1,6 +1,7 @@
 // Roster rename client (deviation 16): which endpoint it posts to, and live vs demo behavior.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { eventUrlFor, renameAgent, setLiveUrlSource } from "@/lib/rename";
+import { saveToken } from "@/lib/token";
 
 const stubStore = (mode: string) => {
   const applied: unknown[] = [];
@@ -57,5 +58,22 @@ describe("renameAgent", () => {
     expect(await renameAgent(store, "zorp", { name: "Zed", role: "Coder", team: null })).toEqual({ ok: true, local: true });
     expect(applied).toEqual([{ type: "agent_update", id: "zorp", name: "Zed", role: "Coder", team: "office" }]);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("live: sends the HQ_TOKEN typed in this tab, and asks for it on a 401", async () => {
+    setLiveUrlSource(() => "/api/stream");
+    const saved = new Map<string, string>();
+    vi.stubGlobal("sessionStorage", { getItem: (k: string) => saved.get(k) ?? null, setItem: (k: string, v: string) => void saved.set(k, v) });
+    const fetchMock = vi.fn(async () => new Response("", { status: 401 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const headers = (i: number) => (fetchMock.mock.calls[i] as unknown as [string, RequestInit])[1].headers;
+    const { store } = stubStore("live");
+    expect(await renameAgent(store, "x", { name: "Y" })).toEqual({ ok: false, error: "Agent HQ memakai HQ_TOKEN. Masukkan tokennya dulu.", needToken: true });
+    expect(headers(0)).toEqual({ "content-type": "application/json" });
+    saveToken("rahasia");
+    expect(await renameAgent(store, "x", { name: "Y" })).toEqual({ ok: false, error: "Token salah. Masukkan lagi.", needToken: true });
+    fetchMock.mockImplementation(async () => new Response('{"ok":true}', { status: 202 }));
+    expect(await renameAgent(store, "x", { name: "Y" })).toEqual({ ok: true, local: false });
+    expect(headers(2)).toEqual({ "content-type": "application/json", authorization: "Bearer rahasia" });
   });
 });

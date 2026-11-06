@@ -6,6 +6,7 @@ import path from "node:path";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { canKick, KICK_TTL_MS, kickAgent as kickFromRoster, kickRefusal, wakesUp } from "@/lib/kick";
 import { setLiveUrlSource } from "@/lib/rename";
+import { saveToken } from "@/lib/token";
 import { hookToEvents, type HookPayload } from "@/lib/bridge/hooks";
 import { agentKnown, hub, kickAgent, listAgents, publish, reloadOverrides, renameAgent, resetHub, type BridgeEvent } from "@/lib/bridge/hub";
 import { POST as postEvent } from "@/app/api/event/route";
@@ -235,5 +236,23 @@ describe("roster kick client", () => {
     expect(await kickFromRoster(store, "a")).toEqual({ ok: false, error: "Bridge ini belum mendukung kick agen." });
     expect(await kickFromRoster(store, "a")).toEqual({ ok: false, error: "Zorp berstatus Kerja." });
     expect(await kickFromRoster(store, "a")).toMatchObject({ ok: false, error: expect.stringContaining("HQ_TOKEN") });
+  });
+
+  it("live: sends the HQ_TOKEN typed in this tab, and asks for it on a 401", async () => {
+    setLiveUrlSource(() => "/api/stream");
+    const saved = new Map<string, string>();
+    vi.stubGlobal("sessionStorage", { getItem: (k: string) => saved.get(k) ?? null, setItem: (k: string, v: string) => void saved.set(k, v) });
+    const fetchMock = vi.fn(async () => new Response('{"ok":false,"error":"token salah"}', { status: 401 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const headers = (i: number) => (fetchMock.mock.calls[i] as unknown as [string, RequestInit])[1].headers;
+    const { store } = stub("live");
+    expect(await kickFromRoster(store, "a")).toEqual({ ok: false, error: "Agent HQ memakai HQ_TOKEN. Masukkan tokennya dulu.", needToken: true });
+    expect(headers(0)).toEqual({ "content-type": "application/json" });
+    saveToken(" rahasia ");
+    expect(await kickFromRoster(store, "a")).toEqual({ ok: false, error: "Token salah. Masukkan lagi.", needToken: true });
+    expect(headers(1)).toEqual({ "content-type": "application/json", authorization: "Bearer rahasia" });
+    fetchMock.mockImplementation(async () => new Response(JSON.stringify({ ok: true, kicked: true }), { status: 202 }));
+    expect(await kickFromRoster(store, "a")).toEqual({ ok: true, local: false });
+    expect(headers(2)).toEqual({ "content-type": "application/json", authorization: "Bearer rahasia" });
   });
 });
