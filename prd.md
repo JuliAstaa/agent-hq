@@ -124,6 +124,9 @@ All events are JSON objects. `id` identifies the agent. Unknown fields are ignor
 { "type": "snapshot", "agents": [ { ...agent_update fields } ] }
 ```
 A `remove` with `"reason": "kick"` comes from the bridge after a kick (§7.10).
+A `snapshot` is the full list of agents: viewers drop agents missing from it (a `remove` sent while they were
+reconnecting). Replayed lines (`_replay: true`) of an agent missing from the snapshot only appear in the log; they
+never add an agent or bring a kicked one back (deviation 31 in `plan-m1.md`).
 
 ### 7.3 Security events
 ```json

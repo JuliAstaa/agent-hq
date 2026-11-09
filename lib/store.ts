@@ -247,10 +247,11 @@ export function createHQStore(): HQStore {
 
     /**
      * Events of a kicked agent: activity brings it back (true = it is back), anything else is dropped (null).
-     * The live bridge filters these already; this covers demo mode. A snapshot is the bridge's truth.
+     * The live bridge filters these already; this covers demo mode. A snapshot is the bridge's truth. A replayed
+     * line passes, but applyAgent keeps it out of the office.
      */
     const kickGate = (p: AgentPatch): boolean | null => {
-      if (!kicked.has(p.id)) return false;
+      if (!kicked.has(p.id) || p.replay) return false;
       if (!p.snap && !wakesUp(p.type, p.status)) return null;
       kicked.delete(p.id);
       return !p.snap;
@@ -291,6 +292,15 @@ export function createHQStore(): HQStore {
     const applyAgent = (d: Draft, p: AgentPatch) => {
       const id = p.id;
       const isNew = !d.agents.has(id);
+      // A replayed line of an agent missing from the snapshot (session ended, kicked): only its log line is shown.
+      if (isNew && p.replay) {
+        if (p.type === "log") {
+          const lvl = p.level || "info";
+          if (lvl === "error" && !p.statusFieldError) d.stats.errors++;
+          logInto(d, { id, level: lvl, message: p.message ?? "" });
+        }
+        return;
+      }
       if (isNew) {
         // A subagent waits for the meeting plan (planInto): a meeting seat, else a desk.
         const sub = !!p.parent;
@@ -439,6 +449,10 @@ export function createHQStore(): HQStore {
           kicked.add(e.id);
         } else kicked.delete(e.id);
         removeInto(d, e.id, kick);
+      } else if (e.kind === "snapshot") {
+        // The bridge's full list: agents missing from it were removed while this page was reconnecting.
+        const keep = new Set(e.ids);
+        for (const id of [...d.agents.keys()]) if (!keep.has(id)) removeInto(d, id);
       } else {
         applyAgent(d, e.agent);
       }

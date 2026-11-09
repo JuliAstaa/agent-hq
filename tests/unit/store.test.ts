@@ -187,6 +187,34 @@ describe("snapshot placement and reset", () => {
     expect(S().vuln.nodes).toEqual([]);
     expect(signals.slice(-2)).toEqual([{ type: "remove", id: "a" }, { type: "reset" }]);
   });
+  it("a snapshot after a reconnect drops agents the bridge no longer has", () => {
+    apply({ type: "snapshot", agents: [{ id: "a", status: "idle" }, { id: "b", status: "working" }] });
+    S().select("b");
+    signals = [];
+    // The remove of "b" was sent while the page was reconnecting; the new snapshot no longer has it.
+    apply({ type: "snapshot", agents: [{ id: "a", status: "idle" }, { id: "c", status: "idle" }] });
+    expect([...S().agents.keys()]).toEqual(["a", "c"]);
+    expect(S().selectedId).toBeNull();
+    expect(signals[0]).toEqual({ type: "remove", id: "b" });
+    apply({ type: "snapshot", agents: [] });
+    expect(S().agents.size).toBe(0);
+  });
+  it("a replayed line of an agent missing from the snapshot shows in the log but adds no agent", () => {
+    apply({ type: "snapshot", agents: [{ id: "a", name: "Glimbo", status: "idle" }] });
+    signals = [];
+    apply({ type: "log", id: "gone", level: "error", message: "Bash: $ rg", _replay: true });
+    apply({ type: "finding", id: "gone", title: "SQLi", _replay: true });
+    apply({ type: "alert", id: "gone", message: "SSH", _replay: true });
+    expect([...S().agents.keys()]).toEqual(["a"]);
+    expect(signals.some((s) => s.type === "add")).toBe(false);
+    expect(logMsgs()).toContain("error|gone|Bash: $ rg");
+    expect(S().stats.errors).toBe(1);
+    expect(S().vuln.list).toHaveLength(1);
+    apply({ type: "log", id: "a", message: "masih di sini", _replay: true });
+    expect(agent("a").events.at(-1)).toMatchObject({ msg: "masih di sini" });
+    apply({ type: "log", id: "gone", message: "baru" });
+    expect(S().agents.has("gone")).toBe(true); // a live line still adds the agent
+  });
 });
 
 describe("ui state", () => {
@@ -278,6 +306,18 @@ describe("kick (prd.md §7.10)", () => {
     apply({ type: "remove", id: "a", reason: "kick" });
     S().clearAgents();
     apply({ id: "a", status: "idle" });
+    expect(S().agents.has("a")).toBe(true);
+  });
+
+  it("a replayed finding of a kicked agent does not bring it back", () => {
+    apply({ id: "a", status: "idle" });
+    apply({ type: "remove", id: "a", reason: "kick" });
+    apply({ type: "finding", id: "a", title: "SQLi", _replay: true });
+    expect(S().agents.has("a")).toBe(false);
+    expect(logMsgs().some((m) => m.endsWith("Kembali ke kantor"))).toBe(false);
+    apply({ id: "a", status: "idle" });
+    expect(S().agents.has("a")).toBe(false); // still kicked
+    apply({ id: "a", status: "working" });
     expect(S().agents.has("a")).toBe(true);
   });
 

@@ -98,6 +98,11 @@ export interface AgentPatch {
   /** From snapshot: no transition log line, place idle agents in spots and team agents at stations. */
   quiet: boolean;
   snap: boolean;
+  /**
+   * Replayed by the bridge for a new viewer (`_replay`): old news. It never adds an agent that is not in the snapshot
+   * (its session ended or it was kicked) and never brings a kicked agent back.
+   */
+  replay: boolean;
 }
 
 export type HQEvent =
@@ -107,6 +112,11 @@ export type HQEvent =
   | { kind: "finding"; agentId: string | null; sev: Severity; title: string; node: AttackNode; agent: AgentPatch | null }
   /** `kicked`: the agent was kicked (reason "kick", prd.md §7.10): the office launches it from the Airlock. */
   | { kind: "remove"; id: string; kicked: boolean }
+  /**
+   * Comes first in a snapshot: the ids of every agent the bridge has. Agents missing from it are dropped (their
+   * remove was sent while the page was reconnecting).
+   */
+  | { kind: "snapshot"; ids: string[] }
   | { kind: "agent"; agent: AgentPatch }
   /** Scheduled jobs snapshot (Hermes cron). Never an agent. */
   | { kind: "schedule"; cron: Omit<CronState, "receivedAt">; ageMs: number }
@@ -145,6 +155,7 @@ function agentPatch(ev: RawEvent, type: string, id: string, now: number): AgentP
     statusFieldError: normStatus(ev.status) === "error",
     quiet: !!ev._quiet,
     snap: !!ev._snap,
+    replay: !!ev._replay,
   };
   if (ev.name) p.name = String(ev.name);
   if (ev.role) p.role = String(ev.role);
@@ -180,8 +191,10 @@ export function normalizeEvent(input: unknown, now = Date.now()): HQEvent[] {
     return discussion ? [{ kind: "meeting_state", discussion }] : [];
   }
   if (type === "snapshot") {
-    const list = Array.isArray(ev.agents) ? ev.agents : [];
-    return list.flatMap((x) => normalizeEvent({ ...(x as object), type: "agent_update", _quiet: true, _snap: true }, now));
+    if (!Array.isArray(ev.agents)) return [];
+    const agents = ev.agents.flatMap((x) => normalizeEvent({ ...(x as object), type: "agent_update", _quiet: true, _snap: true }, now));
+    const ids = agents.flatMap((e) => (e.kind === "agent" ? [e.agent.id] : []));
+    return [{ kind: "snapshot", ids }, ...agents];
   }
   if (type === "schedule") return [{ kind: "schedule", ...normalizeSchedule(ev) }];
   if (type === "cron_command") {

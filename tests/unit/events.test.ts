@@ -113,14 +113,20 @@ describe("log, task_done, remove, snapshot (§7.2)", () => {
     expect(one({ type: "remove", id: "coder-1", reason: "kick" })).toEqual({ kind: "remove", id: "coder-1", kicked: true });
     expect(normalizeEvent({ type: "kick", id: "coder-1" })).toEqual([]);
   });
-  it("snapshot -> quiet agent updates", () => {
+  it("snapshot -> the list of ids, then quiet agent updates", () => {
     const out = normalizeEvent({ type: "snapshot", agents: [{ id: "a", status: "idle" }, { id: "b", name: "B", type: "log" }] }, NOW);
-    expect(out).toHaveLength(2);
-    for (const e of out) {
+    expect(out).toHaveLength(3);
+    expect(out[0]).toEqual({ kind: "snapshot", ids: ["a", "b"] });
+    for (const e of out.slice(1)) {
       expect(e.kind).toBe("agent");
-      if (e.kind === "agent") expect(e.agent).toMatchObject({ type: "agent_update", quiet: true, snap: true });
+      if (e.kind === "agent") expect(e.agent).toMatchObject({ type: "agent_update", quiet: true, snap: true, replay: false });
     }
+    expect(normalizeEvent({ type: "snapshot", agents: [] }, NOW)).toEqual([{ kind: "snapshot", ids: [] }]);
     expect(normalizeEvent({ type: "snapshot" }, NOW)).toEqual([]);
+  });
+  it("replayed lines are marked", () => {
+    expect(agentOf({ type: "log", id: "a", message: "m", _replay: true }).replay).toBe(true);
+    expect(agentOf({ type: "log", id: "a", message: "m" }).replay).toBe(false);
   });
   it("arrays and junk", () => {
     expect(normalizeEvent([{ id: "a" }, null, 3, [{ id: "b" }]], NOW)).toHaveLength(2);
