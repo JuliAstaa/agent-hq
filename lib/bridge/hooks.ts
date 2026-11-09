@@ -103,6 +103,8 @@ export function hookToEvents(
       return out;
     }
     case "StopFailure":
+      // A failed subagent never sends SubagentStop: it shows the error, then leaves like a finished one.
+      if (isSub) scheduleRemove(id, 45000);
       return [up({ status: "error" }), log(`Gagal berhenti normal: ${h.error || h.message || evName}`, "error")];
     case "SubagentStart":
       return [up({ status: "working", task: `Subagen ${h.agent_type || ""} mulai` })];

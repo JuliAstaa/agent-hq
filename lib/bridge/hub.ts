@@ -176,12 +176,7 @@ export function remember(ev: BridgeEvent): void {
   const id = idOf(ev);
   hub.lastSeen.set(id, Date.now());
   if (type === "remove") {
-    hub.agents.delete(id);
-    hub.lastSeen.delete(id);
-    hub.sourceIdentity.delete(id);
-    clearTimeout(hub.removeTimers.get(id));
-    hub.removeTimers.delete(id);
-    hub.removals.delete(id);
+    forget(id);
     return;
   }
   if (["log", "finding", "alert", "metric"].includes(type)) {
@@ -195,6 +190,20 @@ export function remember(ev: BridgeEvent): void {
   }
   hub.agents.set(id, mergeAgent(hub.agents.get(id) || { id }, ev, type));
 }
+
+/** Drop an agent's state and any pending removal of it. */
+function forget(id: string): void {
+  hub.agents.delete(id);
+  hub.lastSeen.delete(id);
+  hub.sourceIdentity.delete(id);
+  clearTimeout(hub.removeTimers.get(id));
+  hub.removeTimers.delete(id);
+  hub.removals.delete(id);
+}
+
+/** Ids of the agents that name `parent` as their delegating agent (prd.md §7.9). */
+const childrenOf = (parent: string): string[] =>
+  [...hub.agents.values()].filter((a) => a.parent != null && String(a.parent) === parent).map((a) => String(a.id));
 
 /** `prev` with the agent fields of `ev` applied (an agent's snapshot record). */
 function mergeAgent(prev: BridgeEvent, ev: BridgeEvent, type: string): BridgeEvent {
@@ -246,6 +255,10 @@ export function publish(ev: BridgeEvent): void {
   // Live server metrics and schedule commands are unrelated to agent restart state.
   if (!["server_stats", "schedule", "cron_command", "meeting_state"].includes(String(ev.type || "").toLowerCase())) persistHub();
   broadcast(ev);
+  // A session's subagents leave with it (a failed subagent may never have sent SubagentStop). A kick keeps them.
+  if (String(ev.type || "").toLowerCase() === "remove" && ev.reason !== "kick") {
+    for (const child of childrenOf(idOf(ev))) publish({ type: "remove", id: child });
+  }
 }
 
 /* ---------------- kick (prd.md §7.10) ---------------- */
@@ -485,10 +498,13 @@ for (const [id, removal] of hub.removals) {
     hub.removals.delete(id);
     expired = true;
   } else if (removal.at <= Date.now()) {
-    hub.agents.delete(id);
-    hub.lastSeen.delete(id);
-    hub.sourceIdentity.delete(id);
-    hub.removals.delete(id);
+    const gone = [id];
+    // Subagents leave with their session, as in publish().
+    while (gone.length) {
+      const g = gone.pop()!;
+      gone.push(...childrenOf(g));
+      forget(g);
+    }
     expired = true;
   } else armRemoval(id, removal);
 }

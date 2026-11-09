@@ -107,6 +107,31 @@ describe("bridge restart snapshots", () => {
     expect(h.hub.sourceIdentity.size).toBe(0);
   });
 
+  it("subagents leave with their session, live and when its removal expired during downtime; a kick keeps them", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-09T12:00:00Z"));
+    let h = await restart();
+    const sent: string[] = [];
+    h.hub.subs.add((ev) => { if (ev.type === "remove") sent.push(`${ev.id}${ev.reason ? ":" + ev.reason : ""}`); });
+    h.publish({ id: "lead", status: "idle" });
+    h.publish({ id: "lead-sub", parent: "lead", status: "error" });
+    h.publish({ id: "other", status: "idle" });
+    h.kickAgent({ id: "lead" });
+    expect(h.hub.agents.has("lead-sub")).toBe(true);
+    h.publish({ type: "remove", id: "lead" });
+    expect(sent).toEqual(["lead:kick", "lead", "lead-sub"]);
+    expect([...h.hub.agents.keys()]).toEqual(["other"]);
+
+    h.publish({ id: "s2", status: "idle" });
+    h.publish({ id: "s2-sub", parent: "s2", status: "error" });
+    h.publish({ id: "s2-sub-sub", parent: "s2-sub", status: "idle" });
+    h.scheduleRemove("s2", 300000);
+    vi.setSystemTime(Date.now() + 600000); // the session's removal expires while the process is stopped
+    h = await restart();
+    expect([...h.hub.agents.keys()]).toEqual(["other"]);
+    expect(loadSnapshot(file)?.agents.map((a) => a.id)).toEqual(["other"]);
+  });
+
   it("resumes the remaining removal delay, expires during downtime, and keeps reactivated sessions", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-11-04T12:00:00Z"));

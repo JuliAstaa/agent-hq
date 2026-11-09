@@ -79,9 +79,14 @@ describe("hook -> event mapping (prd.md §8.3)", () => {
     expect(sub.sched).toHaveBeenCalledWith("cc-5f3c9a-abcdef12", 45000);
   });
   it("StopFailure, PreCompact, Task*, SessionEnd, unknown", () => {
-    const sf = run({ hook_event_name: "StopFailure", error: "rate_limit" }).out;
+    const failed = run({ hook_event_name: "StopFailure", error: "rate_limit" });
+    const sf = failed.out;
     expect(sf[0]).toMatchObject({ status: "error" });
     expect(sf[1]).toMatchObject({ level: "error", message: "Gagal berhenti normal: rate_limit" });
+    expect(failed.sched).not.toHaveBeenCalled(); // a main session stays to show its error
+    const subFailed = run({ hook_event_name: "StopFailure", agent_id: "abcdef123456", error: "rate_limit" });
+    expect(subFailed.out[0]).toMatchObject({ id: "cc-5f3c9a-abcdef12", status: "error" });
+    expect(subFailed.sched).toHaveBeenCalledWith("cc-5f3c9a-abcdef12", 45000);
     expect(run({ hook_event_name: "PreCompact" }).out[0]).toMatchObject({ status: "thinking", task: "Merangkum konteks (compact)" });
     expect(run({ hook_event_name: "TaskCreated", task: { subject: "Write tests" } }).out[0]).toMatchObject({ message: "Tugas baru: Write tests" });
     expect(run({ hook_event_name: "TaskCompleted", subject: "Write tests" }).out[0]).toMatchObject({ message: "Tugas selesai: Write tests" });

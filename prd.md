@@ -291,10 +291,13 @@ A session that is already running without `HQ_NAME` can be renamed afterwards wi
 | `PermissionRequest` | status waiting, task "Minta izin: <tool description>" |
 | `Notification` | `permission_prompt`, `agent_needs_input`, `elicitation_*` to waiting; `idle_prompt` to idle; others to log |
 | `Stop` / `SubagentStop` | `task_done` (confetti, idle) plus log of `last_assistant_message`; subagents removed about 45 s later if silent |
-| `StopFailure` | status error, error log |
+| `StopFailure` | status error, error log; a subagent is removed about 45 s later if silent (it never sends `SubagentStop`) |
 | `SubagentStart` | new character, status working |
 | `PreCompact` | status thinking, task "Merangkum konteks (compact)" |
 | `SessionEnd` | status offline; removed after 5 min if silent |
+
+When an agent is removed (not kicked), every agent that names it as `parent` is removed too, also when the removal
+expired while the bridge was down (deviation 32 in `plan-m1.md`).
 
 Tool descriptions: `Bash` to `$ <command>`, `Edit/Write` to `Edit <file>`, `Read` to `Baca <file>`, `WebSearch` to `Search: <query>`, `WebFetch` to `Buka <host>`, `Task/Agent` to `Delegasi: <description>`, `mcp__srv__tool` to `MCP srv: tool`.
 
